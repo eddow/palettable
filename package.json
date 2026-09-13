@@ -1,0 +1,24 @@
+{
+	"name": "palettable",
+	"version": "0.0.1",
+	"description": "Palettable monorepo — headless palette primitives + heads",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@11.25.0",
+	"scripts": {
+		"dev": "pnpm --filter svelette dev",
+		"build": "pnpm --filter svelette build",
+		"preview": "pnpm --filter svelette preview",
+		"check": "pnpm --filter svelette check",
+		"test": "pnpm --filter svelette test",
+		"test:e2e": "playwright test",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"lint:unsafe": "biome check --write . --unsafe",
+		"format": "biome format --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.12",
+		"@playwright/test": "^1.62.1"
+	}
+}

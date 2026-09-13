@@ -1,0 +1,1152 @@
+/* Standalone default palette visual theme. Adapters may override or replace. */
+
+/* ── Tool Button Chrome ── */
+
+.palette-default-tool,
+.palette-default-trigger,
+.palette-default-menu-item,
+.palette-default-arrow {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	line-height: 1;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+	color: inherit;
+	transition:
+		border-color 120ms ease,
+		background 120ms ease,
+		transform 120ms ease;
+}
+
+.palette-default-tool,
+.palette-default-menu-item {
+	padding: 7px 10px;
+	border-radius: 10px;
+	cursor: pointer;
+}
+
+.palette-default-tool-compact {
+	min-width: 2.35rem;
+	padding-inline: 8px;
+}
+
+.palette-default-tool:hover:not(:disabled),
+.palette-default-trigger:hover:not(:disabled),
+.palette-default-menu-item:hover:not(:disabled) {
+	border-color: #93c5fd;
+	transform: translateY(-1px);
+}
+
+/* Inside a toolbar the lift would fight the toolbar's own hover padding
+ * (the whole row grows) and stretch `align-items: center` siblings, so
+ * buttons stay put there. The toolbar root is `.toolbar` (there is no
+ * `.palette-default-toolbar` wrapper in the markup). */
+.toolbar .palette-default-tool:hover:not(:disabled),
+.toolbar .palette-default-trigger:hover:not(:disabled),
+.toolbar .palette-default-menu-item:hover:not(:disabled) {
+	transform: none;
+}
+
+.palette-default-tool:disabled,
+.palette-default-trigger:disabled,
+.palette-default-menu-item:disabled {
+	cursor: default;
+	opacity: 0.72;
+}
+
+.palette-default-tool.is-selected,
+.palette-default-menu-item.is-selected {
+	background: #1d4ed8;
+	border-color: #60a5fa;
+	color: #eff6ff;
+}
+
+.palette-default-tool-accent,
+.palette-default-tone-accent .palette-default-tool,
+.palette-default-tone-accent .palette-default-trigger {
+	border-color: rgba(96, 165, 250, 0.9);
+	box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+}
+
+/* ── Icons ── */
+
+.palette-default-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 1rem;
+	color: #93c5fd;
+}
+
+/* ── Status (pointless read-only tool) ── */
+
+.palette-default-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 10px;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 10px;
+	background: rgba(15, 23, 42, 0.64);
+	color: inherit;
+	font-variant-numeric: tabular-nums;
+}
+
+.palette-default-status-value {
+	font-weight: 600;
+	color: #bfdbfe;
+}
+
+.palette-default-theme-light .palette-default-status {
+	background: rgba(241, 245, 249, 0.96);
+	border-color: rgba(148, 163, 184, 0.9);
+}
+
+.palette-default-theme-light .palette-default-status-value {
+	color: #1d4ed8;
+}
+
+/* ── Command Box ── */
+
+.palette-default-command-box {
+	position: relative;
+	inline-size: 12rem;
+	max-inline-size: min(22rem, calc(100vw - 8rem));
+	transition: inline-size 140ms ease;
+}
+
+.palette-default-command-box.is-expanded {
+	inline-size: 100%;
+}
+
+.palette-default-command-box.is-floating {
+	z-index: 5;
+}
+
+.palette-default-command-shell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-inline-size: 0;
+	padding: 6px 10px;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.88);
+	box-sizing: border-box;
+}
+
+.palette-default-command-box.is-expanded .palette-default-command-shell {
+	border-color: rgba(96, 165, 250, 0.9);
+	box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+}
+
+.palette-default-command-tokens {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-inline-size: 0;
+}
+
+.palette-default-command-chip,
+.palette-default-command-suggestion,
+.palette-default-command-result {
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+	color: inherit;
+}
+
+.palette-default-command-chip,
+.palette-default-command-suggestion {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0.2rem 0.52rem;
+	border-radius: 999px;
+	cursor: pointer;
+}
+
+.palette-default-command-input {
+	flex: 1 1 7rem;
+	min-inline-size: 4rem;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+}
+
+/* Square action button that opens the console (edit mode) from the toolbar
+ * command box. Mirrors the console's `command-mode` toggle chrome so the two
+ * read as the same affordance, but it is a plain button — not a check-button. */
+.palette-default-command-open {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 1.75rem;
+	block-size: 1.75rem;
+	flex: 0 0 auto;
+	margin: -2px;
+	padding: 0;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 10px;
+	background: rgba(15, 23, 42, 0.88);
+	color: #94a3b8;
+	cursor: pointer;
+	font-size: 0.9rem;
+	line-height: 1;
+	transition:
+		border-color 120ms ease,
+		background 120ms ease,
+		color 120ms ease;
+}
+.palette-default-command-open:hover,
+.palette-default-command-open:focus-visible {
+	border-color: #60a5fa;
+	background: #1d4ed8;
+	color: #eff6ff;
+}
+.palette-default-theme-light .palette-default-command-open {
+	border-color: rgba(148, 163, 184, 0.9);
+	background: #ffffff;
+	color: #475569;
+}
+.palette-default-theme-light .palette-default-command-open:hover,
+.palette-default-theme-light .palette-default-command-open:focus-visible {
+	border-color: #60a5fa;
+	background: #1d4ed8;
+	color: #eff6ff;
+}
+
+.palette-default-command-input::placeholder {
+	color: #94a3b8;
+}
+
+.palette-default-command-popover {
+	position: relative;
+	margin-top: 6px;
+	display: grid;
+	gap: 8px;
+	inline-size: 100%;
+	padding: 8px;
+	border-radius: 14px;
+	border: 1px solid rgba(71, 85, 105, 0.9);
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	z-index: 3;
+	box-sizing: border-box;
+}
+
+.palette-default-command-box.is-floating .palette-default-command-popover {
+	position: absolute;
+	inset-inline: 0;
+	top: calc(100% + 6px);
+	inline-size: max(18rem, 100%);
+}
+
+.palette-default-command-suggestions,
+.palette-default-command-results {
+	display: grid;
+	gap: 6px;
+}
+
+.palette-default-command-suggestions {
+	grid-template-columns: repeat(auto-fit, minmax(4.75rem, max-content));
+}
+
+.palette-default-command-result {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	inline-size: 100%;
+	padding: 8px 10px;
+	border-radius: 10px;
+	cursor: pointer;
+	text-align: left;
+}
+
+.palette-default-command-result:hover:not(:disabled),
+.palette-default-command-result.is-selected {
+	border-color: #60a5fa;
+	background: #1d4ed8;
+	color: #eff6ff;
+}
+
+.palette-default-command-result-copy,
+.palette-default-command-result-label {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-command-result-label {
+	grid-auto-flow: column;
+	justify-content: start;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.palette-default-command-result-meta,
+.palette-default-command-empty {
+	color: #94a3b8;
+	font-size: 0.82rem;
+}
+
+/* ── Command Popup Overlay ── */
+
+.palette-default-command-overlay {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	background: transparent;
+	/* Non-blocking backdrop: the work-zone dimming + `pointer-events: none`
+	 * (`.demo-center.is-dimmed`) already disable it; the borders must stay
+	 * interactive in edit mode (click a toolbar item to inspect it). Only the
+	 * panel captures pointer events. */
+	pointer-events: none;
+	z-index: 40;
+	box-sizing: border-box;
+}
+
+.palette-default-command-panel {
+	inline-size: 100%;
+	max-inline-size: 48rem;
+	max-block-size: calc(100vh - 2rem);
+	padding: 10px;
+	border: 1px solid rgba(71, 85, 105, 0.92);
+	border-radius: 18px;
+	background: #020617;
+	box-shadow: 0 22px 44px rgba(2, 6, 23, 0.42);
+	box-sizing: border-box;
+	position: relative;
+	overflow: auto;
+	pointer-events: auto;
+}
+
+.palette-default-command-top {
+	display: grid;
+	gap: 14px;
+	padding-top: 1rem;
+}
+
+.palette-default-command-bottom {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 14px;
+	align-items: start;
+	inline-size: 100%;
+	min-inline-size: 0;
+}
+
+.palette-default-command-main {
+	display: grid;
+	gap: 12px;
+	inline-size: 100%;
+	max-inline-size: 100%;
+	min-inline-size: 0;
+}
+
+.palette-default-details-panel {
+	min-inline-size: 0;
+	min-width: min(16rem, 100%);
+}
+
+@media (min-width: 980px) {
+	.palette-default-command-bottom:has(.palette-default-details-panel) {
+		grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+		align-items: start;
+	}
+}
+
+.palette-default-command-parking {
+	display: flex;
+	flex-direction: column;
+	min-inline-size: 0;
+	min-block-size: 0;
+}
+
+.palette-default-command-parking .palette-parking-empty {
+	color: rgba(148, 163, 184, 0.9);
+}
+
+/* Empty parking reads as a drop target: dashed border while it holds no rows. */
+.palette-default-command-parking:has(.palette-parking-empty) {
+	border-style: dashed;
+}
+
+.palette-default-command-toolbar {
+	inline-size: auto;
+	max-inline-size: 100%;
+}
+
+.palette-default-command-close {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.88);
+	color: #94a3b8;
+	cursor: pointer;
+	font-size: 1rem;
+	line-height: 1;
+	transition:
+		border-color 120ms ease,
+		background 120ms ease,
+		color 120ms ease;
+}
+
+.palette-default-command-close:hover {
+	border-color: #60a5fa;
+	background: #1d4ed8;
+	color: #eff6ff;
+}
+
+/* ── Editors ── */
+
+.palette-default-select,
+.palette-default-radio-group,
+.palette-default-slider,
+.palette-default-stepper,
+.palette-default-stars,
+.palette-default-segmented,
+.palette-default-split {
+	display: inline-flex;
+	align-items: center;
+	gap: 0;
+	position: relative;
+}
+
+.palette-default-select,
+.palette-default-radio-group,
+.palette-default-slider,
+.palette-default-stepper,
+.palette-default-stars {
+	padding: 3px;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.88);
+}
+
+.palette-default-select {
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-select select {
+	min-width: 0;
+	padding: 0.42rem 0.72rem;
+	border-radius: 9px;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: rgba(15, 23, 42, 0.96);
+	color: inherit;
+}
+
+.palette-default-select > .palette-default-icon,
+.palette-default-slider > .palette-default-icon,
+.palette-default-stars > .palette-default-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-inline-size: 2rem;
+	padding-inline: 0.55rem;
+}
+
+.palette-default-slider input[type='range'] {
+	inline-size: clamp(64px, 9vw, 110px);
+}
+
+.palette-default-radio-group {
+	flex-wrap: wrap;
+}
+
+.palette-default-radio-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.82rem;
+	font-weight: 700;
+	color: #94a3b8;
+}
+
+.palette-default-radio-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0.42rem 0.55rem;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 9px;
+	background: rgba(15, 23, 42, 0.94);
+	color: inherit;
+	cursor: pointer;
+	font: inherit;
+}
+
+.palette-default-radio-item.is-selected {
+	border-color: rgba(96, 165, 250, 0.95);
+	box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4) inset;
+}
+
+.palette-default-choice {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.palette-default-stars-row {
+	display: inline-flex;
+	gap: 2px;
+	align-items: center;
+}
+
+.palette-default-arrow {
+	padding: 0 1px;
+	border: 0;
+	background: transparent;
+	color: #facc15;
+	line-height: 1;
+	font-size: 1rem;
+}
+
+.palette-default-arrow.is-selected {
+	color: #f59e0b;
+}
+
+/* ── Editor Internals ── */
+
+.palette-default-trigger {
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	border-radius: 0 9px 9px 0;
+	cursor: pointer;
+	font-size: 0.82rem;
+	line-height: 1;
+}
+
+.palette-default-stepper {
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.palette-default-stepper-value {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-inline-size: 3.2rem;
+	min-block-size: 2rem;
+	padding-inline: 0.72rem;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 0;
+	background: rgba(15, 23, 42, 0.88);
+	font-weight: 600;
+}
+
+/* ── Menu Popover ── */
+
+.palette-default-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	display: grid;
+	gap: 4px;
+	min-width: 8.8rem;
+	padding: 6px;
+	border-radius: 12px;
+	border: 1px solid rgba(71, 85, 105, 0.9);
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	z-index: 2;
+}
+
+.palette-default-menu.palette-default-region-bottom {
+	top: auto;
+	bottom: calc(100% + 6px);
+}
+
+.palette-default-menu.palette-default-region-left {
+	top: 0;
+	right: auto;
+	left: calc(100% + 6px);
+}
+
+.palette-default-menu.palette-default-region-right {
+	top: 0;
+	right: calc(100% + 6px);
+}
+
+.palette-default-menu[hidden] {
+	display: none;
+}
+
+.palette-default-menu-item {
+	justify-content: flex-start;
+}
+
+/* ── Axis-Aware Vertical Layouts ── */
+
+.palette-default-split > .palette-default-tool,
+.palette-default-split > .palette-default-trigger {
+	height: 2rem;
+}
+
+.palette-default-split-button > .palette-default-trigger {
+	width: 1.72rem;
+	font-size: 0.74rem;
+}
+
+.palette-default-split-button > .palette-default-tool {
+	height: 2rem;
+	padding-block: 0;
+}
+
+.palette-default-split.palette-default-layout-vertical > .palette-default-tool,
+.palette-default-split.palette-default-layout-vertical > .palette-default-trigger {
+	width: 2.375rem;
+	height: 2.375rem;
+	padding: 0;
+}
+
+.palette-default-split.palette-default-layout-vertical > .palette-default-trigger {
+	border-radius: 9px 9px 0 0;
+}
+
+.palette-default-split-radio.palette-default-layout-vertical > .palette-default-trigger {
+	width: 2.3rem;
+	font-size: 0.98rem;
+}
+
+/* ── Axis-Aware Vertical: Slider ── */
+
+.palette-default-slider.palette-default-layout-vertical {
+	inline-size: 2.375rem;
+	block-size: 2.375rem;
+	padding: 0;
+	position: relative;
+	overflow: visible;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	border-top-right-radius: 12px;
+	border-bottom-right-radius: 12px;
+	transition:
+		box-shadow 120ms ease;
+}
+
+.palette-default-slider.palette-default-layout-vertical.palette-default-region-left {
+	border-top-left-radius: 12px;
+	border-bottom-left-radius: 12px;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-slider.palette-default-layout-vertical::before {
+	content: '';
+	position: absolute;
+	inset-block: 0;
+	inset-inline-end: calc(100% - 1px);
+	inline-size: 5.875rem;
+	border: 1px solid rgba(71, 85, 105, 0.9);
+	border-radius: 12px 0 0 12px;
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(0.4rem);
+	transition:
+		transform 140ms ease,
+		opacity 120ms ease;
+}
+
+.palette-default-slider.palette-default-layout-vertical.palette-default-region-left::before {
+	inset-inline-end: auto;
+	inset-inline-start: calc(100% - 1px);
+	border-radius: 0 12px 12px 0;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-slider.palette-default-layout-vertical:hover::before,
+.palette-default-slider.palette-default-layout-vertical:has(> input[type='range']:hover)::before,
+.palette-default-slider.palette-default-layout-vertical:focus-within::before {
+	opacity: 1;
+	transform: translateX(0);
+}
+
+.palette-default-slider.palette-default-layout-vertical > .palette-default-icon {
+	min-inline-size: 2.375rem;
+	block-size: 2.375rem;
+	padding-inline: 0;
+	position: relative;
+	z-index: 1;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	border-top-right-radius: 12px;
+	border-bottom-right-radius: 12px;
+}
+
+.palette-default-slider.palette-default-layout-vertical.palette-default-region-left > .palette-default-icon {
+	border-top-left-radius: 12px;
+	border-bottom-left-radius: 12px;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-slider.palette-default-layout-vertical > input[type='range'] {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-end: calc(100% - 1px);
+	inline-size: 5.875rem;
+	margin: 0;
+	padding: 0 0.72rem 0 0.9rem;
+	box-sizing: border-box;
+	z-index: 2;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(0.4rem);
+	transition:
+		transform 140ms ease,
+		opacity 120ms ease;
+}
+
+.palette-default-slider.palette-default-layout-vertical.palette-default-region-left > input[type='range'] {
+	inset-inline-end: auto;
+	inset-inline-start: calc(100% - 1px);
+	padding: 0 0.9rem 0 0.72rem;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-slider.palette-default-layout-vertical:hover > input[type='range'],
+.palette-default-slider.palette-default-layout-vertical:has(> input[type='range']:hover) > input[type='range'],
+.palette-default-slider.palette-default-layout-vertical:focus-within > input[type='range'] {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateX(0);
+}
+
+/* ── Axis-Aware Vertical: Stepper ── */
+
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value {
+	inline-size: 2.375rem;
+	min-inline-size: 2.375rem;
+	padding: 0.35rem 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1;
+}
+
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value > .palette-default-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-inline-size: 0;
+	padding-inline: 0;
+}
+
+/* ── Axis-Aware Vertical: Common ── */
+
+.palette-default-radio-group.palette-default-layout-vertical,
+.palette-default-segmented.palette-default-layout-vertical,
+.palette-default-stepper.palette-default-layout-vertical,
+.palette-default-split.palette-default-layout-vertical,
+.palette-default-stars.palette-default-layout-vertical,
+.palette-default-stars-row.palette-default-layout-vertical {
+	flex-direction: column-reverse;
+}
+
+/* ── Margin & Radius Collapsing (Horizontal) ── */
+
+.palette-default-toolbar > * + * {
+	margin-inline-start: -1px;
+}
+
+.palette-default-toolbar.palette-vertical > * + *,
+.palette-default-border.palette-vertical .palette-default-toolbar > * + * {
+	margin-inline-start: 0;
+	margin-block-start: -1px;
+}
+
+.palette-default-split > .palette-default-tool,
+.palette-default-split > .palette-default-trigger,
+.palette-default-segmented > .palette-default-tool,
+.palette-default-stepper > .palette-default-tool,
+.palette-default-stepper-value,
+.palette-default-select > .palette-default-icon,
+.palette-default-select > select,
+.palette-default-slider > .palette-default-icon,
+.palette-default-slider > input,
+.palette-default-stars > .palette-default-icon,
+.palette-default-stars > .palette-default-stars-row,
+.palette-default-radio-group > .palette-default-radio-item {
+	margin-inline-start: -1px;
+}
+
+.palette-default-split > :first-child,
+.palette-default-segmented > :first-child,
+.palette-default-stepper > :first-child,
+.palette-default-select > :first-child,
+.palette-default-slider > :first-child,
+.palette-default-stars > :first-child,
+.palette-default-radio-group > .palette-default-radio-item:first-of-type {
+	margin-inline-start: 0;
+}
+
+.palette-default-split > :first-child,
+.palette-default-stepper > :first-child,
+.palette-default-select > :first-child,
+.palette-default-slider > :first-child,
+.palette-default-stars > :first-child {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-split > :last-child,
+.palette-default-stepper > :last-child,
+.palette-default-select > :last-child,
+.palette-default-slider > :last-child,
+.palette-default-stars > :last-child {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.palette-default-stepper > :not(:first-child):not(:last-child),
+.palette-default-select > :not(:first-child):not(:last-child),
+.palette-default-slider > :not(:first-child):not(:last-child),
+.palette-default-stars > :not(:first-child):not(:last-child) {
+	border-radius: 0;
+}
+
+.palette-default-segmented > :not(:first-child) {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.palette-default-segmented > :not(:last-child) {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+/* ── Margin & Radius Collapsing (Vertical) ── */
+
+.palette-default-split.palette-default-layout-vertical > .palette-default-tool,
+.palette-default-split.palette-default-layout-vertical > .palette-default-trigger,
+.palette-default-segmented.palette-default-layout-vertical > .palette-default-tool,
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-tool,
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value,
+.palette-default-stars.palette-default-layout-vertical > .palette-default-icon,
+.palette-default-stars.palette-default-layout-vertical > .palette-default-stars-row {
+	margin-inline-start: 0;
+	margin-block-start: -1px;
+}
+
+.palette-default-split.palette-default-layout-vertical > :first-child,
+.palette-default-segmented.palette-default-layout-vertical > :first-child,
+.palette-default-stepper.palette-default-layout-vertical > :first-child,
+.palette-default-stars.palette-default-layout-vertical > :first-child {
+	margin-block-start: 0;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 9px;
+}
+
+.palette-default-split.palette-default-layout-vertical > :last-child,
+.palette-default-stepper.palette-default-layout-vertical > :last-child,
+.palette-default-stars.palette-default-layout-vertical > :last-child {
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+	border-top-left-radius: 9px;
+}
+
+.palette-default-stepper.palette-default-layout-vertical > :not(:first-child):not(:last-child),
+.palette-default-stars.palette-default-layout-vertical > :not(:first-child):not(:last-child) {
+	border-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+/* ── Configurator ── */
+
+.palette-default-panel {
+	/* used as container for config panels */
+}
+
+.palette-default-config-table,
+.palette-default-config-stack {
+	display: grid;
+	gap: 10px;
+}
+
+.palette-default-config-header {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-config-header strong {
+	font-size: 0.97rem;
+	font-weight: 600;
+}
+
+.palette-default-config-header span {
+	font-size: 0.78rem;
+	color: #94a3b8;
+}
+
+.palette-default-config-row {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 10px;
+	align-items: center;
+	min-inline-size: 0;
+}
+
+.palette-default-config-key {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-config-key strong {
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: #94a3b8;
+}
+
+.palette-default-config-key span {
+	font-size: 0.72rem;
+	color: #64748b;
+}
+
+.palette-default-config-value {
+	min-inline-size: 0;
+}
+
+.palette-default-config-value input,
+.palette-default-config-value select {
+	inline-size: 100%;
+	min-inline-size: 0;
+	padding: 0.42rem 0.62rem;
+	border: 1px solid rgba(71, 85, 105, 0.92);
+	border-radius: 10px;
+	background: rgba(15, 23, 42, 0.84);
+	color: inherit;
+	box-sizing: border-box;
+	font: inherit;
+}
+
+.palette-default-config-value input::placeholder {
+	color: #64748b;
+}
+
+.palette-default-config-empty {
+	padding: 1.2rem 0.65rem;
+	border: 1px dashed rgba(71, 85, 105, 0.55);
+	border-radius: 12px;
+	color: #94a3b8;
+	font-size: 0.82rem;
+	text-align: center;
+}
+
+.palette-default-config-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.palette-default-panel-title {
+	font-size: 0.82rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #94a3b8;
+}
+
+/* ── Add-Item Panel ── */
+
+.palette-default-add-panel {
+	min-inline-size: 0;
+	inline-size: 100%;
+	max-inline-size: 100%;
+	max-block-size: min(38rem, calc(100vh - 6rem));
+	overflow: auto;
+}
+
+.palette-default-add-variant {
+	display: grid;
+	gap: 10px;
+	padding: 10px;
+	border: 1px solid rgba(71, 85, 105, 0.55);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.42);
+}
+
+.palette-default-add-variant-trigger {
+	display: grid;
+	gap: 4px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.palette-default-add-variant-trigger.is-disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.palette-default-add-inline-value {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 10px;
+	align-items: center;
+	min-inline-size: 0;
+}
+
+.palette-default-add-inline-value > strong {
+	font-size: 0.82rem;
+	color: #94a3b8;
+}
+
+.palette-default-add-inline-value > input,
+.palette-default-add-inline-value > select {
+	inline-size: 100%;
+	min-inline-size: 0;
+	padding: 0.45rem 0.65rem;
+	border: 1px solid rgba(71, 85, 105, 0.92);
+	border-radius: 10px;
+	background: rgba(15, 23, 42, 0.84);
+	color: inherit;
+	box-sizing: border-box;
+}
+
+.palette-default-add-inline-value > input::placeholder {
+	color: #64748b;
+}
+
+.palette-default-add-drag-note {
+	padding: 8px;
+	border: 1px dashed rgba(96, 165, 250, 0.55);
+	border-radius: 10px;
+	color: #94a3b8;
+	font-size: 0.78rem;
+	text-align: center;
+}
+
+.palette-default-add-drag-source {
+	display: grid;
+	gap: 6px;
+	justify-items: center;
+}
+
+.palette-default-add-drag-toolbar {
+	pointer-events: none;
+}
+
+/* ── Light Theme ──
+ *
+ * The base theme above is dark. These overrides apply under a
+ * `.palette-default-theme-light` ancestor — the demo syncs that class onto
+ * `<html>` so it also covers body-portaled drawer popups. Keep this list in
+ * sync with every `background`/`border-color` rule above (plus the drawer
+ * popup shell in `palette.css`, which is headless layout + dark chrome).
+ */
+
+.palette-default-theme-light .palette-default-tool,
+.palette-default-theme-light .palette-default-trigger,
+.palette-default-theme-light .palette-default-menu-item,
+.palette-default-theme-light .palette-default-select,
+.palette-default-theme-light .palette-default-radio-group,
+.palette-default-theme-light .palette-default-radio-item,
+.palette-default-theme-light .palette-default-slider,
+.palette-default-theme-light .palette-default-stepper,
+.palette-default-theme-light .palette-default-stars,
+.palette-default-theme-light .palette-default-segmented,
+.palette-default-theme-light .palette-default-split,
+.palette-default-theme-light .palette-default-command-panel,
+.palette-default-theme-light .palette-default-command-shell,
+.palette-default-theme-light .palette-default-command-chip,
+.palette-default-theme-light .palette-default-command-suggestion,
+.palette-default-theme-light .palette-default-command-result,
+.palette-default-theme-light .palette-default-select select,
+.palette-default-theme-light .palette-default-menu,
+.palette-default-theme-light .palette-default-command-popover,
+.palette-default-theme-light .palette-default-command-parking,
+.palette-default-theme-light .palette-default-stepper-value,
+.palette-default-theme-light .palette-default-config-value input,
+.palette-default-theme-light .palette-default-config-value select,
+.palette-default-theme-light .palette-default-add-variant,
+.palette-default-theme-light .palette-default-add-inline-value > input,
+.palette-default-theme-light .palette-default-add-inline-value > select,
+.palette-default-theme-light .palette-default-command-close,
+.palette-default-theme-light.svelette-palette-drawer__popup,
+.palette-default-theme-light .svelette-palette-drawer__popup {
+	border-color: rgba(148, 163, 184, 0.9);
+	background: rgba(241, 245, 249, 0.96);
+	color: #0f172a;
+}
+
+/* Drawer popups + command panels use flat fills in the base theme (not the
+ * tool gradient), so re-assert the flat fill here — otherwise the gradient
+ * from the grouped selector above leaks through. */
+.palette-default-theme-light .palette-default-command-panel,
+.palette-default-theme-light .palette-default-command-popover,
+.palette-default-theme-light .palette-default-menu,
+.palette-default-theme-light.svelette-palette-drawer__popup,
+.palette-default-theme-light .svelette-palette-drawer__popup {
+	background: rgba(255, 255, 255, 0.98);
+}
+
+.palette-default-theme-light .palette-default-icon {
+	color: #475569;
+}
+
+.palette-default-theme-light .palette-default-command-input::placeholder,
+.palette-default-theme-light .palette-default-config-value input::placeholder,
+.palette-default-theme-light .palette-default-add-inline-value > input::placeholder {
+	color: #64748b;
+}
+
+.palette-default-theme-light .palette-default-tool.is-selected,
+.palette-default-theme-light .palette-default-menu-item.is-selected,
+.palette-default-theme-light .palette-default-command-result.is-selected,
+.palette-default-theme-light .palette-default-command-result:hover:not(:disabled),
+.palette-default-theme-light .palette-default-radio-item.is-selected {
+	border-color: #60a5fa;
+	background: #1d4ed8;
+	color: #eff6ff;
+}
+
+.palette-default-theme-light .palette-default-panel-title,
+.palette-default-theme-light .palette-default-radio-label,
+.palette-default-theme-light .palette-default-command-result-meta,
+.palette-default-theme-light .palette-default-command-empty,
+.palette-default-theme-light .palette-default-command-input::placeholder {
+	color: #475569;
+}
