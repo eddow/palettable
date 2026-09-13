@@ -1,5 +1,5 @@
 {
-	"name": "svelette",
+	"name": "@palettable/svelte",
 	"version": "0.0.1",
 	"description": "A Svelte 5 re-implementation of @sursaut/ui (headless UI primitives + palette)",
 	"private": true,
