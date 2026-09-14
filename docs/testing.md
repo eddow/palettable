@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 150 tests, 10 files
+## Core unit (Vitest, node) — 184 tests, 13 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -17,6 +17,9 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners`, inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
 | `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked), `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
+| `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
+| `src/console.test.ts` | `ConsoleStore` open/close/toggle + add-state + listeners, `consolePointDescriptor` |
+| `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveEditorVariant` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from/stash display helpers |
 | `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration`, `GapDwell` |
 
 Gotchas:

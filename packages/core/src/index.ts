@@ -34,7 +34,9 @@
  *   parent — enforced by adapters, opaque to the core).
  */
 
+export * from './command-box.js'
 export * from './configuration.js'
+export * from './console.js'
 export * from './core.js'
 export * from './editors.js'
 export * from './errors.js'
@@ -45,6 +47,7 @@ export * from './keys.js'
 export * from './layout.js'
 export * from './palette.js'
 export * from './points.js'
+export * from './presenters.js'
 export * from './specs.js'
 export * from './store.js'
 export * from './type.js'

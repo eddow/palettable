@@ -1,23 +1,27 @@
 # Mitosis — split `svelte` into `core` + `vanilla` + `vue` + `svelte`
 
-> Status: **active plan — Phase 2 landed, Phases 3–7 + 6c + SSR + Context remaining.**
+> Status: **active plan — Phases 2–6 landed; remaining in execution order:
+> Phase 7 (SSR render model) → Phase 8 (context) → Phase 9 (optimization,
+> empty) → Phase 10 (vanilla parity) → Phase 11 (vue parity) →
+> Phase 12 (thin svelte).**
 > `packages/core` (headless, DOM-free) and `packages/vanilla` (vanilla-DOM
 > adapter + demo) exist and are green; `packages/svelte` is still
-> self-contained and does **not** import core yet. Order: build `core`+
-> `vanilla` → reach demo parity → build `core` + `vue` → reach demo parity → only then make `svelte` depend on `core`
+> self-contained and does **not** import core yet. Order: finish `core`
+> (SSR + context) → reach demo parity (`vanilla`, then `vue`) → only then
+> make `svelte` depend on `core`
 > (see **Evolution strategy** below). Permanent decisions for what has landed
 > live in `docs/architecture.md §21`; this file tracks only what is left.
 >
 > SSR companion: `plans/ssr.md` is the normative SSR spec (analysis only, no
 > implementation yet). It constrains — but does not reorder — the phases below:
-> every phase must keep the core SSR-safe (§SSR below), and Phase 8 implements
+> every phase must keep the core SSR-safe (§SSR below), and Phase 7 implements
 > the SSR render model on top of what Phases 3–5 land.
 >
 > Context companion: `plans/context.md` is the normative context-sensitive-tools
 > spec (specification complete, no implementation yet). It constrains — but does
 > not reorder — the phases below: points/store/core stay extension-ready for
-> bags (`§Context` below), and Phase 9 implements `ValuesBag` + `uses` +
-> nothing-points + functional `can` on top of what Phases 3–5 + 8 land.
+> bags (`§Context` below), and Phase 8 implements `ValuesBag` + `uses` +
+> nothing-points + functional `can` on top of what Phases 3–5 + 7 land.
 
 ## Evolution strategy (the order is the point)
 
@@ -50,33 +54,33 @@ reactive framework (`vue`). Four stages, in this order:
    reproduce the same Stellar Outpost demo feature-for-feature and pass the
    same `tests/e2e/` suite (own playwright project, own port). Svelte is kept
    as reference until **both** `vanilla` and `vue` parities are green.
-4. **Only then rewrite `svelte` to depend on `core`.**
+4. **Only then rewrite `svelte` to depend on `core` (Phase 12).**
    With parity proven, `svelte` becomes a thin adapter: delete its duplicated
-   implementation and re-export / delegate to `core` (Phases 3–7). Any
+   implementation and re-export / delegate to the `core` surface (Phases 2–11). Any
    behavioural difference that surfaces at this point is a `core` bug, not a
    reason to keep the old code.
 
 Consequences for how work is sequenced:
 
-- Phases 2–6c + 8 + 9 are **additive**: they add to `core`/`vanilla`/`vue` and leave `svelte`
-  alone. Nothing in `packages/svelte/src` is edited until Phase 7.
+- Remaining phases (7–11) are **additive**: they add to `core`/`vanilla`/`vue`
+  and leave `svelte` alone. Nothing in `packages/svelte/src` is edited until Phase 12.
 - The vanilla demo is built up **alongside** the core phases, not after them —
   each capability that lands in `core` should show up in the vanilla demo so
   parity is tracked continuously rather than assessed at the end. The vue demo
-  follows the same rule once `packages/vue` is scaffolded (Phase 6c).
-- `svelte`'s existing tests stay green throughout stages 1–3 (they are the
+  follows the same rule once `packages/vue` is scaffolded (Phase 11).
+- `svelte`'s existing tests stay green throughout (they are the
   regression net for the reference implementation).
-- Phase 7 is the only phase allowed to delete svelte code, and it is gated on
+- Phase 12 is the only phase allowed to delete svelte code, and it is gated on
   the e2e suite passing against **all three** demos (svelte reference + vanilla
-  + vue — Phases 6b + 6c).
-- SSR never reorders the phases (`plans/ssr.md` §4–§7 map onto Phases 3–5 + 8,
+  + vue — Phases 10 + 11).
+- SSR never reorders the phases (`plans/ssr.md` §4–§7 map onto Phases 3–5 + 7,
   never before them). Each phase keeps the core import-safe under plain Node
   (no `document`, no timers firing, no `run()` reachable from the render path);
   see §SSR for the per-phase constraints.
-- Context never reorders the phases either (`plans/context.md` §§1–4 map onto
-  Phase 9, after Phases 3–5 + 8, never before them). Each phase keeps
+- Context lands before parity (`plans/context.md` §§1–4 map onto
+  Phase 8, after Phases 3–5 + 7 and before 10, never after parity). Each phase keeps
   `points.ts` / `store.ts` / `core.ts` extension-ready for bags (no API that
-  Phase 9 must break to extend); see §Context for the per-phase obligations.
+  Phase 8 must break to extend); see §Context for the per-phase obligations.
 
 ## Target ownership
 
@@ -86,9 +90,9 @@ Consequences for how work is sequenced:
   basic typing, toolbar-movement management, command-box builders, console
   state machine, presenters (pure view-models), main CSS + default head
   theme CSS (dark/light) — plus the SSR render model (`resolveRenderTree` +
-  atomic snapshot + value hydration, Phase 8; SSR-safe by construction, see
+  atomic snapshot + value hydration, Phase 7; SSR-safe by construction, see
   §SSR and `plans/ssr.md`) and the context layer (`ValuesBag` + `uses` +
-  nothing-points + functional `can`, Phase 9; headless by construction, see
+  nothing-points + functional `can`, Phase 8; headless by construction, see
   §Context and `plans/context.md`).
 - **`packages/vanilla` (vanilla-DOM adapter + demo):**
   imports `core` only (never the reverse); owns plain-DOM rendering
@@ -96,7 +100,7 @@ Consequences for how work is sequenced:
   pointer math / drag sessions / head components (as they land), and the
   vite demo (`demo/main.ts` + `index.html`). Rolled-up cjs/mjs/umd
   (`external: ['@palettable/core']`), vitest `jsdom`.
-- **`packages/vue` (Vue adapter + demo — Phase 6c):**
+- **`packages/vue` (Vue adapter + demo — Phase 11):**
   imports `core` only (never the reverse); owns Vue reactive wrappers
   (`ref`/`computed`/`watch`), directives/actions, layout/head components,
   demo. Proves the core works with a reactive framework other than svelte
@@ -132,13 +136,17 @@ packages/core/src/              # landed 2026-09-14 — see docs/architecture.md
   gap-dwell.ts      # Phase 2: GapDwell state machine (timers via globals.ts)
   core.ts           # PaletteCore (registry + values store + layout + virtuals + resolveTargetVirtual + canRunAction)
   palette.ts        # Phase 3: ServerPointDescriptor + to/fromServerDescriptor + validateInitialValues + readSetterValue
-  *.test.ts         # 150 node tests across 10 files
-  # target additions (Phases 4–6 + 8 + 9):
-  # palette.ts, command-box.ts, console.ts, presenters.ts,
-  # render.ts (Phase 8: resolveRenderTree + snapshotPalette + descriptors),
-  # context.ts (Phase 9: ValuesBag + bag registry surface),
-  # context-display.ts (Phase 9: pure (boundValues, boundBags) resolvers),
-  # styles/palette.css, theme/head-default.css
+  command-box.ts    # Phase 4: builders + headless query model (run = spec string, entries carry uses)
+  console.ts        # Phase 4: ConsoleStore + consolePointDescriptor
+  presenters.ts     # Phase 5: button/toggle/select/slider/status/configurator + resolveEditorVariant + axisForRegion
+  *.test.ts         # 184 node tests across 13 files
+  styles/palette.css        # Phase 6: layout + edit chrome (verbatim)
+  theme/head-default.css    # Phase 6: dark base + light override (verbatim)
+  # target additions (Phases 7–9):
+  # render.ts (Phase 7: resolveRenderTree + snapshotPalette + descriptors),
+  # context.ts (Phase 8: ValuesBag + bag registry surface),
+  # context-display.ts (Phase 8: pure (boundValues, boundBags) resolvers),
+  # (Phase 9 optimization: no new files — scope TBD, see Phase 9.)
 packages/vanilla/src/           # landed 2026-09-14 (library + demo)
   index.ts          # barrel: `export * from './adapter.js'`
   adapter.ts        # VanillaAdapter (owns PaletteCore, <ul> render, mount/dispose)
@@ -154,12 +162,12 @@ packages/svelte/src/lib/
 | Today (`svelte/src/lib/…`) | Size | Target |
 | --- | --- | --- |
 | `palette/types.ts` (imports `Component`, `SvelteHTMLElements`) | 980 | **Done** — split into `core/` modules (`identifiers`, `type`, `points`, `specs`, `store`, `layout`, `editors`, `keys`, `errors`, `core`); see `docs/architecture.md §21` |
-| `palette/configuration.ts` (already plain) | 48 | **Done (Phase 2)** — `core/configuration.ts` verbatim; svelte re-export deferred to Phase 7 |
+| `palette/configuration.ts` (already plain) | 48 | **Done (Phase 2)** — `core/configuration.ts` verbatim; svelte re-export deferred to Phase 12 |
 | `palette/keys.ts` (already pure) | 116 | Phase 2: **not** verbatim — core keeps only the headless lookup (`KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget`); `normalizePaletteKeystroke` / `paletteKeystrokeFromEvent` / `createPaletteKeys` stay in the adapter (they touch `KeyboardEvent`). Contract: `KeyBindings` values are **string** specs (references by name) — keys bind to action points (`save`, `id:action`, setter `id=value`, stash virtual id, `enum-from` setter `virtualId=key`); inline virtual definitions live on toolbar items (`ToolToolbarItem.tool: PointTarget`), never in this map — a key bound to an inline stash uses the stash's `id` as its spec string, matched via `canonicalSpecId`. The map is JSON-safe and `findKeystrokesFor` matches by `canonicalPointId`, so setters/actions resolve to their point. Rebuild = serialized config (layout specs incl. inline definitions + `KeyBindings`, both JSON-safe) + points-list (descriptors + client-injected `run` runners + registered virtuals) |
 | `palette/drag-session.ts` (DOM-only, no svelte) | 120 | **Stays in the adapter** — DOM-free core rule (see Phase 2 decision); also SSR-client-only (§SSR) |
 | `palette/gap-dwell.ts` (plain class + `setTimeout`) | 110 | **Done (Phase 2)** — `core/gap-dwell.ts` (timers via `globals.ts` hatch); SSR render path must never call `arm()` (§SSR) |
-| `palette/layout.svelte.ts` (pure math + `$effect` actions + slide engine) | 1536 | **Phase 2 done** (pure math → `core/layout.ts`: `clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, ownership); Phase 5: commit fns (`commitDraggedTo*`, `insertTrackWithToolbar`, drag actions) rebuilt in core against explicit state param (movement was stripped for restart — do NOT port the old slide engine, rebuild on the pure primitives). SSR: track-space math is already SSR-safe; `axisForRegion()` + drawer perpendicular rule land here in Phase 5 (SSR §4.3 needs them in core) |
-| `palette/palette.svelte.ts` (`Palette` class + `$state palettes` + hydrate/serialize) | 1261 | Phase 3: `core/palette.ts` — `PaletteError`, `valueActions`, `valueReader`, spec resolution, serialization/hydration, `Palette` with injected store (no `$state`); svelte keeps `$state palettes` mirror. SSR: this phase also lands `initialValues` + `setMany` (SSR §4.2) and `ServerPointDescriptor` + `to/fromServerDescriptor` (SSR §4.1) — see §SSR. Context: keep `points.ts` / `store.ts` / `core.ts` extension-ready for Phase 9 (`uses`, `NothingPoint`, functional `can`, bag registry) — no API this phase may break to extend; see §Context |
+| `palette/layout.svelte.ts` (pure math + `$effect` actions + slide engine) | 1536 | **Phase 2 done** (pure math → `core/layout.ts`: `clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, ownership); movement commits stay deferred (engine restart — do NOT port the old slide engine, rebuild on the pure primitives). SSR: track-space math is already SSR-safe; `axisForRegion()` + drawer perpendicular rule land in core in Phase 5 (SSR §4.3 needs them in core) |
+| `palette/palette.svelte.ts` (`Palette` class + `$state palettes` + hydrate/serialize) | 1261 | Phase 3: `core/palette.ts` — `PaletteError`, `valueActions`, `valueReader`, spec resolution, serialization/hydration, `Palette` with injected store (no `$state`); svelte keeps `$state palettes` mirror. SSR: this phase also lands `initialValues` + `setMany` (SSR §4.2) and `ServerPointDescriptor` + `to/fromServerDescriptor` (SSR §4.1) — see §SSR. Context: keep `points.ts` / `store.ts` / `core.ts` extension-ready for Phase 8 (`uses`, `NothingPoint`, functional `can`, bag registry) — no API this phase may break to extend; see §Context |
 | `palette/command-box.svelte.ts` (pure builders + `$state`/`$derived` model) | 1366 | Phase 4: builders (`paletteCommandEntries`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`, catalogue payload) → `core/command-box.ts` pure; model becomes vanilla query→results fn, svelte wraps with `$derived`. SSR: builders stay pure over descriptors, no closures in the SSR path (SSR §4.3); the entry list itself is client-only — the box shell is SSR, entries are not (SSR §8). Context: builders must not assume a single global store — entries carry `uses` and the renderer filters/resolves at render time (Context §2.7); commands on nothing-points with `uses: []`/`undefined` are always present (see §Context) |
 | `palette/console.svelte.ts` (`$state consoleState` + open/toggle/add-state) | 101 | Phase 4: `core/console.ts` vanilla state machine + listener set; svelte wraps with `$state`. SSR: console is resting-state only (no timers/popups/interactivity on the server) |
 | `palette/presenters.svelte.ts` (pure fns over `PaletteEditorContext`) | 466 | Phase 5: `core/presenters.ts` verbatim logic, generic component type; svelte re-exports typed with `Component`. SSR: this phase also lands `resolveEditorVariant()` — the single-id fallback chain the render model needs (SSR §4.3); `editorChoicesFor()` stays for the client-only config surface. Context: presenters take the param-array display shape `(boundValues, boundBags)` so nothing-points (`status`, `command-box`, `drawer`) render from bags (Context §2, §4 step 6); see §Context |
@@ -174,10 +182,10 @@ packages/svelte/src/lib/
 ## Phase 2 — pure movers (landed 2026-09-14)
 
 > **Additive only** — nothing in `packages/svelte/src` was edited.
-> `svelte` stays the working reference until Phase 7.
+> `svelte` stays the working reference until Phase 12.
 
 - [x] `configuration.ts` → `core/configuration.ts` verbatim (plain object,
-      no svelte/runes). Svelte re-export deferred to Phase 7 (additive rule —
+      no svelte/runes). Svelte re-export deferred to Phase 12 (additive rule —
       `packages/svelte/src` frozen until then).
 - [x] `gap-dwell.ts` → `core/gap-dwell.ts` (near-verbatim; one deliberate
       delta: `setTimeout`/`clearTimeout` route through the `globals.ts`
@@ -227,22 +235,22 @@ packages/svelte/src/lib/
 - [x] Move `valueActions`, `valueReader`, `resolveEditableTool`,
       `paletteTool*` helpers, `serializePaletteLayout` / `validatePaletteLayout` /
       `hydratePaletteLayout` (return plain objects; svelte wraps with `$state` at
-      the call site — see `palette.svelte.ts:1245` `$state(plain)` pattern) — landed 2026-09-14 as headless core ports (svelte keeps its own copies until Phase 7):
+      the call site — see `palette.svelte.ts:1245` `$state(plain)` pattern) — landed 2026-09-14 as headless core ports (svelte keeps its own copies until Phase 12):
   - `valueActions` (number `inc`/`dec` with `step`) **and** its bounds-checked `can`, reviewed + fixed 2026-09-14: `run('id:inc'|'id:dec')` applies the step via `core.ts:applyNamedAction` (a private method — it needs the store), and `PaletteCore.canRunAction(id, action)` exposes the pure bounds check (`inc` vs `max`, `dec` vs `min`, `undefined` bound = unlimited) mirroring the svelte reference's `valueActions.number.inc.get can()`. Unknown action → `PaletteError`, not a silent `true`. `valueReader` (boolean `1`/`true`/`0`/`false`, `Number` with finite/blank rejection, string passthrough) landed as `palette.ts:readSetterValue` and is **the single coercion path** — `coerceSetterValue` was deleted (it was a second, weaker copy: it accepted blank → `0` and `Infinity`, diverging from the oracle); `resolveEditableTool` (unknown/action/family-mismatch throws) landed as `core.ts:resolveEditablePoint`. Deliberate divergence: an unrecognized boolean token (`"maybe"`) throws instead of silently coercing to `false`.
   - `serializePaletteLayout` / `hydratePaletteLayout` already lived in `core/layout.ts` as `getSnapshot` / `setLayout` / `fromSerializedLayout` (flat slot list, each slot in its own track, deep-clone, inline definitions verbatim); `validatePaletteLayout` landed as `layout.ts:validateSerializedLayout` (version/regions/items/inline-tool/config/drawer checks, never throws). Covered in `layout.test.ts` + `palette.test.ts`; 150 node tests green.
   - Deliberately **not** ported: the `Palette` class itself (config/tools/keys/editors resolution over live component-bearing tool objects + `runner`/`setter` wrapper hooks — adapter-owned, components never cross into core), `paletteTool*` runner factories returning `{ can, run }` closures over live tool objects (core's `run(spec)` is the headless equivalent), the `setter` toggle-restore `WeakMap` behaviour (svelte-only value semantics, no core counterpart), `palettes = $state(…)` (svelte reactive mirror — core exposes `values.subscribe`/`subscribeLayout` instead), `resolveItemPlacementTarget` (border/track terms — movement rebuilds it in Phase 5), `describeItemConfiguration` / `resolveEditor` / `renderEditor` / `renderConfigurator` (editor-registry + component surface — Phase 5 presenters).
 - [x] `Palette` class: keep config/tools/keys/editors resolution verbatim;
       replace `get editing()` `$state` read with injected store predicate
       (`store.editing === this`); keep `dispose()` no-op for parity. — decided 2026-09-14: **not ported** (see above — the class is adapter-owned; core's `PaletteCore` + `values.subscribe`/`subscribeLayout` + `dispose` (drops value **and** layout listeners) is the headless equivalent).
-- [x] Svelte keeps `palettes = $state(…)` as the reactive mirror of the core store. — confirmed: core exposes `values.subscribe`/`subscribeLayout`, svelte keeps `$state palettes` until Phase 7.
+- [x] Svelte keeps `palettes = $state(…)` as the reactive mirror of the core store. — confirmed: core exposes `values.subscribe`/`subscribeLayout`, svelte keeps `$state palettes` until Phase 12.
 - [x] **No duplicated value surface** (review fix 2026-09-14): `PaletteCore` does **not** re-implement get/set/events. The former `getValue` / `setValue` / `resetValue` / `subscribe` wrappers were deleted and the store is exposed as `PaletteCore.values` (`PaletteStateStore`) — adapters read/write/subscribe there directly. Only what the raw store cannot do stays on core: virtual resolution (`resolveTargetVirtual`), command execution (`run` / `runStash` / `canRunAction`), core-owned stash aside slots, validated batch hydration (`setMany` / `initialValues`), and `resetAll` (bridges store reset + stash-aside clear). This removes the old footgun where `core.subscribe('someVirtual', …)` never fired (it proxied the virtual-unaware store) while `core.getValue('someVirtual')` did resolve.
   - `run()` is **synchronous** (review fix): `PaletteError`s are thrown, not rejected, matching the svelte oracle. Action-point `run()` may return a promise; core does not await it — the caller decides.
-- [x] Context readiness (from `plans/context.md` — no bags yet, just don't block Phase 9) — landed 2026-09-14:
+- [x] Context readiness (from `plans/context.md` — no bags yet, just don't block Phase 8) — landed 2026-09-14:
   - `PointBase` gains `uses?: readonly ContextName[]` (optional bags; `undefined` = root only as today). No behaviour change — `run`/`can` keep today's signatures this phase. Landed: `points.ts` (`uses?: readonly string[]`).
   - `PaletteStateStore` gains `setTree(patch)` (apply all pairs, collect `Object.is`-changed keys, notify once with the changed-key array). Existing `set()`/`notify()` unchanged. Tests in `store.test.ts`. Landed: `store.ts` (`setTree` — all writes land before any listener runs, returns changed keys; covered in `palette.test.ts`).
   - `errors.ts` gains `PaletteWriteError extends PaletteError` (thrown by bag writes; adapters catch for UI feedback). No other error change. Landed: `errors.ts` (stub — no core code throws it yet; covered in `palette.test.ts`).
-  - `ActionPoint.can` stays readable as today this phase — the static→functional migration lands in Phase 9 (adapters switch to `evaluateCan(id)` then, not now).
-  - NOTE for Phase 9: `PaletteCore.canRunAction` is the named-action `can`; the Phase 9 functional `can`/`evaluateCan` is a different channel (point-level, bag-aware) — keep them distinct.
+  - `ActionPoint.can` stays readable as today this phase — the static→functional migration lands in Phase 8 (adapters switch to `evaluateCan(id)` then, not now).
+  - NOTE for Phase 8: `PaletteCore.canRunAction` is the named-action `can`; the Phase 8 functional `can`/`evaluateCan` is a different channel (point-level, bag-aware) — keep them distinct.
 - [x] SSR inputs (from `plans/ssr.md` §4.1–§4.2 — land here because they touch
       the same `core.ts`/`store.ts`/`points.ts` surface, not as a separate pass) — landed 2026-09-14 (`core/palette.ts`: `ServerPointDescriptor` + `to/fromServerDescriptor` + `validateInitialValues` + `readSetterValue`; `core.ts`: `initialValues` + `setMany` + `resolveEditablePoint` + `readActionCan` + `canRunAction`; `layout.ts`: `validateSerializedLayout`; covered in `palette.test.ts` + `layout.test.ts`; 150 node tests green):
   - `initialValues?: Readonly<Record<string, unknown>>` on `PaletteCoreOptions`
@@ -256,7 +264,7 @@ packages/svelte/src/lib/
     (`JSON.parse(JSON.stringify())` stable). Rendering needs only the
     descriptor; `run()` is unreachable from the render path by construction.
     Document: custom `TypeConstraints` entries participating in SSR must be
-    `JSON.stringify`-stable (or wait for the Phase 8 `ValueCodec` registry).
+    `JSON.stringify`-stable (or wait for the Phase 7 `ValueCodec` registry).
   - Action-point rebuild contract (key-shortcuts need this, not just SSR):
     action points serialize **by name** — the descriptor carries the action
     point's `id` (+ `label`/`can`/metadata, no `run`); the client rebinds
@@ -282,62 +290,77 @@ packages/svelte/src/lib/
 
 ## Phase 4 — command-box + console (headless model)
 
-- [ ] Pure builders → `core/command-box.ts`: `paletteCommandEntries`,
+- [x] Pure builders → `core/command-box.ts`: `paletteCommandEntries`,
       `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`,
       catalogue `serialize/parseCatalogDragPayload` (or delete per
-      `plans/simplify.md` if still caller-less), tokenize/filter/rank fns.
-- [ ] Model: extract the `$derived.by` chains (`availableCategories`,
+      `plans/simplify.md` if still caller-less), tokenize/filter/rank fns. — landed 2026-09-14 as headless ports over `readonly AnyPoint[]` + `CommandBoxContext` (keys/values/actionCan/itemEditors) instead of a live `Palette`: entries carry `run` **spec strings** (adapters execute via `PaletteCore.run`), never closures. Catalogue drag payloads **deleted per `plans/simplify.md`** (dead code — rows are click-to-select); `commandBoxEnumCommands`/`per-value` **deleted** (enum catalog always one row); editor-registry item builders stay adapter-owned (core has no components). Covered in `command-box.test.ts`.
+- [x] Model: extract the `$derived.by` chains (`availableCategories`,
       `parsedInput`, `resultsValue`, `suggestionsValue`) into vanilla
       `(entries, query) => results` functions; svelte `paletteCommandBoxModel`
-      becomes a thin `$state`/`$derived` wrapper.
-- [ ] `console.svelte.ts` → `core/console.ts`: `ConsoleState`, open/close/toggle,
-      `resetConsoleAddState`, `consoleTool` (returns a run point; no svelte import).
-- [ ] Context readiness: command-box entries carry `uses` (filter at render, never build-time precompile — Context §2.7). `consoleTool` stays a run point this phase; its nothing-point form lands in Phase 9.
-- [ ] SSR constraint (from `plans/ssr.md` §4.3): command-box builders ported
+      becomes a thin `$state`/`$derived` wrapper. — landed 2026-09-14: `filterCommandEntries`, `suggestCommandKeywords`, `parseCommandInput`, `availableEntryCategories`/`availableEntryKeywords`, `tokenizeQuery`/`trimLastToken` in `core/command-box.ts` (svelte keeps its `$derived` model until Phase 12).
+- [x] `console.svelte.ts` → `core/console.ts`: `ConsoleState`, open/close/toggle,
+      `resetConsoleAddState`, `consoleTool` (returns a run point; no svelte import). — landed 2026-09-14: `ConsoleStore` (vanilla state + listener set; svelte wraps in `$state` until Phase 12) + `consolePointDescriptor` (run-point descriptor; adapter binds `run` to the store toggle). Covered in `console.test.ts`.
+- [x] Context readiness: command-box entries carry `uses` (filter at render, never build-time precompile — Context §2.7). `consoleTool` stays a run point this phase; its nothing-point form lands in Phase 8. — landed: `CommandBoxEntry.uses` + `consolePointDescriptor` is a run point.
+- [x] SSR constraint (from `plans/ssr.md` §4.3): command-box builders ported
       here must be pure over descriptors — no closures in the SSR path. The
       command box is SSR as a shell; the entry list is client-only (does not
-      show on load).
+      show on load). — landed: builders take descriptors + plain-data context; `run` is a spec string.
 
 ## Phase 5 — presenters + movement commits + SSR variant resolution
 
-- [ ] `presenters.svelte.ts` → `core/presenters.ts`: `button/toggle/select/slider/
+- [x] `presenters.svelte.ts` → `core/presenters.ts`: `button/toggle/select/slider/
       commandBox/status/configurator` presenters verbatim, generic component type.
-      Heads stay dumb (no `tool.value = …` in `.svelte`, per `docs/architecture.md §5`).
-- [ ] `resolveEditorVariant()` (single id) alongside `editorChoicesFor()`
+      Heads stay dumb (no `tool.value = …` in `.svelte`, per `docs/architecture.md §5`). — landed 2026-09-14 as headless ports over plain data (definition + value + config + surface): `buttonPresenter`/`togglePresenter`/`selectPresenter`/`sliderPresenter`/`statusPresenter`/`configuratorModel` + patches/cleanup. Mutation routes through spec strings / `values.set` — never live tool writes. Deliberately **not** ported: `commandBoxPresenter` (builds a `$state` model — core has no runes), `configuratorPresenter.remove()` (needs live toolbar/track/border identity — adapters own it), `headEnumSubsetConfig` display filtering beyond option `can` (demo `EnumSubsetConfigurator` owns it). Covered in `presenters.test.ts`.
+- [x] `resolveEditorVariant()` (single id) alongside `editorChoicesFor()`
       (config-surface list); document the fallback chain once (from
       `plans/ssr.md` §4.3 — the render model needs exactly one id, not a
-      choice list adapters interpret themselves).
-- [ ] `axisForRegion()` + drawer perpendicular-axis rule in core (moved from
+      choice list adapters interpret themselves). — landed 2026-09-14 in `core/presenters.ts`: explicit item `editor` → family default → first eligible → compact fallback for ineligible explicit → `undefined`. `editorChoicesFor()` stays for the config surface.
+- [x] `axisForRegion()` + drawer perpendicular-axis rule in core (moved from
       adapters; from `plans/ssr.md` §4.3 — server/client disagree on variant
       eligibility otherwise). Replaces the adapter-owned `regionDirection` and
-      the "enforced by adapters, opaque to the core" drawer rule.
+      the "enforced by adapters, opaque to the core" drawer rule. — landed 2026-09-14: `axisForRegion` + `drawerChildAxis`/`drawerChildRegion` in `core/presenters.ts`.
 - [ ] Movement commits (`commitDraggedToTrackSpace/ItemSpace/StackSpace/Parking…`,
       `insertTrackWithToolbar`, `moveToolbarToTrack/Stack`) rebuilt in
       `core/layout.ts` on the Phase-2 primitives against an explicit drag-state
       param (no module `$state` reads). Svelte actions/components call them.
-      Commits stay client-only (never in the SSR render path).
-- [ ] `drawer-editor`: keep portal in svelte; move only the perpendicular-direction
-      + open-mode/placement derivation if reusable.
-- [ ] Context readiness: presenters take `(boundValues, boundBags)` param-array shape (Context §2.2, §4 step 6) so Phase 9 resolvers plug in without re-shaping; context flows down into drawer child tools (Context §1.2).
+      Commits stay client-only (never in the SSR render path). — deferred: movement was stripped for restart (`plans/movement.md` stays the behaviour spec); the engine rebuilds on the Phase-2 primitives, not by porting the old slide engine.
+- [x] `drawer-editor`: keep portal in svelte; move only the perpendicular-direction
+      + open-mode/placement derivation if reusable. — landed: perpendicular rule in core (`drawerChildAxis`/`drawerChildRegion`); portal + open-mode/placement stay svelte (adapter-owned).
+- [x] Context readiness: presenters take `(boundValues, boundBags)` param-array shape (Context §2.2, §4 step 6) so Phase 8 resolvers plug in without re-shaping; context flows down into drawer child tools (Context §1.2). — landed: `BoundDisplay` carries `point` + `value` + optional `bags` (accepted + ignored this phase).
 
 ## Phase 6 — CSS + theme to core
 
-- [ ] Move `palette/styles/palette.css` → `core/styles/palette.css` (layout +
-      edit chrome + drawer shell, global selectors unchanged).
-- [ ] Move `head/styles/head-default.css` → `core/theme/head-default.css`
-      (dark base + light override stay in sync; see `docs/theming.md`).
+- [x] Move `palette/styles/palette.css` → `core/styles/palette.css` (layout +
+      edit chrome + drawer shell, global selectors unchanged). — landed 2026-09-14 verbatim (+ header comment).
+- [x] Move `head/styles/head-default.css` → `core/theme/head-default.css`
+      (dark base + light override stay in sync; see `docs/theming.md`). — landed 2026-09-14 verbatim (+ header comment).
 - [ ] Svelte/app import CSS from `@palettable/core` (`core/styles`, `core/theme`);
-      no runtime injection, no per-instance scoping (unchanged rule).
+      no runtime injection, no per-instance scoping (unchanged rule). — deferred to Phase 12 (svelte frozen; `package.json` already exports `./styles/*` + `./theme/*` and ships them in `files`).
 - [ ] SSR constraint: CSS moves are SSR-neutral (no runtime injection to port),
       but the SSR HTML must reference the same global selectors — no
       per-instance scoping on the server either.
 
-## Phase 8 — SSR render model (after Phases 3–5, before Phase 7)
+## Execution order (remaining work)
+
+Phases 2–6 are landed. What is left runs in this order (numbers are
+topological, not sequential — the old 6b/6c labels sort early but execute as 10/11):
+
+1. **Phase 7** (SSR render model) — needs only the landed Phases 3–5 surface.
+2. **Phase 8** (context) — needs Phases 3–5 + 7; lands **before** the parity
+   expansion so the vanilla spike can ride the Phase 10 demo work instead of
+   requiring a second pass.
+3. **Phase 9** (optimization — empty, scope TBD) — placeholder between
+   context and adapters; no work item may block parity on it.
+4. **Phase 10** (vanilla parity) → **Phase 11** (vue parity) — same demo,
+   same e2e suite; both stay context-free and SSR-independent.
+5. **Phase 12** (thin svelte) — the only phase that edits `packages/svelte/src`.
+
+## Phase 7 — SSR render model (after Phases 3–5, before Phase 12)
 
 > Implements `plans/ssr.md` §4.3–§4.8 on top of the Phases 3–5 surface.
 > Additive only — nothing in `packages/svelte/src` is edited. Gated on Phases
 > 3–5 (needs `initialValues`, descriptors, `resolveEditorVariant`,
-> `axisForRegion`); must land before Phase 7 so the svelte thinning can rely
+> `axisForRegion`); must land before Phase 12 so the svelte thinning can rely
 > on the same resolver the server uses.
 
 - [ ] `resolveRenderTree()` pure resolver in `core/render.ts` (+ `snapshotPalette()`
@@ -383,14 +406,14 @@ packages/svelte/src/lib/
       `plans/ssr.md` (the `plans/` → `docs/` lifecycle).
 - [ ] Context readiness: `resolveRenderTree()` input shape stays bag-extensible
       (Context §2.2 param-array `(boundValues, boundBags)` flows through, not
-      a single-store assumption) so Phase 9 plugs bags in without re-shaping.
+      a single-store assumption) so Phase 8 plugs bags in without re-shaping.
 
-## Phase 9 — context-sensitive tools (after Phases 3–5 + 8, before Phase 7)
+## Phase 8 — context-sensitive tools (after Phases 3–5 + 7; before Phase 10 parity and Phase 12)
 
 > Implements `plans/context.md` §§1–4 in core. Additive only — nothing in
 > `packages/svelte/src` is edited. Gated on Phases 3–5 + 8 (needs `setTree`,
 > `uses` stub, `PaletteWriteError`, pure builders, `(boundValues, boundBags)`
-> presenter shape, bag-extensible render input); must land before Phase 7 so
+> presenter shape, bag-extensible render input); must land before Phase 12 so
 > the svelte thinning subscribes to context channels instead of inventing its
 > own. Vanilla spike first for the adapter proof (Context §2.6); svelte/React
 > parity follows, it is not this phase's gate.
@@ -441,19 +464,28 @@ packages/svelte/src/lib/
       `docs/core-concepts.md`; migrate context decisions to
       `docs/architecture.md` (new §23); retire `plans/context.md` once landed.
 
-## Phase 6b — vanilla demo parity (first parity gate)
+## Phase 9 — optimization (empty placeholder, scope TBD)
+
+> Empty on purpose: a reserved slot between context (Phase 8) and adapters
+> (Phases 10–11) for perf/cleanup work discovered during 7–8. No checklist
+> yet — file it here when it appears, not in the parity phases. Must stay
+> SSR-safe and bag-extensible like every other additive phase; must not
+> block parity (10/11 gate on their own criteria, never on this phase).
+
+## Phase 10 — vanilla demo parity (first parity gate)
 
 > This is the acceptance criterion for stages 1–2 of the evolution strategy:
 > the vanilla demo must be the **same demo** as the svelte one, because
 > `tests/e2e/` will attack all demos with the same specs.
 >
 > SSR note: the parity demos are client-rendered; SSR coverage comes from the
-> Phase 8 render-model tests (core, node), not from e2e. Do not gate parity on
-> SSR output — but do not break the Phase 8 import-graph rule while building
+> Phase 7 render-model tests (core, node), not from e2e. Do not gate parity on
+> SSR output — but do not break the Phase 7 import-graph rule while building
 > the demo (demo code lives in adapters, never in the render path).
 >
-> Context note: the parity demos stay context-free (root bag only); context
-> coverage comes from the Phase 9 vanilla spike + core tests, not from e2e.
+> Context note: the parity demos stay context-free (root bag only) — Phase 8
+> lands first, so the vanilla spike rides this phase's demo work; context
+> coverage comes from the Phase 8 core tests + vanilla spike, not from e2e.
 > Do not gate parity on context output.
 
 - [ ] Port the svelte demo to `packages/vanilla/demo/` feature-for-feature:
@@ -467,22 +499,22 @@ packages/svelte/src/lib/
       vanilla on its own port) and run the **same** `tests/e2e/*.spec.ts`
       against both.
 - [ ] Gate: `tests/e2e/` green against **both** demos (svelte reference +
-      vanilla). This unlocks Phase 6c, not Phase 7.
+      vanilla). This unlocks Phase 11, not Phase 12.
 
-## Phase 6c — vue adapter + demo parity (second parity gate)
+## Phase 11 — vue adapter + demo parity (second parity gate)
 
 > This is the acceptance criterion for stage 3 of the evolution strategy:
 > `svelte` is kept as reference until we have `vanilla` **+ one reactive
-> framework** (`vue`). Gated on Phase 6b (vanilla parity green) — the vue
+> framework** (`vue`). Gated on Phase 10 (vanilla parity green) — the vue
 > adapter builds on the same core surface the vanilla parity already proved.
 >
 > SSR note: the vue demo is client-rendered like the others; SSR coverage
-> stays in the Phase 8 render-model tests (core, node). Do not gate vue
-> parity on SSR output — but do not break the Phase 8 import-graph rule
+> stays in the Phase 7 render-model tests (core, node). Do not gate vue
+> parity on SSR output — but do not break the Phase 7 import-graph rule
 > (demo code lives in the adapter, never in the render path).
 >
 > Context note: the vue demo stays context-free (root bag only); context
-> coverage comes from the Phase 9 vanilla spike + core tests, not from e2e.
+> coverage comes from the Phase 8 core tests + vanilla spike, not from e2e.
 
 - [ ] Scaffold `packages/vue/` (Vue adapter + vite demo): imports `core`
       only (never the reverse); owns Vue reactive wrappers
@@ -490,16 +522,18 @@ packages/svelte/src/lib/
       Add to `pnpm-workspace.yaml` (`packages/*` already covers it) +
       `playwright.config.ts` (own project, own port).
 - [ ] Port the same Stellar Outpost demo to `packages/vue/demo/`
-      feature-for-feature (same reference as Phase 6b:
+      feature-for-feature (same reference as Phase 10:
       `packages/svelte/src/routes/+page.svelte` +
       `src/demo/palette.svelte.ts`): same points, same initial layout, same
       editors, same console, same drag behaviour, same DOM contract the e2e
       specs assert.
 - [ ] Run the **same** `tests/e2e/*.spec.ts` against all three demos.
 - [ ] Gate: `tests/e2e/` green against **all three** demos (svelte reference
-      + vanilla + vue). Only then may Phase 7 delete svelte code.
+      + vanilla + vue). Only then may Phase 12 delete svelte code.
 
-> **Only phase allowed to edit `packages/svelte/src`.** Gated on Phase 6c:
+## Phase 12 — thin the adapter, close out
+
+> **Only phase allowed to edit `packages/svelte/src`.** Gated on Phase 11:
 > with parity proven, `svelte` becomes a thin adapter over `core`. Any
 > behavioural difference that surfaces here is a `core` bug — fix `core`, do
 > not keep the old implementation.
@@ -515,9 +549,9 @@ packages/svelte/src/lib/
 - [ ] Docs per repo rule (`AGENTS.md`): remove completed items here, migrate
       permanent contracts to `docs/architecture.md` (+ `theming.md`,
       `layout-and-drag.md`, `core-concepts.md` as touched).
-- [ ] Done = `tests/e2e/` green against **all three** demos (Phase 6b + 6c gates),
-      Phase 8 render-model tests green (SSR gate),
-      Phase 9 context tests green (`context.test.ts`, `context-display.test.ts`,
+- [ ] Done = `tests/e2e/` green against **all three** demos (Phase 10 + 11 gates),
+      Phase 7 render-model tests green (SSR gate),
+      Phase 8 context tests green (`context.test.ts`, `context-display.test.ts`,
       store `setTree`, core bag/`can` channels, vanilla spike — Context gate),
       `pnpm --filter @palettable/core check/build/test` green,
       `pnpm --filter @palettable/vanilla check/build/test` green,
@@ -569,18 +603,18 @@ packages/svelte/src/lib/
   listener-errors and `GapDwell`), `tsconfig` (`lib: ["ES2022"]`, no `DOM`).
 - **Per-phase SSR obligations:**
   - Phase 2 (landed): `configuration` singleton stays process-wide mutable —
-    Phase 8 pins it per-request; `GapDwell` timers go through the `globals.ts`
+    Phase 7 pins it per-request; `GapDwell` timers go through the `globals.ts`
     hatch so the render path can exclude them by import graph.
   - Phase 3: lands `initialValues`/`setMany` + descriptors (the wire inputs).
   - Phase 4: builders stay pure over descriptors (entry list is client-only).
   - Phase 5: lands `resolveEditorVariant` + `axisForRegion` (variant
     eligibility must agree server/client).
   - Phase 6: CSS-neutral, same global selectors on server HTML.
-  - Phase 8: implements the render model + pinning + codecs + hygiene + tests.
+  - Phase 7: implements the render model + pinning + codecs + hygiene + tests.
 - **Open questions (decided, from SSR §8):** stash asides excluded; shared
   object values keep shared references; box shell SSR / entry list
   client-only; missing configuration → skeleton placeholder (SSR optional).
-- **Lifecycle:** when Phase 8 lands, migrate its decisions to
+- **Lifecycle:** when Phase 7 lands, migrate its decisions to
   `docs/architecture.md` (new §22) and clear both this section and the
   completed items in `plans/ssr.md` per `AGENTS.md` (`plans/` → `docs/`).
 
@@ -632,35 +666,36 @@ packages/svelte/src/lib/
     only — `can` stays static, bags unwired).
   - Phase 4: entries carry `uses`, filter at render (never build-time
     precompile); `consoleTool` stays a run point (nothing-point form in
-    Phase 9).
+    Phase 8).
   - Phase 5: presenters take `(boundValues, boundBags)`; context flows into
     drawer children.
   - Phase 6: CSS-neutral for context (disabled + placeholder states reuse
     existing selectors).
-  - Phase 8: render input stays bag-extensible (no single-store
+  - Phase 7: render input stays bag-extensible (no single-store
     assumption).
-  - Phase 9: implements bags + `NothingPoint` + functional `can` +
-    `context-display.ts` + vanilla spike + command-box pass (see Phase 9).
-- **Lifecycle:** when Phase 9 lands, document the `uses` contract in
+  - Phase 8: implements bags + `NothingPoint` + functional `can` +
+    `context-display.ts` + vanilla spike + command-box pass (see Phase 8).
+    Lands before 10 so the spike rides the parity demo work.
+- **Lifecycle:** when Phase 8 lands, document the `uses` contract in
   `docs/core-concepts.md`, migrate context decisions to
-  `docs/architecture.md` (new §23), and retire `plans/context.md` per
+  `docs/architecture.md` (new §24 — §22 SSR, §23 optimization), and retire `plans/context.md` per
   `AGENTS.md` (`plans/` → `docs/`).
 
 ## Non-goals / guardrails
 
-- **Order is not negotiable**: additive first (`core` + `vanilla`, then
-  `core` + `vue`), parity second (same demo, same e2e suite — vanilla parity
-  6b, then vue parity 6c), subtractive last (`svelte` depends on `core`).
-  Do not start Phase 7 before Phase 6c is green.
-- **`packages/svelte/src` is frozen during Phases 2–6c + 8 + 9.** It is the reference
+- **Order is not negotiable**: additive first (`core` Phases 2–6, then
+  SSR 7 + context 8 + optimization 9), parity second (same demo, same e2e suite — vanilla parity
+  10, then vue parity 11), subtractive last (`svelte` depends on `core`, Phase 12).
+  Do not start Phase 12 before Phase 11 is green.
+- **`packages/svelte/src` is frozen during Phases 2–12 except Phase 12 itself.** It is the reference
   implementation and the oracle for parity; editing it early destroys the
-  comparison. (Phases 8–9 are additive-only like Phases 2–5.)
+  comparison. (Phases 7–11 are additive-only like Phases 2–5.)
 - No new movement behaviour in this plan — the engine restart builds on core
   primitives (`plans/movement.md` stays the behaviour spec). Movement commits
   stay client-only and out of the SSR render path.
-- No context behaviour before Phase 9 — Phases 3–5 land readiness stubs only
+- No context behaviour before Phase 8 — Phases 3–5 land readiness stubs only
   (`uses`, `setTree`, `PaletteWriteError`); bags, nothing-points, and
-  functional `can` wait for Phase 9 (`plans/context.md` stays the behaviour spec).
+  functional `can` wait for Phase 8 (`plans/context.md` stays the behaviour spec).
 - No `*Model` / variant-factory layer (out of scope per `docs/architecture.md §5`).
 - No `Snippet` in icon tokens (no runtime discriminator — wrap in a component).
 - Keep `AGENTS.md` recipes: scratch work in `sandbox/`, read-only `git`.

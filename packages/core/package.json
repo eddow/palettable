@@ -13,10 +13,14 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.mjs",
 			"require": "./dist/index.cjs"
-		}
+		},
+		"./styles/*": "./styles/*",
+		"./theme/*": "./theme/*"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"styles",
+		"theme"
 	],
 	"scripts": {
 		"build": "rollup -c",

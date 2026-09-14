@@ -570,6 +570,11 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
 | `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan`, `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll` |
 | `palette.ts` | `ServerPointDescriptor` + `to/fromServerDescriptor` (action rebuild by name via `runners`), `validateInitialValues`, `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
+| `command-box.ts` | `paletteCommandEntries` / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
+| `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
+| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `(boundValues, boundBags)`-ready, bags accepted + ignored) |
+| `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
+| `theme/head-default.css` | dark base + light override (Phase 6, verbatim from svelte; stay in sync per `docs/theming.md`) |
 
 ### Phase 2 status (landed 2026-09-14)
 
