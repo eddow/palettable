@@ -7,9 +7,9 @@
  * fresh `SerializedLayout` snapshot. Zero DOM.
  */
 import { PaletteError } from './errors.js'
-import { scheduleMicrotask } from './globals.js'
+import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
-import type { PointSpec } from './specs.js'
+import { canonicalSpecId, type PointTarget } from './specs.js'
 
 /** Listener invoked with a fresh layout snapshot after each structural mutation. */
 export type LayoutListener = (snapshot: SerializedLayout) => void
@@ -28,7 +28,13 @@ export type SurfaceContext = {
 
 /** Toolbar item bound to a point (a tool). `editor` is a variant id, `config` opaque. */
 export type ToolToolbarItem<TPoint extends string = string, TEditor extends string = string> = {
-	readonly tool: PointSpec<TPoint>
+	/**
+	 * Binding to the point: a string reference (`id`, `id=value`, `id:action`)
+	 * or an inline virtual definition (`StashDefinition` / `EnumFromDefinition`).
+	 * Inline definitions behave like the same definition registered under
+	 * their `id`, with lifetime scoped to this item.
+	 */
+	readonly tool: PointTarget<TPoint>
 	editor?: TEditor
 	config?: Record<string, unknown>
 }
@@ -103,9 +109,15 @@ export type PaletteLayout<TPoint extends string = string, TEditor extends string
 }
 
 // ── Serialized layout (JSON-safe persistence) ───────────────────────────────
+// `tool` mirrors `ToolToolbarItem.tool`: a string reference, or an inline
+// virtual definition (`StashDefinition` / `EnumFromDefinition`) carried
+// directly in the serialized item. Inline definitions are full JSON-safe
+// definition objects (`id` + `source` + options / `stashedValue`), so a
+// serialized configuration + points-list rebuilds the run-time structures
+// with no separate virtuals lookup.
 
 export type SerializedToolbarItem = {
-	readonly tool?: string
+	readonly tool?: string | import('./virtual.js').VirtualPoint
 	readonly editor?: string
 	readonly config?: Record<string, unknown>
 	readonly toolbar?: readonly SerializedToolbarItem[]
@@ -364,6 +376,8 @@ function hydrateItem(item: SerializedToolbarItem): ToolbarItem {
 		} as DrawerToolbarItem
 	}
 	if (item.tool === undefined) return { editor: item.editor ?? 'status', config: item.config }
+	// String references and inline virtual definitions both hydrate verbatim:
+	// strings stay strings, inline definitions stay inline definition objects.
 	return { tool: item.tool, editor: item.editor, config: item.config }
 }
 
@@ -395,7 +409,9 @@ function cloneItem(item: ToolbarItem): ToolbarItem {
 			config: item.config === undefined ? undefined : { ...item.config },
 		}
 	return {
-		tool: item.tool,
+		// Strings are immutable; inline virtual definitions are deep-cloned
+		// (JSON-safe definition objects) so the clone shares no structure.
+		tool: typeof item.tool === 'string' ? item.tool : cloneValue(item.tool),
 		editor: item.editor,
 		config: item.config === undefined ? undefined : { ...item.config },
 	}
@@ -424,7 +440,14 @@ function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 function serializeItem(item: ToolbarItem): SerializedToolbarItem {
 	if (isDrawerItem(item))
 		return { editor: 'drawer', config: item.config, toolbar: item.toolbar.map(serializeItem) }
-	return { tool: (item as ToolToolbarItem).tool, editor: item.editor, config: item.config }
+	// String references serialize as-is; inline virtual definitions serialize
+	// as their full definition object (JSON-safe: `id` + `source` + options /
+	// `stashedValue`), so no separate virtuals lookup is needed on rebuild.
+	const tool =
+		typeof (item as ToolToolbarItem).tool === 'string'
+			? (item as ToolToolbarItem).tool
+			: cloneValue((item as ToolToolbarItem).tool)
+	return { tool, editor: item.editor, config: item.config }
 }
 
 /** Null-safe drawer guard (a drawer is pointless + carries a nested toolbar). */
@@ -434,4 +457,195 @@ export function isDrawerItem(item: ToolbarItem | null | undefined): item is Draw
 		(item as DrawerToolbarItem).editor === 'drawer' &&
 		Array.isArray((item as DrawerToolbarItem).toolbar)
 	)
+}
+
+// ── Pure track-space math (Phase 2 — verbatim from the svelte adapter) ──────
+// Operates on core `Track` / `Border` / `Parking` data only: no DOM, no runes,
+// no store reads. Adapters commit drag results through these primitives (or
+// through `PaletteLayoutTree` for location-based moves).
+
+/** Clamp a spacing value into the unit interval (non-finite → 0). */
+export function clampUnit(value: number): number {
+	return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
+}
+
+/**
+ * Effective spacing of the gap at `index` in a track: the stored slot space
+ * for a leading gap, the remaining share (`1 − Σ`) for the trailing gap,
+ * `0` out of range.
+ */
+export function actualTrackSpaceAt(track: Track, index: number): number {
+	return index < track.length
+		? clampUnit(track[index]!.space)
+		: index === track.length
+			? clampUnit(track.reduce((remaining, slot) => remaining - slot.space, 1))
+			: 0
+}
+
+function actualTrackSpaces(track: Track): number[] {
+	const spaces = track.map((slot) => clampUnit(slot.space))
+	const trailing = clampUnit(1 - spaces.reduce((sum, space) => sum + space, 0))
+	return [...spaces, trailing]
+}
+
+function applyTrackSpaces(track: Track, spaces: readonly number[]): void {
+	for (let index = 0; index < track.length; index += 1)
+		track[index]!.space = clampUnit(spaces[index] ?? 0)
+}
+
+/**
+ * Removes a toolbar from a track and merges its surrounding spacing into a single gap.
+ *
+ * @returns The removed toolbar slot index, or `-1` when the toolbar is not in the track.
+ */
+export function removeToolbar(track: Track, toolbar: Toolbar): number {
+	const index = track.findIndex((slot) => slot.toolbar === toolbar)
+	if (index < 0) return -1
+	const spaces = actualTrackSpaces(track)
+	const merged = (spaces[index] ?? 0) + (spaces[index + 1] ?? 0)
+	spaces.splice(index, 2, merged)
+	track.splice(index, 1)
+	applyTrackSpaces(track, spaces)
+	return index
+}
+
+/** Removes a track from a border when it no longer contains any toolbars. */
+export function removeEmptyTrack(border: Border, track: Track): void {
+	if (track.length > 0) return
+	const trackIndex = border.indexOf(track)
+	if (trackIndex < 0) return
+	border.splice(trackIndex, 1)
+}
+
+/**
+ * Removes a toolbar from the parking stack by identity.
+ *
+ * Parking rows have no spacing to merge — the stack is a plain list.
+ *
+ * @returns The removed index, or `-1` when the toolbar is not parked.
+ */
+export function removeParkedToolbar(parking: Parking, toolbar: Toolbar): number {
+	const index = parking.indexOf(toolbar)
+	if (index < 0) return -1
+	parking.splice(index, 1)
+	return index
+}
+
+/**
+ * Inserts a toolbar into an existing track and splits the target gap according to `split`.
+ */
+export function insertToolbar(track: Track, index: number, toolbar: Toolbar, split: number): void {
+	const insertionIndex = Math.min(Math.max(index, 0), track.length)
+	const spaces = actualTrackSpaces(track)
+	const merged = spaces[insertionIndex] ?? 0
+	const before = merged * clampUnit(split)
+	const after = merged - before
+	spaces.splice(insertionIndex, 1, before, after)
+	track.splice(insertionIndex, 0, { space: 0, toolbar })
+	applyTrackSpaces(track, spaces)
+}
+
+/** Rebalances the spaces around an existing toolbar within a track. */
+export function resizeToolbar(track: Track, index: number, split: number): void {
+	if (index < 0 || index >= track.length) return
+	const spaces = actualTrackSpaces(track)
+	const merged = (spaces[index] ?? 0) + (spaces[index + 1] ?? 0)
+	const before = merged * clampUnit(split)
+	const after = merged - before
+	spaces.splice(index, 2, before, after)
+	applyTrackSpaces(track, spaces)
+}
+
+/**
+ * Canonical point id for a toolbar item: the string spec's point id
+ * (setter `=`/`|` and action `:` suffixes stripped, so `alertLevel`,
+ * `alertLevel=red`, and `alertLevel|red` fingerprint as the same point),
+ * or the inline definition's own `id`. Pointless items fingerprint on `editor`.
+ */
+export function canonicalItemTool(item: ToolbarItem): string {
+	const spec = (item as { tool?: unknown }).tool
+	if (typeof spec === 'string') {
+		const setter = spec.search(/[=|]/)
+		const colon = spec.indexOf(':')
+		const cut =
+			setter >= 0 && (colon < 0 || setter < colon) ? setter : colon >= 0 ? colon : spec.length
+		return spec.slice(0, cut)
+	}
+	if (spec !== null && typeof spec === 'object') return canonicalSpecId(spec as never) ?? ''
+	return ''
+}
+
+/**
+ * Stable structural fingerprint of an instantiated tool: canonical point (or
+ * pointless editor) + editor variant + stable-stringified config.
+ * Position is NOT part of the fingerprint — it is the container that makes
+ * two identical fingerprints two distinct instances.
+ */
+export function itemFingerprint(item: ToolbarItem): string {
+	const tool = canonicalItemTool(item)
+	const editor = (item as { editor?: unknown }).editor
+	const config = (item as { config?: unknown }).config
+	return JSON.stringify([tool, typeof editor === 'string' ? editor : null, stableStringify(config)])
+}
+
+function stableStringify(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(stableStringify)
+	if (value !== null && typeof value === 'object') {
+		const record = value as Record<string, unknown>
+		const sorted: Record<string, unknown> = {}
+		for (const key of Object.keys(record).sort()) sorted[key] = stableStringify(record[key])
+		return sorted
+	}
+	return value ?? null
+}
+
+/**
+ * Single-ownership invariant: every toolbar/item object lives in exactly one
+ * container. Scans borders + parking for shared `===` references (the same
+ * object rendered twice) and for structural duplicates (same fingerprint in
+ * two places).
+ *
+ * @returns Human-readable violations (empty = invariant holds).
+ */
+export function findOwnershipViolations(options: {
+	borders: Borders
+	parking?: Parking
+}): string[] {
+	const { borders, parking } = options
+	const violations: string[] = []
+	const toolbarOwners = new Map<Toolbar, string>()
+	const itemOwners = new Map<ToolbarItem, string>()
+	const fingerprints = new Map<string, string>()
+	function claimToolbar(toolbar: Toolbar, where: string): void {
+		const owner = toolbarOwners.get(toolbar)
+		if (owner !== undefined) violations.push(`toolbar shared by ${owner} and ${where}`)
+		else toolbarOwners.set(toolbar, where)
+	}
+	function claimItem(item: ToolbarItem, where: string): void {
+		const owner = itemOwners.get(item)
+		if (owner !== undefined) violations.push(`item shared by ${owner} and ${where}`)
+		else itemOwners.set(item, where)
+		const fingerprint = itemFingerprint(item)
+		const first = fingerprints.get(fingerprint)
+		if (first !== undefined)
+			violations.push(`duplicate item ${fingerprint} in ${first} and ${where}`)
+		else fingerprints.set(fingerprint, where)
+	}
+	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
+	for (const region of regions) {
+		const border = borders[region] ?? []
+		border.forEach((track, trackIndex) => {
+			track.forEach((slot, slotIndex) => {
+				const where = `${region}[${trackIndex}][${slotIndex}]`
+				claimToolbar(slot.toolbar, where)
+				slot.toolbar.forEach((item, itemIndex) => claimItem(item, `${where}#${itemIndex}`))
+			})
+		})
+	}
+	parking?.forEach((toolbar, index) => {
+		const where = `parking[${index}]`
+		claimToolbar(toolbar, where)
+		toolbar.forEach((item, itemIndex) => claimItem(item, `${where}#${itemIndex}`))
+	})
+	return violations
 }

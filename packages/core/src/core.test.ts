@@ -91,6 +91,34 @@ describe('PaletteCore construction', () => {
 		expect(core.getVirtual('pause')?.id).toBe('pause')
 		expect(core.getVirtual('missing')).toBeUndefined()
 	})
+
+	it('resolveTargetVirtual returns registered virtuals and validates inline specs', () => {
+		const core = new PaletteCore(points(), {
+			virtuals: [
+				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
+			],
+		})
+		expect(core.resolveTargetVirtual('pause')?.id).toBe('pause')
+		expect(core.resolveTargetVirtual('theme')).toBeUndefined()
+		expect(
+			core.resolveTargetVirtual({
+				id: 'inlinePause',
+				label: 'Inline pause',
+				source: 'fontSize',
+				kind: 'stash',
+				stashedValue: 0,
+			})?.id
+		).toBe('inlinePause')
+		expect(() =>
+			core.resolveTargetVirtual({
+				id: 'bad',
+				label: 'Bad',
+				source: 'missing',
+				kind: 'stash',
+				stashedValue: 0,
+			})
+		).toThrow('unknown source point "missing"')
+	})
 })
 
 describe('defineVirtual / removeVirtual', () => {

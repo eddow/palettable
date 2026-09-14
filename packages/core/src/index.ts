@@ -34,9 +34,11 @@
  *   parent — enforced by adapters, opaque to the core).
  */
 
+export * from './configuration.js'
 export * from './core.js'
 export * from './editors.js'
 export * from './errors.js'
+export * from './gap-dwell.js'
 export * from './globals.js'
 export * from './identifiers.js'
 export * from './keys.js'

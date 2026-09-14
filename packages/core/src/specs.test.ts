@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalPointId, parsePointSpec } from './specs.js'
+import { canonicalPointId, canonicalSpecId, isInlineSpec, parsePointSpec } from './specs.js'
+import type { StashDefinition } from './virtual.js'
 
 describe('parsePointSpec', () => {
 	it('parses a bare point id', () => {
@@ -49,5 +50,28 @@ describe('canonicalPointId', () => {
 		expect(canonicalPointId('theme=dark')).toBe('theme')
 		expect(canonicalPointId('theme|dark')).toBe('theme')
 		expect(canonicalPointId('fontSize:inc')).toBe('fontSize')
+	})
+})
+
+describe('PointTarget (string reference vs inline virtual)', () => {
+	const stash: StashDefinition<number> = {
+		id: 'pause',
+		label: 'Pause',
+		source: 'gameSpeed',
+		kind: 'stash',
+		stashedValue: 0,
+	}
+
+	it('narrows inline definitions from string references', () => {
+		expect(isInlineSpec(stash)).toBe(true)
+		expect(isInlineSpec('pause')).toBe(false)
+		expect(isInlineSpec({ tool: 'pause' })).toBe(false)
+		expect(isInlineSpec(null)).toBe(false)
+		expect(isInlineSpec(undefined)).toBe(false)
+	})
+
+	it('resolves the canonical id of either form', () => {
+		expect(canonicalSpecId('theme=dark')).toBe('theme')
+		expect(canonicalSpecId(stash)).toBe('pause')
 	})
 })

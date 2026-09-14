@@ -502,9 +502,14 @@ but a build guarantee:
   accidental `document`, `HTMLElement`, `KeyboardEvent` or `window` reference
   fails `tsc` (`error TS2584: Cannot find name 'document'`).
 - `packages/core/src/globals.ts` is the single escape hatch: it resolves
-  `queueMicrotask` through `globalThis` (the only host global core needs, used to
-  re-throw listener errors off the notify stack). It is resolved **per call**, not
-  captured at module load, so tests can stub the host global.
+  host globals through `globalThis` — `queueMicrotask` (used to re-throw
+  listener errors off the notify stack) plus `setTimeout` / `clearTimeout`
+  (used by the `GapDwell` hover-dwell timer). Timers exist in every target
+  host (browsers, Node, workers) but are not part of the ES2022 lib, so they
+  are resolved here rather than pulling in `DOM` or `@types/node`. All are
+  resolved **per call**, not captured at module load, so tests can stub the
+  host globals. Timer handles stay opaque (`unknown`) — pass them back to
+  `clearHostTimeout`.
 - Consequence for Phase 2: `drag-session.ts` (`HTMLElement`, pointer events) does
   **not** move into core. Drag sessions live in the adapters (`packages/vanilla`,
   `packages/svelte`); core exposes only structural commits
@@ -515,13 +520,21 @@ but a build guarantee:
 - **Icons are opaque tokens** (`IconToken = string`). Resolution to a component or
   glyph is an adapter concern; core never imports an icon factory.
 - **Keystrokes are normalized strings** (`"Ctrl+Shift+S"`). Core owns only the
-  headless lookup (`findKeystrokesFor`); adapters own `KeyboardEvent` →
-  keystroke normalization (`normalizePaletteKeystroke`,
-  `paletteKeystrokeFromEvent`).
+  headless lookup (`findKeystrokesFor`, `findKeystrokesForTarget`); adapters
+  own `KeyboardEvent` → keystroke normalization (`normalizePaletteKeystroke`,
+  `paletteKeystrokeFromEvent`). `KeyBindings` values are strings (references
+  by name); inline virtual definitions live on toolbar items, never in this
+  map — a key bound to an inline stash uses the stash's `id`.
 - **Virtual points** (`virtual.ts`) are end-user-defined derived points over a
   source point: `enum-from` (present any value as an enum / enum subset) and
   `stash` (push-aside / pop-back toggle action, single aside slot — no stack).
   Matching uses `Object.is`, the same contract as `PaletteStateStore.set`.
+  A spec may also carry a virtual **inline** (`PointTarget = string |
+  VirtualPoint` in `specs.ts`): the definition object lives directly in
+  `ToolToolbarItem` / `SerializedToolbarItem` `tool`, behaves like the same
+  definition registered under its `id` (validated via `assertValidVirtual`,
+  resolved via `PaletteCore.resolveTargetVirtual`), but its lifetime is the
+  spec — no registry entry, no id-collision check.
 - **Layout is pure data.** `PaletteLayoutTree` holds borders / tracks / toolbars /
   items and emits a fresh `SerializedLayout` snapshot per mutation via
   `subscribe`. Two structurally different forms exist and must not be conflated:
@@ -545,15 +558,48 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `identifiers.ts` | `IconToken`, `Keystroke`, `Unsubscribe`, listener types |
 | `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
 | `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `isActionPoint` / `isValuedPoint` |
-| `specs.ts` | `PointSpec`, `parsePointSpec`, `canonicalPointId` |
+| `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
 | `store.ts` | `PaletteStateStore` |
-| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `isDrawerItem` |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `isDrawerItem`, pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
+| `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
+| `gap-dwell.ts` | `GapDwell` hover-dwell state machine + `GapDwellState` (Phase 2; timers via `globals.ts` so `lib` stays `ES2022`-only) |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
-| `keys.ts` | `KeyBindings`, `findKeystrokesFor` (headless lookup only) |
+| `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
 | `virtual.ts` | `enum-from` / `stash` derived points |
 | `errors.ts` | `PaletteError` |
-| `globals.ts` | `scheduleMicrotask` — the only host global |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions` |
+| `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions`, `resolveTargetVirtual` |
+
+### Phase 2 status (landed 2026-09-14)
+
+`configuration.ts`, `gap-dwell.ts`, and the pure track-space math in
+`layout.svelte.ts` now live in core (`configuration.ts`, `gap-dwell.ts`,
+`layout.ts` additions). Notes:
+
+- `gap-dwell.ts` is **not** a byte-verbatim move: the svelte source calls
+  `setTimeout` / `clearTimeout` directly, which do not exist under
+  `lib: ["ES2022"]`. Core routes timers through the `globals.ts` escape hatch
+  (`scheduleHostTimeout` / `clearHostTimeout`, opaque `unknown` handle) so the
+  DOM-free rule stays compiler-enforced. Behaviour (dwell, one-shot latch,
+  retarget, reset) is unchanged and covered by `phase2.test.ts` (node).
+- `findOwnershipViolations` stays a **core export** (not a test helper):
+  adapters and e2e parity checks reuse the single-ownership invariant at
+  runtime, so one implementation in core beats a copy in each test dir.
+- `insertTrackWithToolbar` was **not** moved: it is a one-line `splice`
+  the movement engine (Phase 5) will rebuild against an explicit drag-state
+  param. Moving it now would freeze the old slide-engine shape in core.
+- `regionDirection` was **not** moved: it maps a region to an adapter
+  orientation string (`horizontal` / `vertical`), which is a rendering concern.
+  Core's equivalent is `SurfaceContext.axis` (already in `layout.ts`).
+- `removePaletteItem` was **not** moved: it couples item removal to a
+  border/track prune in svelte `PaletteBorder` / `PaletteTrack` terms. The
+  core equivalent is `PaletteLayoutTree.removeItem` (location-based, prunes
+  emptied toolbars/tracks the same way).
+- `isEditableTarget` was **not** moved: it touches `HTMLElement` /
+  `HTMLInputElement` and stays adapter-owned per the DOM-free rule.
+- Svelte keeps its own copies until Phase 7 (additive-first rule) — the core
+  versions are proven by `phase2.test.ts` (21 node tests) while the svelte
+  reference tests stay green untouched.
 
 ### Packaging
 

@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 104 tests, 8 files
+## Core unit (Vitest, node) — 132 tests, 9 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -8,14 +8,15 @@ Run: `pnpm --filter @palettable/core test`. Config:
 
 | File | Covers |
 | ---- | ------ |
-| `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/action forms) |
-| `src/keys.test.ts` | `findKeystrokesFor` (spec-prefix match) + `PaletteError` name |
+| `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/action forms) + `PointTarget` (`isInlineSpec`, `canonicalSpecId`) |
+| `src/keys.test.ts` | `findKeystrokesFor` (spec-prefix match) + `findKeystrokesForTarget` (inline targets by own id) + `PaletteError` name |
 | `src/points.test.ts` | `isActionPoint` / `isValuedPoint` guards + null-safety |
 | `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation |
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
-| `src/layout.test.ts` | `defaultLayoutFromPoints`, tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners` |
+| `src/layout.test.ts` | `defaultLayoutFromPoints`, tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners`, inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
-| `src/core.test.ts` | `PaletteCore` registry, values, `run` (setters/actions/virtuals/stash), subscriptions, `dispose` |
+| `src/core.test.ts` | `PaletteCore` registry, values, `run` (setters/actions/virtuals/stash), `resolveTargetVirtual` (registered + inline), subscriptions, `dispose` |
+| `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration`, `GapDwell` |
 
 Gotchas:
 

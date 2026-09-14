@@ -19,7 +19,7 @@ import {
 } from './layout.js'
 import type { AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isValuedPoint } from './points.js'
-import { canonicalPointId, parsePointSpec } from './specs.js'
+import { canonicalPointId, isInlineSpec, type PointTarget, parsePointSpec } from './specs.js'
 import { PaletteStateStore } from './store.js'
 import type { PointType, TypeMap } from './type.js'
 import {
@@ -94,6 +94,22 @@ export class PaletteCore {
 
 	getVirtual(id: string): VirtualPoint | undefined {
 		return this.virtuals.get(canonicalPointId(id))
+	}
+
+	/**
+	 * Resolve a point target to its virtual definition: registered virtuals
+	 * by id, or an inline definition carried directly in the spec. Returns
+	 * `undefined` for plain point ids (use `getDefinition` for those).
+	 * Inline definitions are validated against the registry on every call
+	 * (same `assertValidVirtual` rules as `defineVirtual`, minus the
+	 * id-collision check — the lifetime is the spec, not the registry).
+	 */
+	resolveTargetVirtual(target: PointTarget<string, unknown>): VirtualPoint | undefined {
+		if (isInlineSpec(target)) {
+			assertValidVirtual(target, this.definitions, this.allPointIds())
+			return target
+		}
+		return this.virtuals.get(canonicalPointId(target))
 	}
 
 	/**
@@ -243,6 +259,11 @@ export class PaletteCore {
 
 	private allIds(): Set<string> {
 		return new Set([...this.definitions.keys(), ...this.virtuals.keys()])
+	}
+
+	/** Point ids only (excludes virtuals) — for inline-spec validation. */
+	private allPointIds(): Set<string> {
+		return new Set(this.definitions.keys())
 	}
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PaletteError } from './errors.js'
-import { findKeystrokesFor, type KeyBindings } from './keys.js'
+import { findKeystrokesFor, findKeystrokesForTarget, type KeyBindings } from './keys.js'
 
 describe('findKeystrokesFor', () => {
 	const bindings: KeyBindings = {
@@ -27,6 +27,27 @@ describe('findKeystrokesFor', () => {
 
 	it('does not prefix-match point ids', () => {
 		expect(findKeystrokesFor({ 'Ctrl+A': 'saveGame' }, 'save')).toEqual([])
+	})
+})
+
+describe('findKeystrokesForTarget', () => {
+	const bindings: KeyBindings = { 'Ctrl+P': 'pause', 'Ctrl+T': 'theme=dark' }
+
+	it('matches string specs by canonical id', () => {
+		expect(findKeystrokesForTarget(bindings, 'pause')).toEqual(['Ctrl+P'])
+		expect(findKeystrokesForTarget(bindings, 'theme=dark')).toEqual(['Ctrl+T'])
+	})
+
+	it('matches inline virtual definitions by their own id', () => {
+		expect(
+			findKeystrokesForTarget(bindings, {
+				id: 'pause',
+				label: 'Pause',
+				source: 'gameSpeed',
+				kind: 'stash',
+				stashedValue: 0,
+			})
+		).toEqual(['Ctrl+P'])
 	})
 })
 

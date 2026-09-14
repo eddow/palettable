@@ -129,6 +129,34 @@ describe('PaletteLayoutTree construction', () => {
 		const live = tree.getLayout()
 		expect(isDrawerItem(live.borders.top[0]?.[0]?.toolbar[0])).toBe(true)
 	})
+
+	it('round-trips inline virtual definitions through snapshot', () => {
+		const stash = {
+			id: 'pause',
+			label: 'Pause',
+			source: 'gameSpeed',
+			kind: 'stash',
+			stashedValue: 0,
+		} as const
+		const tree = new PaletteLayoutTree({
+			version: 1,
+			borders: {
+				top: [{ space: 1, toolbar: [{ tool: stash }] }],
+				right: [],
+				bottom: [],
+				left: [],
+			},
+		})
+		const snapshot = tree.getSnapshot()
+		expect(snapshot.borders.top[0]?.toolbar[0]?.tool).toEqual({ ...stash })
+		// The snapshot shares no structure with the live tree.
+		;(snapshot.borders.top[0]?.toolbar[0]?.tool as { label: string }).label = 'mutated'
+		expect(tree.getLayout().borders.top[0]?.[0]?.toolbar[0]).toEqual({
+			tool: { ...stash },
+			editor: undefined,
+			config: undefined,
+		})
+	})
 })
 
 describe('moveItem', () => {
