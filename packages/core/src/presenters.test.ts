@@ -100,7 +100,7 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		const disabled = buttonPresenter(
 			{ tool: 'save' },
 			{
-				point: { id: 'save', label: 'Save', type: 'action', run: () => {}, can: false },
+				point: { id: 'save', label: 'Save', type: 'action', run: () => {}, can: () => false },
 				value: undefined,
 			},
 			'save'

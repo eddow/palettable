@@ -1,9 +1,8 @@
 # Mitosis — split `svelte` into `core` + `vanilla` + `vue` + `svelte`
 
-> Status: **active plan — Phases 2–6 landed; remaining in execution order:
-> Phase 7 (SSR render model) → Phase 8 (context) → Phase 9 (optimization,
-> empty) → Phase 10 (vanilla parity) → Phase 11 (vue parity) →
-> Phase 12 (thin svelte).**
+> Status: **active plan — Phases 2–8 landed; remaining in execution order:
+> Phase 9 (optimization, empty) → Phase 10 (vanilla parity) →
+> Phase 11 (vue parity) → Phase 12 (thin svelte).**
 > `packages/core` (headless, DOM-free) and `packages/vanilla` (vanilla-DOM
 > adapter + demo) exist and are green; `packages/svelte` is still
 > self-contained and does **not** import core yet. Order: finish `core`
@@ -342,11 +341,11 @@ packages/svelte/src/lib/
 
 ## Execution order (remaining work)
 
-Phases 2–6 are landed. What is left runs in this order (numbers are
+Phases 2–8 are landed. What is left runs in this order (numbers are
 topological, not sequential — the old 6b/6c labels sort early but execute as 10/11):
 
-1. **Phase 7** (SSR render model) — needs only the landed Phases 3–5 surface.
-2. **Phase 8** (context) — needs Phases 3–5 + 7; lands **before** the parity
+1. **Phase 7** (SSR render model — landed 2026-09-14) — needed only the landed Phases 3–5 surface.
+2. **Phase 8** (context — landed 2026-09-14) — needed Phases 3–5 + 7; landed **before** the parity
    expansion so the vanilla spike can ride the Phase 10 demo work instead of
    requiring a second pass.
 3. **Phase 9** (optimization — empty, scope TBD) — placeholder between
@@ -355,122 +354,50 @@ topological, not sequential — the old 6b/6c labels sort early but execute as 1
    same e2e suite; both stay context-free and SSR-independent.
 5. **Phase 12** (thin svelte) — the only phase that edits `packages/svelte/src`.
 
-## Phase 7 — SSR render model (after Phases 3–5, before Phase 12)
+## Phase 7 — SSR render model (landed 2026-09-14)
 
-> Implements `plans/ssr.md` §4.3–§4.8 on top of the Phases 3–5 surface.
-> Additive only — nothing in `packages/svelte/src` is edited. Gated on Phases
-> 3–5 (needs `initialValues`, descriptors, `resolveEditorVariant`,
-> `axisForRegion`); must land before Phase 12 so the svelte thinning can rely
-> on the same resolver the server uses.
+> Implemented `plans/ssr.md` §4.3–§4.8 on top of the Phases 3–5 surface.
+> Additive only — nothing in `packages/svelte/src` was edited. See
+> `docs/architecture.md` §"Phase 7 status" for the landed surface
+> (`core/render.ts`: `resolveRenderTree` + `snapshotPalette` + `ValueCodec`
+> registry; 14 tests in `render.test.ts`). Remaining below is retired.
 
-- [ ] `resolveRenderTree()` pure resolver in `core/render.ts` (+ `snapshotPalette()`
-      atomic snapshot): input = definitions + virtuals + layout snapshot +
-      values snapshot (taken once — no layout/values tear); per-item output =
-      canonical point id, point descriptor (or `undefined` for pointless),
-      current value / enum-from key / stash pressed-state, single resolved
-      editor variant id, capabilities, keystrokes, drawer children (recursive,
-      depth-bounded). Guarantees: no subscriptions, no timers, no `run()`, no
-      `set()`, no DOM; same input → `JSON.stringify`-identical output.
-- [ ] Configuration pinning (SSR §4.5, preferred option): freeze the four
-      `configuration` numbers into the wire snapshot; the resolver takes them
-      as an argument (defaulting to the singleton for back-compat). Only
-      `trackGapSplit`/`trackGapMinGrow` affect resting geometry; the two `…Ms`
-      timeouts never affect SSR output but are pinned for the hydration check.
-      If no configuration is transmitted, the server renders a skeleton
-      placeholder (SSR §8 — SSR stays optional).
-- [ ] `ValueCodec` registry for custom types (SSR §4.6), or explicit
-      SSR-unsafe-by-default with loud failure. Built-ins use identity;
-      the wire snapshot carries only serialized values. Reference rule: two
-      tools aiming at the same point with the same object value keep the same
-      reference (SSR §8).
-- [ ] UMD/server-bundle hygiene (SSR §4.8): SSR uses `dist/index.mjs` /
-      `dist/index.cjs`, never the UMD bundle (`umd.ts` writes
-      `globalThis.palettable` on import). Consider a build-time guard.
-- [ ] Host-timers policy lock-in (SSR §4.7): the render path (`render.ts` +
-      everything it calls) must not import `globals.ts` or `gap-dwell.ts` —
-      enforce with an import-graph test. `GapDwell` instances are client-only
-      (adapters construct them post-hydration).
-- [ ] Determinism tests (SSR §5): no `Math.random`/`Date.now`/
-      iteration-order dependence (grep test); `Map` order = descriptor array
-      order; registry JSON round-trip preserves fallback order (or sort by
-      `id`); `stableStringify` key-sorting kept; `defaultLayoutFromPoints`
-      order = points order; `SerializedLayout` `version: 1` rejection test.
-- [ ] Render-model tests (SSR §6, all in core, node, no jsdom): Node-only
-      import test (no `setTimeout`/`queueMicrotask` during build + resolve);
-      golden render-model snapshot (byte-identical across runs + JSON
-      round-trip); hydration round-trip (server → serialize → client →
-      identical output); action isolation (no `run` without binding, resolving
-      never calls `run`); config-pinning test; import-graph test.
-- [ ] Docs per repo rule (`AGENTS.md`): migrate SSR decisions to
-      `docs/architecture.md` (new §22); remove completed items here and in
-      `plans/ssr.md` (the `plans/` → `docs/` lifecycle).
-- [ ] Context readiness: `resolveRenderTree()` input shape stays bag-extensible
-      (Context §2.2 param-array `(boundValues, boundBags)` flows through, not
-      a single-store assumption) so Phase 8 plugs bags in without re-shaping.
+- [x] `resolveRenderTree()` pure resolver in `core/render.ts` (+ `snapshotPalette()`
+      atomic snapshot) — landed 2026-09-14 (see architecture §"Phase 7 status").
+- [x] Configuration pinning (SSR §4.5, preferred option) — landed 2026-09-14.
+- [x] `ValueCodec` registry for custom types (SSR §4.6) — landed 2026-09-14 (SSR-unsafe-by-default with loud failure).
+- [x] UMD/server-bundle hygiene (SSR §4.8) — landed: documented (SSR uses `dist/index.mjs` / `dist/index.cjs`, never UMD); build-time guard still open.
+- [x] Host-timers policy lock-in (SSR §4.7) — landed 2026-09-14 (import-graph test).
+- [x] Determinism tests (SSR §5) — landed 2026-09-14.
+- [x] Render-model tests (SSR §6, all in core, node, no jsdom) — landed 2026-09-14 (14 tests).
+- [x] Docs per repo rule (`AGENTS.md`) — landed 2026-09-14 (architecture §"Phase 7 status"; `plans/ssr.md` retirement still open).
+- [x] Context readiness — landed: `RenderInput` carries optional `bags`, threaded through.
 
-## Phase 8 — context-sensitive tools (after Phases 3–5 + 7; before Phase 10 parity and Phase 12)
+## Phase 8 — context-sensitive tools (landed 2026-09-14)
 
-> Implements `plans/context.md` §§1–4 in core. Additive only — nothing in
-> `packages/svelte/src` is edited. Gated on Phases 3–5 + 8 (needs `setTree`,
-> `uses` stub, `PaletteWriteError`, pure builders, `(boundValues, boundBags)`
-> presenter shape, bag-extensible render input); must land before Phase 12 so
-> the svelte thinning subscribes to context channels instead of inventing its
-> own. Vanilla spike first for the adapter proof (Context §2.6); svelte/React
-> parity follows, it is not this phase's gate.
+> Implemented `plans/context.md` §§1–4 step 6 in core. Additive only —
+> nothing in `packages/svelte/src` was edited. See `docs/architecture.md`
+> §"Phase 8 status" for the landed surface (`core/context.ts` +
+> `core/context-display.ts`; 16 tests in `context.test.ts`). Steps 7–8 are
+> adapter work for Phase 10 (vanilla spike rides the demo work); step 9 is
+> the doc update (done: `docs/core-concepts.md` `uses` contract +
+> architecture §"Phase 8 status"). Remaining below is retired.
 
-- [ ] **`core/context.ts`** — `ValuesBag` class (`get` frozen / `set` /
-      `setTree` one-notify / `asObject` / global + per-key `subscribe` /
-      `clearListeners`), same `Map` + `Object.is` + snapshot-iteration +
-      async error re-throw discipline as `PaletteStateStore`. Root bag `''`
-      wraps the store generalized to the `ValuesBag` interface; non-root bags
-      start empty. Tests mirror `store.test.ts` (one-notify file-swap,
-      per-key invalidation, freeze enforcement, `setTree` batching).
-- [ ] **`points.ts`** — `NothingPoint` kind
-      (`{ type: 'nothing', id, label, uses, can?, … }`) + `isNothingPoint`
-      guard (`isValuedPoint` / `isActionPoint` return `false` for it); extend
-      `AnyPoint` union. `uses?: readonly ContextName[]` already stubbed in
-      Phase 3 becomes load-bearing. `can` becomes functional on **all** kinds
-      (`can(...bags) => boolean`, omitted = enabled); static `can: boolean`
-      readers switch to `evaluateCan(id)` here (not earlier). Core semantics:
-      `getValue` → `undefined`, `setValue` throws `PaletteError`, `reset`
-      no-op, excluded from value serialization (binding itself serializes).
-      Pointless tools become pointful 1:1 — `status` / `command-box` /
-      `drawer` each bind a nothing-point whose `uses` names their context.
-- [ ] **Wire bags into `PaletteCore`** — registry `Map<ContextName,
-      ValuesBag>` (root `''` core-owned, hydrated/persisted/reset; context
-      bags host-owned via `setContext`/`removeContext` with the §1.3
-      replace-never-append lifecycle); `getBag` / `resolveBags` (never
-      throws, missing → `undefined`) / `evaluateCan` / `subscribeContext`
-      (`(bagName, changedKeys)`) / `subscribeCan` (flips only, no render
-      storms); `getValue`/`setValue` survive as root-bag sugar; `dispose()`
-      clears root + layout listeners and unsubscribes from context bags
-      (host disposes them). Tests in `core.test.ts`.
-- [ ] **`core/context-display.ts`** — pure resolvers per family with
-      `(boundValues, boundBags)` param-array signature + `missingContext`
-      sentinel (`undefined` slot) + single-point dual-source bold precedence
-      resolver (selection bag when present, else root value). No
-      value-mirroring, no virtual chaining (Context §2.3). Tests mirror
-      `virtual.test.ts` style.
-- [ ] **Adapter spike (vanilla first)** — dirty-set + rAF refresh + one
-      context-bound control proving selection-follows-context with zero value
-      notifications (Context §2.6, §4 step 7). Bridge code (IDE push + write
-      propagation) lives in adapter code, never in core.
-- [ ] **Command-box context pass** — entries carry `uses`, filter at render
-      (Context §2.7, §4 step 8). Nothing-point commands with `uses: []` /
-      `undefined` always present (no bag subscription); unregistered bags →
-      `undefined` slot, entry decides (hidden / disabled / fallback label).
-- [ ] **Docs per repo rule (`AGENTS.md`):** document the `uses` contract
-      (1:1 tool→point, optional bags, functional `can` + `subscribeCan`) in
-      `docs/core-concepts.md`; migrate context decisions to
-      `docs/architecture.md` (new §23); retire `plans/context.md` once landed.
+- [x] **`core/context.ts`** — landed 2026-09-14 (see architecture §"Phase 8 status").
+- [x] **`points.ts`** — `NothingPoint` + `isNothingPoint` + functional `can` — landed 2026-09-14.
+- [x] **Wire bags into `PaletteCore`** — landed 2026-09-14 (registry + `evaluateCan` + `subscribeContext` + `subscribeCan` + `dispose`).
+- [x] **`core/context-display.ts`** — landed 2026-09-14.
+- [ ] **Adapter spike (vanilla first)** — deferred to Phase 10 demo work (dirty-set + rAF + one context-bound control).
+- [ ] **Command-box context pass** — shaped (entries carry `uses`, filter at render); full pass rides Phase 10.
+- [x] **Docs per repo rule (`AGENTS.md`)** — landed 2026-09-14 (`docs/core-concepts.md` `uses` contract + architecture §"Phase 8 status"; `plans/context.md` retirement still open).
 
 ## Phase 9 — optimization (empty placeholder, scope TBD)
 
-> Empty on purpose: a reserved slot between context (Phase 8) and adapters
-> (Phases 10–11) for perf/cleanup work discovered during 7–8. No checklist
-> yet — file it here when it appears, not in the parity phases. Must stay
-> SSR-safe and bag-extensible like every other additive phase; must not
-> block parity (10/11 gate on their own criteria, never on this phase).
+> TODO: description
+> Purpose:
+> - program optimization - both in amount of objects created/deleted, memory, calculation time
+> - hunting down any redundancy
+> - simplification of structures and algorithms
 
 ## Phase 10 — vanilla demo parity (first parity gate)
 
@@ -487,6 +414,10 @@ topological, not sequential — the old 6b/6c labels sort early but execute as 1
 > lands first, so the vanilla spike rides this phase's demo work; context
 > coverage comes from the Phase 8 core tests + vanilla spike, not from e2e.
 > Do not gate parity on context output.
+
+Note: demo will over-come svelte's demo by using contexts. Vue will have parity with the vanilla's demo, and the e2e tests about context will simply fail (or be skipped at first) on svelte until svelte is refactored
+
+Idea on interface (discussable): the createIDE should take a container html element (plus the options, ...) and just add it the classes and the children (tool-stacks) while wrapping its children in the workspace' div
 
 - [ ] Port the svelte demo to `packages/vanilla/demo/` feature-for-feature:
       same points, same initial layout, same editors, same console, same drag

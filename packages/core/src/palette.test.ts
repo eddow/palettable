@@ -87,7 +87,7 @@ describe('PaletteCore initialValues / setMany', () => {
 			'initialValues: unknown point "missing"'
 		)
 		expect(() => new PaletteCore(points(), { initialValues: { save: 1 } })).toThrow(
-			'initialValues: point "save" is an action'
+			'initialValues: point "save" is not valued'
 		)
 	})
 
@@ -101,7 +101,7 @@ describe('PaletteCore initialValues / setMany', () => {
 		expect(changed).toEqual(['theme', 'fontSize'])
 		expect(calls).toEqual(['theme', 'fontSize'])
 		expect(() => core.setMany({ missing: 1 })).toThrow('initialValues: unknown point "missing"')
-		expect(() => core.setMany({ save: 1 })).toThrow('initialValues: point "save" is an action')
+		expect(() => core.setMany({ save: 1 })).toThrow('initialValues: point "save" is not valued')
 	})
 })
 
@@ -181,9 +181,11 @@ describe('PaletteCore.resolveEditablePoint / readActionCan', () => {
 		)
 	})
 
-	it('readActionCan reads the static flag without running', () => {
+	it('readActionCan evaluates functional can without running', () => {
 		const run = vi.fn()
-		const core = new PaletteCore([{ id: 'save', label: 'Save', type: 'action', run, can: false }])
+		const core = new PaletteCore([
+			{ id: 'save', label: 'Save', type: 'action', run, can: () => false },
+		])
 		expect(core.readActionCan('save')).toBe(false)
 		expect(run).not.toHaveBeenCalled()
 		expect(() => core.readActionCan('missing')).toThrow('Unknown palette point "missing"')

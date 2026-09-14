@@ -23,17 +23,25 @@
  * (rendering a stash button needs only current-vs-stashed pressed state).
  */
 import { PaletteError } from './errors.js'
-import type { ActionPoint, AnyPoint, AnyValuedPoint } from './points.js'
-import { isActionPoint, isValuedPoint } from './points.js'
+import type { ActionPoint, AnyPoint, AnyValuedPoint, NothingPoint } from './points.js'
+import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 
 /** JSON-safe action descriptor: everything except `run` (`id` + `label`/`can`/metadata). */
-export type ServerActionDescriptor = Omit<ActionPoint, 'run'>
+export type ServerActionDescriptor = Omit<ActionPoint, 'run' | 'can'> & {
+	readonly can?: boolean
+}
 
-/** JSON-safe valued descriptor: valued points are already plain data. */
-export type ServerValuedDescriptor = AnyValuedPoint
+/** JSON-safe valued descriptor: valued points minus functional `can`. */
+export type ServerValuedDescriptor = Omit<AnyValuedPoint, 'can'>
 
-/** JSON-safe point descriptor (no `run` closure). */
-export type ServerPointDescriptor = ServerActionDescriptor | ServerValuedDescriptor
+/** JSON-safe nothing descriptor: nothing-points minus functional `can`. */
+export type ServerNothingDescriptor = Omit<NothingPoint, 'can'>
+
+/** JSON-safe point descriptor (no `run` closure, no functional `can`). */
+export type ServerPointDescriptor =
+	| ServerActionDescriptor
+	| ServerValuedDescriptor
+	| ServerNothingDescriptor
 
 /** Client-injected `run` implementations, keyed by action id. */
 export type ActionRunners = Record<string, ActionPoint['run']>
@@ -45,11 +53,20 @@ export type ActionRunners = Record<string, ActionPoint['run']>
  */
 export function toServerDescriptor(points: readonly AnyPoint[]): ServerPointDescriptor[] {
 	return points.map((point) => {
+		const record = point as unknown as Record<string, unknown>
 		if (isActionPoint(point)) {
-			const { run: _run, ...descriptor } = point
-			return { ...descriptor }
+			const { run: _run, can: _can, ...descriptor } = record
+			return { ...descriptor } as ServerActionDescriptor
 		}
-		return { ...point }
+		if (isNothingPoint(point)) {
+			const { can: _can, ...descriptor } = record
+			return { ...descriptor } as ServerNothingDescriptor
+		}
+		if (isValuedPoint(point)) {
+			const { can: _can, ...descriptor } = record
+			return { ...descriptor } as ServerValuedDescriptor
+		}
+		return { ...record } as ServerPointDescriptor
 	})
 }
 
@@ -74,13 +91,20 @@ export function fromServerDescriptor(
 			const run = runners[descriptor.id]
 			if (typeof run !== 'function')
 				throw new PaletteError(`fromServerDescriptor: missing runner for action "${descriptor.id}"`)
-			points.push({ ...(descriptor as ServerActionDescriptor), run })
+			const { can: _wireCan, ...rest } = descriptor as ServerActionDescriptor &
+				Record<string, unknown>
+			points.push({ ...rest, run } as unknown as AnyPoint)
 			continue
 		}
-		if (!isValuedPoint(descriptor as AnyPoint))
+		if (!isValuedPoint(descriptor as AnyPoint)) {
+			if ((descriptor as { type?: unknown }).type === 'nothing') {
+				points.push({ ...(descriptor as ServerNothingDescriptor) })
+				continue
+			}
 			throw new PaletteError(
 				`fromServerDescriptor: valued point "${descriptor.id}" is missing defaultValue`
 			)
+		}
 		points.push({ ...(descriptor as ServerValuedDescriptor) })
 	}
 	for (const id of Object.keys(runners)) {
@@ -108,8 +132,8 @@ export function validateInitialValues(
 	for (const [id, value] of Object.entries(values)) {
 		const definition = definitions.get(id)
 		if (definition === undefined) throw new PaletteError(`initialValues: unknown point "${id}"`)
-		if (isActionPoint(definition))
-			throw new PaletteError(`initialValues: point "${id}" is an action`)
+		if (isActionPoint(definition) || isNothingPoint(definition))
+			throw new PaletteError(`initialValues: point "${id}" is not valued`)
 		entries.push([id, value] as const)
 	}
 	return entries

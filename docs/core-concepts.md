@@ -13,13 +13,41 @@
   `PaletteToolbarItem` (`{ tool: spec, editor?, config? }`) resolved through
   the registry to a presenter + head component, placed in a toolbar (layout).
   Buttons, toggles, selects, sliders, steppers are tools. `status`,
-  `command-box`, and `drawer` are **pointless tools**: they bind no value to
-  modify and are not controlled by the palette — a status only displays, a
-  command-box only runs commands, a drawer only holds other tools.
+  `command-box`, and `drawer` bind **nothing-points** (1:1 — one tool, one
+  nothing-point whose `uses` names their context): a status reads
+  `bag?.get('fileName')` to render and never writes; a command-box lists
+  commands filtered by `uses` at render time; a drawer renders a nested
+  toolbar with context flowing down to child tools.
 - **editor** — the configuration panel that comes with a tool
   (`PaletteEditorSpec.configure`, e.g. `BaseConfigurator`): label/icon/hint,
   variant chooser (`editorChoices`), tone, delete. Rendered in the console
   *Details* panel, not on the toolbar.
+
+### The `uses` contract (context-sensitive tools)
+
+A tool refers to **one and only one point**; the point declares **what it
+operates on** via `uses?: readonly ContextName[]` (optional bags — `undefined`
+= root bag only, as before). Each name resolves to `ValuesBag | undefined`
+(`undefined` = bag not registered — render falls back to disabled +
+placeholder, never throws). `''` may appear explicitly to receive the root
+bag as an argument (e.g. `uses: ['', 'activeFile']` → `run(rootBag,
+activeFileBag)`); valued-point value access always stays on the root bag via
+`core.values.get/set` regardless of `uses` — `uses` only controls which bags
+are passed to `run` / `can` / display resolvers, in `uses` order.
+
+- `run(...bags)` receives the used bags writable; the host bridge (adapter
+  code, never core) propagates writes to the IDE. The existing
+  `PaletteCore.run(spec)` survives as root-bag sugar.
+- `can(...bags)` is functional on **all** point kinds (omitted = enabled);
+  adapters read it via `core.evaluateCan(id)` and subscribe to flips via
+  `core.subscribeCan` (flips only — no render storms). Context-bag changes
+  reach adapters via `core.subscribeContext((bagName, changedKeys))`.
+- Bags: the root bag `''` is core-owned (`core.values` itself — hydrated,
+  reset, persisted); context bags are host-owned via
+  `core.setContext`/`removeContext` (replace-never-append) and start empty.
+  `ValuesBag` mirrors the store discipline (`Map` + `Object.is` +
+  snapshot-iteration + async re-throw) with frozen `get`, one-notify
+  `setTree`, and `lock`/`unlock` (→ `PaletteWriteError`).
 
 Code-name map (kept for compatibility): point → `PaletteTool*` types +
 `PaletteToolSpec` strings; tool → `PaletteToolbarItem` +

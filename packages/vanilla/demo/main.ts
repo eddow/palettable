@@ -7,7 +7,7 @@ const adapter = new VanillaAdapter([
 		id: 'saveGame',
 		label: 'Save game',
 		type: 'action',
-		can: true,
+		can: () => true,
 		run() {},
 	},
 ])

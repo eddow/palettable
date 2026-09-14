@@ -35,6 +35,8 @@ export interface DefaultTypeMap {
 	enum: string
 	/** Action points hold no value. */
 	action: void
+	/** Nothing-points hold no value (context + enablement only). */
+	nothing: void
 }
 
 /** Extension point — augment, never rewrite. */
@@ -50,6 +52,7 @@ export interface DefaultTypeConstraints {
 	string: { readonly minLength?: number; readonly maxLength?: number; readonly pattern?: string }
 	enum: { readonly options: readonly EnumOption[] }
 	action: Record<string, never>
+	nothing: Record<string, never>
 }
 
 /** Extension point for custom-type constraints. */

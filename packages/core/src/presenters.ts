@@ -147,8 +147,12 @@ export type BoundDisplay = {
 	readonly point: AnyPoint | undefined
 	/** Current value (root-bag value, enum-from key, or stash pressed-state — resolved by the adapter). */
 	readonly value: unknown
-	/** Context bags in `uses` order (`undefined` = unregistered). Phase 9 makes these load-bearing. */
-	readonly bags?: readonly unknown[]
+	/**
+	 * Context bags in `uses` order (`undefined` = unregistered).
+	 * Phase 8 load-bearing: `buttonPresenter` evaluates functional `can`
+	 * against these when no explicit `can` override is passed.
+	 */
+	readonly bags?: readonly (import('./context.js').ValuesBag | undefined)[]
 }
 
 // ── Button (action) ─────────────────────────────────────────────────────────
@@ -167,17 +171,21 @@ export type ButtonPresenter = {
 export function buttonPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
-	spec: string
+	spec: string,
+	can?: boolean
 ): ButtonPresenter {
 	const meta = headMeta(item)
-	const can =
-		bound.point !== undefined && isActionPoint(bound.point) ? (bound.point.can ?? true) : true
+	const resolved =
+		can ??
+		(bound.point !== undefined && isActionPoint(bound.point)
+			? (bound.point.can?.(...(bound.bags ?? [])) ?? true)
+			: true)
 	return {
 		label: meta.label,
 		icon: meta.icon,
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
-		can,
+		can: resolved,
 		run: spec,
 	}
 }

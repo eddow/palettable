@@ -557,7 +557,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `index.ts` | barrel — re-exports every module below |
 | `identifiers.ts` | `IconToken`, `Keystroke`, `Unsubscribe`, listener types |
 | `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
-| `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `isActionPoint` / `isValuedPoint`; `PointBase.uses` stub (Phase 3 readiness, load-bearing in Phase 9) |
+| `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `NothingPoint` (`type: 'nothing'` — context + enablement only; `isNothingPoint` guard), `isActionPoint` / `isValuedPoint` (both `false` for nothing-points); `PointBase.uses` (optional bags, load-bearing in Phase 8) + functional `can(...bags)` on all kinds (omitted = enabled) |
 | `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
 | `store.ts` | `PaletteStateStore` + `setTree` batching (Phase 3: all writes land before any listener runs, returns changed keys) |
 | `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
@@ -566,18 +566,82 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
 | `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
 | `virtual.ts` | `enum-from` / `stash` derived points |
-| `errors.ts` | `PaletteError` + `PaletteWriteError` (Phase 3 stub for Phase 9 bag writes; adapters catch for UI feedback) |
+| `errors.ts` | `PaletteError` + `PaletteWriteError` (thrown by locked-bag `set`/`setTree`; adapters catch for UI feedback) |
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan`, `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll` |
-| `palette.ts` | `ServerPointDescriptor` + `to/fromServerDescriptor` (action rebuild by name via `runners`), `validateInitialValues`, `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll`, context registry (`setContext`/`removeContext` replace-never-append, `getBag`/`resolveBags` never-throw, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners) |
+| `palette.ts` | `ServerPointDescriptor` (action/valued/nothing — no `run`, no functional `can`) + `to/fromServerDescriptor` (action rebuild by name via `runners`; nothing-points round-trip), `validateInitialValues` (rejects actions + nothing-points), `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
 | `command-box.ts` | `paletteCommandEntries` / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
 | `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
-| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `(boundValues, boundBags)`-ready, bags accepted + ignored) |
+| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
+| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`) |
+| `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`''` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
+| `context-display.ts` (+ `context-display-types.ts`) | pure `(boundValues, boundBags)` resolvers: `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (Phase 8; no mirroring, no virtual chaining) |
 | `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
 | `theme/head-default.css` | dark base + light override (Phase 6, verbatim from svelte; stay in sync per `docs/theming.md`) |
 
-### Phase 2 status (landed 2026-09-14)
+### Phase 7 status (SSR render model — landed 2026-09-14)
 
+`core/render.ts` (+ `render.test.ts`, 14 tests) implements `plans/ssr.md`
+§4.3–§4.8 on the Phases 3–5 surface:
+
+- `resolveRenderTree()` — pure, synchronous, allocation-explicit resolver:
+  definitions + virtuals + layout + values → `ResolvedPalette` (canonical
+  point id, descriptor without `run`/`can` closures, value / enum-from key /
+  stash pressed-state, single editor variant id + capabilities, keystrokes,
+  drawer children recursive depth-bounded by `RENDER_MAX_DEPTH = 8`).
+  Guarantees: no subscriptions, no timers, no `run()`, no `set()`, no DOM;
+  same input → `JSON.stringify`-identical output (golden test).
+- `snapshotPalette()` — atomic layout + values + virtuals + pinned
+  `configuration` (no layout/values tear; values by reference like
+  `asObject()` — the adapter clones before crossing the wire).
+- Configuration pinning (SSR §4.5 option 1): the resolver takes
+  `configuration` as an argument, defaulting to the singleton for
+  back-compat; pinned input ignores later singleton mutations (test).
+- `ValueCodec` registry (SSR §4.6): built-ins use identity; custom types
+  are SSR-unsafe-by-default (loud `PaletteError`, never silent mismatch).
+- Hygiene (SSR §4.7–§4.8): the render path never imports `globals.ts`,
+  `gap-dwell.ts`, or `umd.ts` (import-graph test reads `render.ts` source);
+  determinism (no `Math.random`/`Date.now`, `version: 1` rejection) tested.
+- Render-model tests (SSR §6, node, no jsdom): Node-only import (no
+  `setTimeout`/`queueMicrotask` during build + resolve), golden snapshot,
+  hydration round-trip (server → serialize → client → identical output),
+  action isolation (throwing `run` never called, descriptor has no `run`),
+  config-pinning, import-graph, codecs.
+- Virtuals resolve against a family-point stand-in (`enum` for enum-from,
+  `action` for stash) so `resolveEditorVariant` agrees server/client.
+
+### Phase 8 status (context — landed 2026-09-14)
+
+`core/context.ts` + `core/context-display.ts` (+ `context.test.ts`, 16 tests)
+implement `plans/context.md` §§1–4 step 6 in core (steps 7–8 are adapter work
+for Phase 10; step 9 is this doc update):
+
+- `ValuesBag` — same discipline as the store, plus frozen `get`,
+  `(changedKeys[])` global notify, `lock`/`unlock` (→ `PaletteWriteError`).
+- `NothingPoint` (`type: 'nothing'`) + `isNothingPoint`; `isValuedPoint` /
+  `isActionPoint` return `false` for it. `AnyPoint` is the three-kind union.
+- Functional `can(...bags)` on **all** kinds (omitted = enabled);
+  `PaletteCore.evaluateCan` + `readActionCan` (now a functional read) +
+  `buttonPresenter` (evaluates against `BoundDisplay.bags` unless an explicit
+  `can` override is passed). Static `can: boolean` readers switch to
+  `evaluateCan` — the wire descriptors strip `can` (rebuilt client-side).
+- Registry: `setContext`/`removeContext` (replace-never-append, §1.3),
+  `getBag`/`resolveBags` (never throw, missing → `undefined`),
+  `subscribeContext` (`(bagName, changedKeys)`), `subscribeCan` (flips only).
+  `getBag('')` is the `values` store (root core-owned; context bags
+  host-owned). `dispose()` clears context forwards + listeners.
+- `context-display.ts` — `dualSourceValue` (selection-wins precedence),
+  `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw),
+  `missingContext` sentinel. No mirroring, no virtual chaining.
+- `validateInitialValues` rejects nothing-points (like actions);
+  `fromServerDescriptor` round-trips nothing-points; nothing-point bindings
+  serialize, values never do.
+- Command-box context pass (step 8) is already shaped: entries carry `uses`,
+  filter at render; nothing-point commands with `uses: []`/`undefined` are
+  always present. The vanilla spike (step 7: dirty-set + rAF + one
+  context-bound control) rides the Phase 10 demo work.
+
+### Phase 2 status (landed 2026-09-14)
 `configuration.ts`, `gap-dwell.ts`, and the pure track-space math in
 `layout.svelte.ts` now live in core (`configuration.ts`, `gap-dwell.ts`,
 `layout.ts` additions). Notes:

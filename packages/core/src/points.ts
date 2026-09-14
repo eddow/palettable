@@ -18,21 +18,31 @@ export type PointBase<K extends PointType = PointType> = {
 	readonly keywords?: readonly string[]
 	readonly icon?: IconToken
 	/**
-	 * Optional context bags this point operates on (Phase 9 readiness stub).
-	 * `undefined` = root bag only, as today. No behaviour change this phase —
-	 * `run` / `can` keep today's signatures; Phase 9 makes `uses` load-bearing
-	 * (`ValuesBag` registry, `NothingPoint`, functional `can`).
+	 * Optional context bags this point operates on (Phase 8 load-bearing).
+	 * Each name resolves to `ValuesBag | undefined` (`undefined` = bag not
+	 * registered). `undefined` uses = root bag only, as before. `''` may
+	 * appear explicitly to receive the root bag as an argument.
 	 */
 	readonly uses?: readonly string[]
+	/**
+	 * Functional enablement: called with the resolved bags in `uses` order
+	 * (each `ValuesBag | undefined`). Omitted = always enabled. Must be
+	 * pure and cheap — it runs on every context notify for points using
+	 * that bag, plus on demand via `PaletteCore.evaluateCan`.
+	 */
+	readonly can?: (...bags: readonly (import('./context.js').ValuesBag | undefined)[]) => boolean
 }
 
 /** Runnable point: an imperative action (e.g. `saveGame`, `console`). */
 export type ActionPoint = PointBase<'action'> & {
 	readonly defaultValue?: undefined
-	/** Execute the action. May return a promise; core never awaits it. */
-	run(): void | Promise<void>
-	/** Static enablement flag. Reactive enablement lives in adapters. */
-	readonly can?: boolean
+	/**
+	 * Execute the action. May return a promise; core never awaits it.
+	 * Receives the used bags in `uses` order (each `ValuesBag | undefined`)
+	 * — the context-aware path; the root-bag `PaletteCore.run(spec)` sugar
+	 * calls it with no arguments.
+	 */
+	run(...bags: readonly (import('./context.js').ValuesBag | undefined)[]): void | Promise<void>
 }
 
 /** Valued point: runtime state with a restorable default. */
@@ -56,8 +66,22 @@ export type EnumPoint<T extends string = string> = Omit<
 
 /** Any valued point (excludes `'action'` so `defaultValue` is always present). */
 export type AnyValuedPoint = ValuedPoint<Exclude<PointType, 'action'>>
+
+/**
+ * Nothing-point: context plus optional enablement, no value of its own.
+ * How pointless tools become pointful 1:1 — `status`, `command-box`, and
+ * `drawer` each bind a nothing-point whose `uses` names their context.
+ * Core semantics: `values.get` → `undefined`, `values.set` throws
+ * `PaletteError`, `reset` is a no-op, excluded from value serialization
+ * (only the binding itself serializes).
+ */
+export type NothingPoint = PointBase<'nothing'> & {
+	readonly defaultValue?: undefined
+	readonly constraints?: undefined
+}
+
 /** Any point the core accepts. */
-export type AnyPoint = ActionPoint | AnyValuedPoint
+export type AnyPoint = ActionPoint | AnyValuedPoint | NothingPoint
 
 /** Points map — heterogeneous by design (`Record<string, AnyPoint>`). */
 export type PointsMap = Record<string, AnyPoint>
@@ -68,5 +92,12 @@ export function isActionPoint(point: AnyPoint | null | undefined): point is Acti
 }
 
 export function isValuedPoint(point: AnyPoint | null | undefined): point is AnyValuedPoint {
-	return point != null && point.type !== 'action' && 'defaultValue' in point
+	return (
+		point != null && point.type !== 'action' && point.type !== 'nothing' && 'defaultValue' in point
+	)
+}
+
+/** Narrow guard for nothing-points (`status` / `command-box` / `drawer` bindings). */
+export function isNothingPoint(point: AnyPoint | null | undefined): point is NothingPoint {
+	return point != null && point.type === 'nothing'
 }

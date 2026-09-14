@@ -6,6 +6,7 @@
  * all pointer math, DOM and components live outside this class.
  */
 
+import type { ContextName, ValuesBag } from './context.js'
 import type { EditorDefaults, EditorRegistry } from './editors.js'
 import { PaletteError } from './errors.js'
 import type { Unsubscribe } from './identifiers.js'
@@ -48,6 +49,17 @@ export type PaletteCoreOptions = {
 	 */
 	readonly initialValues?: Readonly<Record<string, unknown>>
 }
+
+/**
+ * Listener for context-bag changes: the bag name + changed keys.
+ */
+export type ContextListener = (bagName: ContextName, changed: readonly string[]) => void
+
+/**
+ * Listener for enablement flips: the point id + new `can` value.
+ * Fired only on flips (no render storms).
+ */
+export type CanListener = (pointId: string, can: boolean) => void
 
 /**
  * Main entry point: point registry + value store + layout tree.
@@ -143,7 +155,133 @@ export class PaletteCore {
 		const def = this.definitions.get(pointId)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isActionPoint(def)) throw new PaletteError(`Palette point "${id}" is not an action`)
-		return def.can
+		return this.evaluateCan(pointId)
+	}
+
+	// ── Context bags (Phase 8) ──────────────────────────────────────────
+	// Root bag `''` is core-owned (the `values` store itself); context bags
+	// are host-owned via `setContext` / `removeContext` (replace-never-append).
+
+	private bags = new Map<ContextName, ValuesBag>()
+	private bagForwards = new Map<ContextName, Unsubscribe>()
+	private contextListeners = new Set<ContextListener>()
+	private canListeners = new Set<CanListener>()
+	private canCache = new Map<string, boolean>()
+
+	/**
+	 * Register a host-owned context bag. Replaces any bag already under
+	 * this name (old bag's internal subscription is cleared). Tools whose
+	 * point `uses` include `name` re-derive against the new bag
+	 * (re-resolve bags, re-evaluate `can`, re-run display resolvers).
+	 */
+	setContext(name: ContextName, bag: ValuesBag): void {
+		const oldForward = this.bagForwards.get(name)
+		oldForward?.()
+		this.bagForwards.delete(name)
+		this.bags.set(name, bag)
+		const forward = bag.subscribe((changed) => this.onBagChanged(name, changed))
+		this.bagForwards.set(name, forward)
+		this.refreshCanForBag(name)
+		this.emitContext(name, [])
+	}
+
+	/**
+	 * Remove a context bag. Tools whose point `uses` include `name`
+	 * re-derive with `undefined` in that slot (disabled + placeholder
+	 * unless their `can` / resolvers define otherwise).
+	 */
+	removeContext(name: ContextName): void {
+		const forward = this.bagForwards.get(name)
+		forward?.()
+		this.bagForwards.delete(name)
+		const bag = this.bags.get(name)
+		bag?.clearListeners()
+		this.bags.delete(name)
+		this.refreshCanForBag(name)
+		this.emitContext(name, [])
+	}
+
+	/** Get a bag by name (root `''` = `values` store). Unknown names → `undefined`. */
+	getBag(name: ContextName): ValuesBag | undefined {
+		if (name === '') return this.values as unknown as ValuesBag
+		return this.bags.get(name)
+	}
+
+	/**
+	 * Resolve used bags for a point's `uses` in order. Never throws:
+	 * missing bags resolve to `undefined`; root `''` always resolves.
+	 */
+	resolveBags(uses: readonly ContextName[] | undefined): (ValuesBag | undefined)[] {
+		return (uses ?? []).map((name) => this.getBag(name))
+	}
+
+	/**
+	 * Evaluate a point's enablement with currently-registered bags
+	 * (missing → `undefined` slot). Omitted `can` = enabled. Throws
+	 * `PaletteError` on unknown point ids.
+	 */
+	evaluateCan(pointId: string): boolean {
+		const id = canonicalPointId(pointId)
+		const def = this.definitions.get(id)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (def.can === undefined) return true
+		return def.can(...this.resolveBags(def.uses))
+	}
+
+	/** Subscribe to context-bag changes (global, across all bags). */
+	subscribeContext(listener: ContextListener): Unsubscribe {
+		this.contextListeners.add(listener)
+		return () => {
+			this.contextListeners.delete(listener)
+		}
+	}
+
+	/**
+	 * Subscribe to enablement flips. Fired only when a context-bag change
+	 * flips `evaluateCan(pointId)` for an observed point (no render storms).
+	 */
+	subscribeCan(listener: CanListener): Unsubscribe {
+		this.canListeners.add(listener)
+		return () => {
+			this.canListeners.delete(listener)
+		}
+	}
+
+	private onBagChanged(name: ContextName, changed: readonly string[]): void {
+		this.emitContext(name, changed)
+		this.refreshCanForBag(name)
+	}
+
+	private emitContext(name: ContextName, changed: readonly string[]): void {
+		for (const listener of [...this.contextListeners]) {
+			try {
+				listener(name, changed)
+			} catch {
+				// Listener errors must not break the forward chain.
+			}
+		}
+	}
+
+	private refreshCanForBag(name: ContextName): void {
+		for (const [id, def] of this.definitions) {
+			if (!(def.uses ?? []).includes(name)) continue
+			const next = this.evaluateCan(id)
+			const previous = this.canCache.get(id)
+			if (previous === undefined) {
+				this.canCache.set(id, next)
+				continue
+			}
+			if (next !== previous) {
+				this.canCache.set(id, next)
+				for (const listener of [...this.canListeners]) {
+					try {
+						listener(id, next)
+					} catch {
+						// Listener errors must not break the flip chain.
+					}
+				}
+			}
+		}
 	}
 
 	/**
@@ -292,6 +430,13 @@ export class PaletteCore {
 	dispose(): void {
 		this.values.clearListeners()
 		this.layout.clearListeners()
+		for (const forward of this.bagForwards.values()) forward?.()
+		this.bagForwards.clear()
+		for (const bag of this.bags.values()) bag.clearListeners()
+		this.bags.clear()
+		this.contextListeners.clear()
+		this.canListeners.clear()
+		this.canCache.clear()
 	}
 
 	private allIds(): Set<string> {

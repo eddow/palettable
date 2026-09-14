@@ -6,10 +6,10 @@
  */
 import type { SurfaceContext } from './layout.js'
 import type { AnyPoint } from './points.js'
-import { isActionPoint } from './points.js'
+import { isActionPoint, isNothingPoint } from './points.js'
 import type { PointType } from './type.js'
 
-/** Point family: valued-type id, `'action'`, or `'item'` (pointless variants). */
+/** Point family: valued-type id, `'action'`, or `'item'` (pointless + nothing-point variants). */
 export type PointFamily = PointType | 'item'
 
 /** Capability descriptor for one editor variant (e.g. `'toggle'`, `'select'`). */
@@ -36,9 +36,11 @@ export type EditorRegistry = Partial<Record<PointFamily, Record<string, EditorCa
 /** Default variant per family, used when an item omits `editor`. */
 export type EditorDefaults = Partial<Record<PointFamily, string>>
 
-/** Family of a point (`'action'` for actions, else the type id). */
+/** Family of a point (`'action'` for actions, `'item'` for nothing-points, else the type id). */
 export function familyOfPoint(point: AnyPoint): PointFamily {
-	return isActionPoint(point) ? 'action' : point.type
+	if (isActionPoint(point)) return 'action'
+	if (isNothingPoint(point)) return 'item'
+	return point.type
 }
 
 /** Compute the selectable variants for a point on a surface (headless). */
