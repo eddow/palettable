@@ -1,8 +1,48 @@
 /**
- * `@palettable/core` — headless palette primitives (vanilla TS, framework-agnostic).
+ * `@palettable/core` — headless palette primitives (vanilla TS, zero DOM).
  *
- * Framework adapters (e.g. `@palettable/svelte`) consume this package.
- * Vanilla modules migrate here from `packages/svelte/src/lib/palette/*.ts`;
- * Svelte runes (`.svelte.ts`) and components (`.svelte`) stay in the adapter.
+ * Every symbol lives in its own module (see the re-exports below).
+ * `index.ts` is the public barrel, so `import ... from '@palettable/core'`
+ * keeps working unchanged, including `TypeMap`/`TypeConstraints` declaration
+ * merging.
+ *
+ * Architectural rules:
+ * - No `HTMLElement`, no framework components, no browser APIs (`KeyboardEvent`,
+ *   `document`, …). Adapters (Svelte / Vue / vanilla-DOM) own all rendering and
+ *   translate their events into the abstract strings/ids below.
+ * - The core manages semantic metadata (points), runtime values (store) and
+ *   pure-data layout (borders / tracks / toolbars / items). Drag math, hit
+ *   testing and pointer coordinates live in adapters; adapters commit results
+ *   through structural methods (`moveItem`, `moveToolbar`, …).
+ * - Icons are opaque string tokens. Resolution to a component / glyph is an
+ *   adapter concern.
+ *
+ * Vocabulary (kept across adapters):
+ * - **point** = a data definition: either runnable (an action) or valued (a
+ *   value with a restorable default). Points carry no layout.
+ * - **virtual point** = an end-user-defined derived point over a source point:
+ *   `enum-from` (present any value as an enum / enum subset) or `stash`
+ *   (push-aside / pop-back toggle action).
+ * - **tool** = a toolbar-bound control (`ToolbarItem`: a point spec + an
+ *   editor-variant id + an opaque config payload). Buttons, toggles, selects,
+ *   sliders, steppers are tools.
+ * - **editor** = the *variant id* of a tool (`'button'`, `'toggle'`, …) plus
+ *   its configuration panel. The core only manipulates variant ids and
+ *   capability descriptors; adapters map ids to components.
+ * - **pointless tools** = items binding no point: `status`, `command-box` and
+ *   `drawer`. A drawer carries a nested `toolbar` (perpendicular to its
+ *   parent — enforced by adapters, opaque to the core).
  */
-export const CORE_PLACEHOLDER = 'core' as const
+
+export * from './core.js'
+export * from './editors.js'
+export * from './errors.js'
+export * from './globals.js'
+export * from './identifiers.js'
+export * from './keys.js'
+export * from './layout.js'
+export * from './points.js'
+export * from './specs.js'
+export * from './store.js'
+export * from './type.js'
+export * from './virtual.js'

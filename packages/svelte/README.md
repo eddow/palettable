@@ -1,6 +1,6 @@
-# svelette
+# @palettable/svelte
 
-Svelte 5 (runes) port of the `@sursaut/ui/palette` headless palette subsystem — state,
+Svelte 5 (runes) adapter for `@palettable/core` — port of the `@sursaut/ui/palette` headless palette subsystem — state,
 a11y semantics, tool resolution, editing, drag/drop, **and HTML structure**. The palette
 core owns logic + functioning; "heads" are presentation-only components (markup + CSS
 bound to headless presenters) placed in a page.
@@ -15,9 +15,9 @@ bound to headless presenters) placed in a page.
 
 ```sh
 pnpm install
-pnpm --filter svelette dev    # Vite dev server
-pnpm --filter svelette check  # svelte-kit sync + svelte-check
-pnpm --filter svelette test   # Vitest (jsdom, browser condition)
+pnpm --filter @palettable/svelte dev    # Vite dev server
+pnpm --filter @palettable/svelte check  # svelte-kit sync + svelte-check
+pnpm --filter @palettable/svelte test   # Vitest (jsdom, browser condition)
 # from the repo root:
 # pnpm test:e2e   # Playwright (builds + previews on :4173)
 # pnpm lint       # Biome check

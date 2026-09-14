@@ -33,7 +33,7 @@
 </script>
 
 <div
-	class="svelette-palette-drawer__overlay"
+	class="palettable-drawer__overlay"
 	role="presentation"
 	onclick={() => onClose()}
 	onkeydown={(event) => {
@@ -41,7 +41,7 @@
 	}}
 >
 	<div
-		class={['svelette-palette-drawer__popup', `is-${direction}`]}
+		class={['palettable-drawer__popup', `is-${direction}`]}
 		data-placement={placement}
 		style:left={`${pos.left}px`}
 		style:top={`${pos.top}px`}

@@ -180,7 +180,7 @@ fallback (wrong axis → first compact fallback).
   chrome, always required) + your head theme (default:
   `$lib/head/styles/head-default.css`). Never inject CSS at runtime; keep
   selectors global and specific (`.palette-ide.editing .toolbar…`), never bare.
-- Drawer popup shell classes (`.svelette-palette-drawer__*`) live in core
+- Drawer popup shell classes (`.palettable-drawer__*`) live in core
   `palette.css`; theme them from your head stylesheet.
 - Light theme: if you add a dark base rule, add its
   `.palette-default-theme-light` (or your own theme class) counterpart in the

@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import nodeResolve from '@rollup/plugin-node-resolve'
 import typescript from '@rollup/plugin-typescript'
 
-const ts = (overrides = {}) => typescript({ tsconfig: './tsconfig.json', ...overrides })
+const ts = (overrides = {}) => typescript({ tsconfig: './tsconfig.build.json', ...overrides })
 
 let cleaned = false
 /** Rimraf `dist` once before bundling (first `buildStart` wins). */
@@ -25,17 +25,5 @@ export default [
 			{ file: 'dist/index.cjs', format: 'cjs', sourcemap: true, exports: 'named' },
 		],
 		plugins: [cleanDist(), nodeResolve(), ts()],
-	},
-	{
-		input: 'src/umd.ts',
-		output: [
-			{
-				file: 'dist/index.js',
-				format: 'umd',
-				name: 'palettable',
-				sourcemap: true,
-			},
-		],
-		plugins: [nodeResolve(), ts({ tsconfig: './tsconfig.umd.json' })],
 	},
 ]

@@ -1,5 +1,5 @@
 /**
- * Headless palette type system for svelette.
+ * Headless palette type system for palettable.
  *
  * Vocabulary (see `docs/core-concepts.md`): **point** = the data definition of
  * what is controlled by the palette, one entry of `PaletteConfig.tools` (no

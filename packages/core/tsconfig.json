@@ -9,12 +9,11 @@
 		"forceConsistentCasingInFileNames": true,
 		"esModuleInterop": true,
 		"resolveJsonModule": true,
-		"declaration": true,
-		"declarationMap": true,
-		"sourceMap": true,
-		"outDir": "./dist",
-		"rootDir": "./src"
+		"noEmit": true,
+		"paths": {
+			"@palettable/core": ["./src/index.ts"]
+		}
 	},
-	"include": ["src/**/*.ts"],
-	"exclude": ["src/umd.ts"]
+	"include": ["src/**/*.ts", "vitest.config.ts"],
+	"exclude": ["dist", "node_modules"]
 }

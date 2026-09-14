@@ -9,6 +9,8 @@ export default defineConfig({
 		alias: {
 			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
 			$demo: fileURLToPath(new URL('./src/demo', import.meta.url)),
+			// Mirrors `kit.alias`: the barrel resolves to core source, not `dist`.
+			'@palettable/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),
 		},
 	},
 	test: {

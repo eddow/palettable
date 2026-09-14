@@ -1,5 +1,5 @@
 /**
- * Headless palette runtime for svelette.
+ * Headless palette runtime for palettable.
  *
  * Ported from `@sursaut/ui/palette` (`ui/src/palette/palette.ts`), with the
  * Sursaut-specific runtime replaced by Svelte 5 equivalents:

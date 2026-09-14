@@ -1,5 +1,5 @@
 /**
- * Headless drawer editor factory for svelette.
+ * Headless drawer editor factory for palettable.
  *
  * Ported from `@sursaut/ui/palette` (`ui/src/palette/drawer-editor.tsx`), with the
  * Sursaut-specific runtime replaced by Svelte 5 equivalents:
@@ -15,7 +15,7 @@
  *   `region`) passed to the mounted popup, which binds it to the child `Toolbar`
  * - `JSX.Element` icon renderer / `renderTrigger` / per-instance CSS classes →
  *   dropped. Icons are `PaletteIcon` (`string | Component`, rendered by the
- *   trigger itself); styling is global (`svelette-palette-drawer__*` classes in
+ *   trigger itself); styling is global (`palettable-drawer__*` classes in
  *   `styles/palette.css`, themed in the head's `head-default.css`) per the repo rule
  *   that CSS is always global — per-instance `triggerClass` / `overlayClass` /
  *   `popupClass` options have no Svelte equivalent and are intentionally omitted

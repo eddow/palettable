@@ -1,6 +1,32 @@
 # Testing
 
-## Unit (Vitest, jsdom) — 151 tests, 16 files
+## Core unit (Vitest, node) — 104 tests, 8 files
+
+Run: `pnpm --filter @palettable/core test`. Config:
+`packages/core/vitest.config.ts` (`environment: 'node'`, alias
+`@palettable/core` → `src/index.ts`, `include: ['src/**/*.test.ts']`).
+
+| File | Covers |
+| ---- | ------ |
+| `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/action forms) |
+| `src/keys.test.ts` | `findKeystrokesFor` (spec-prefix match) + `PaletteError` name |
+| `src/points.test.ts` | `isActionPoint` / `isValuedPoint` guards + null-safety |
+| `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation |
+| `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
+| `src/layout.test.ts` | `defaultLayoutFromPoints`, tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners` |
+| `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
+| `src/core.test.ts` | `PaletteCore` registry, values, `run` (setters/actions/virtuals/stash), subscriptions, `dispose` |
+
+Gotchas:
+
+- Listener-error tests spy on the `scheduleMicrotask` export (see
+  `src/globals.ts`), never on `globalThis.queueMicrotask` — spying the
+  global leaves a real `queueMicrotask` throw escaping as an uncaught
+  exception in the worker.
+- `defineVirtual` re-defining the same virtual id is allowed; a new virtual
+  colliding with a point id throws `duplicate point id`.
+
+## Svelte unit (Vitest, jsdom) — 151 tests, 16 files
 
 Run: `pnpm test`. Config: `vitest.config.ts` (`environment: `jsdom`,
 `resolve.conditions: ['browser']`, alias `$lib`, setup `tests/setup.ts`).

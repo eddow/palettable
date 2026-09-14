@@ -1,5 +1,5 @@
 /**
- * Standard minimal head for the svelette palette.
+ * Standard minimal head for the palettable palette.
  *
  * A small standard set of tools per point family (button/toggle/select+
  * segmented/slider+stepper/commandBox) plus the generic editor (`BaseConfigurator`,

@@ -5,7 +5,7 @@ never injected at runtime, never duplicated per instance:
 
 | File                   | Owner | Contents                                                        |
 | ---------------------- | ----- | --------------------------------------------------------------- |
-| `palette/styles/palette.css`         | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell (`.svelette-palette-drawer__*`) |
+| `palette/styles/palette.css`         | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell (`.palettable-drawer__*`) |
 | `head/styles/head-default.css` | head (default theme) | tool chrome, icons, command box, editors, menus, configurator, add-panel, light override |
 
 ## Rules
@@ -16,7 +16,7 @@ never injected at runtime, never duplicated per instance:
   time, so per-instance `<style>` elements are pure overhead.
 - The reference `componentStyle.css` injection (`paletteInstanceStyle` +
   `#disposeStyle`) was deleted; `Palette.dispose()` is a no-op for API parity.
-- Drawer popup classes use the `svelette-` prefix, not `sursaut-`.
+- Drawer popup classes use the `palettable-` prefix, not `sursaut-`.
 
 ## Base (dark) theme
 

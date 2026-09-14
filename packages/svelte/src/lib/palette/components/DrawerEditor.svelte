@@ -181,7 +181,7 @@
 		class={[
 			'palette-default-tool',
 			`palette-default-tone-${tone}`,
-			'svelette-palette-drawer__trigger',
+			'palettable-drawer__trigger',
 			el?.class
 		]}
 		aria-label={label || hint}

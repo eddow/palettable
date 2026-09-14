@@ -64,11 +64,11 @@ describe('drawer editor', () => {
 		render(DrawerEditor, { props: { context: drawerContext(palette) } })
 		await fireEvent.click(screen.getByRole('button', { name: 'More' }))
 		await Promise.resolve()
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeTruthy()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeTruthy()
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 		await Promise.resolve()
 		await Promise.resolve()
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeNull()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeNull()
 	})
 
 	it('collapses open drawers when the shared signal bumps', async () => {
@@ -76,11 +76,11 @@ describe('drawer editor', () => {
 		render(DrawerEditor, { props: { context: drawerContext(palette) } })
 		await fireEvent.click(screen.getByRole('button', { name: 'More' }))
 		await Promise.resolve()
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeTruthy()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeTruthy()
 		paletteDrawerCollapse.version += 1
 		await Promise.resolve()
 		await Promise.resolve()
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeNull()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeNull()
 	})
 
 	it('inverts the parent axis for the child toolbar direction', async () => {
@@ -90,14 +90,14 @@ describe('drawer editor', () => {
 			props: { context: drawerContext(palette, 'horizontal') },
 		})
 		await fireEvent.click(screen.getByRole('button', { name: 'More' }))
-		expect(document.querySelector('.svelette-palette-drawer__popup.is-vertical')).toBeTruthy()
+		expect(document.querySelector('.palettable-drawer__popup.is-vertical')).toBeTruthy()
 		unmount()
 		document.body.replaceChildren()
 
 		// Vertical parent → horizontal child popup (nested drawers continue the pattern).
 		render(DrawerEditor, { props: { context: drawerContext(palette, 'vertical') } })
 		await fireEvent.click(screen.getByRole('button', { name: 'More' }))
-		expect(document.querySelector('.svelette-palette-drawer__popup.is-horizontal')).toBeTruthy()
+		expect(document.querySelector('.palettable-drawer__popup.is-horizontal')).toBeTruthy()
 	})
 
 	it('popup publishes palette + child region scope to the child toolbar', () => {
@@ -134,16 +134,16 @@ describe('drawer editor', () => {
 		const trigger = screen.getByRole('button', { name: 'More' })
 		await fireEvent.mouseEnter(trigger)
 		await Promise.resolve()
-		const popup = document.querySelector('.svelette-palette-drawer__popup')
+		const popup = document.querySelector('.palettable-drawer__popup')
 		expect(popup).toBeTruthy()
 		// Leaving the trigger schedules a close; entering the popup cancels it.
 		await fireEvent.mouseLeave(trigger)
 		await fireEvent.mouseEnter(popup!)
 		await new Promise((resolve) => setTimeout(resolve, 180))
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeTruthy()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeTruthy()
 		// Leaving the popup for good closes after the grace period.
 		await fireEvent.mouseLeave(popup!)
 		await new Promise((resolve) => setTimeout(resolve, 180))
-		expect(document.querySelector('.svelette-palette-drawer__popup')).toBeNull()
+		expect(document.querySelector('.palettable-drawer__popup')).toBeNull()
 	})
 })

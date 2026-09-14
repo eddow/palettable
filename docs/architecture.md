@@ -1,5 +1,5 @@
-# Architecture — svelette
-
+# Architecture — palettable
+Note: `svelette` has become `@palettable/svelte` + `@palettable/core`
 Foundational decisions for the Svelte 5 re-implementation of `@sursaut/ui/palette`.
 Start with `README.md`, then `docs/getting-started.md`. Topic guides:
 `core-concepts.md` (tools, registry, scope), `layout-and-drag.md`,
@@ -9,8 +9,7 @@ runtime mapping, and phase history.
 
 ## 1. Identity
 
-- **svelette** = a Svelte 5 (runes) port of `@sursaut/ui/palette` — the headless palette
-  subsystem **only**.
+- **@palettable/svelte** = the Svelte 5 (runes) adapter for `@palettable/core` — a port of `@sursaut/ui/palette` (headless palette subsystem **only**).
 - **Headless** contract is preserved: the palette owns state, a11y semantics, tool resolution,
   editing, and drag/drop — **not** styling. Adapters (demo editors) own markup and CSS.
 - Read-only reference source lives in `ui/` (symlink). Never edit it; treat it as the spec.
@@ -95,7 +94,7 @@ value and never renders it itself. Rendering is delegated to a pluggable `option
 the `pure-glyf` package (a separate optional Vite-plugin + adapter, `registerGlyfIconFactory()`)
 is merely *one* such factory.
 
-svelette mirrors that split, in a Svelte-idiomatic way:
+@palettable/svelte mirrors that split, in a Svelte-idiomatic way:
 
 - **Palette core stays icon-agnostic.** `PaletteIcon = string | Component` flows through
   tools / entries / toolbar items to the editor, which is the *only* thing that renders it.
@@ -137,7 +136,7 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   `editing`/`palette-editing` classes + `data-editing` from `palette.editing`, and the
   ported `.palette-ide.editing .toolbar…` / `.toolbar-item-guard…` rules render the
   hover/active chrome. Verified in the Phase 9 demo (edit toggle → hover a toolbar).
-- Drawer popup classes use the `svelette-` prefix (`.svelette-palette-drawer__popup`), not
+- Drawer popup classes use the `palettable-` prefix (`.palettable-drawer__popup`), not
   `sursaut-`.
 
 ## 12. Palette runtime (Phase 3 — implemented, review fixes applied)
@@ -278,7 +277,7 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   `palettes`); `createPaletteDrawerEditor({ portalContainer })` returns a spec whose
   `editor` is the shared `DrawerEditor` component (`flags: { footprint: 'horizontal' }`).
   Dropped with rationale: per-instance `triggerClass` / `overlayClass` / `popupClass` /
-  `popupExtraClass` (CSS is global — `svelette-palette-drawer__*` in `styles/palette.css`),
+  `popupExtraClass` (CSS is global — `palettable-drawer__*` in `styles/palette.css`),
   `renderIcon: JSX.Element` / `renderTrigger` (icons are `PaletteIcon`, trigger is fixed
   icon + label + chevron), `triggerStyle` (no parent-toolbar square-size override to fight).
 - `components/DrawerEditor.svelte` (trigger) + `components/DrawerPopup.svelte` (portal root)
@@ -486,3 +485,83 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
 - Vitest must set `resolve.conditions: ['browser']`, else Svelte resolves to its server build and
   `mount()` throws `lifecycle_function_unavailable`.
 - Biome 2.x has no `files.ignores`; exclusions are `!`-prefixed entries in `files.includes`.
+
+## 21. `@palettable/core` — headless package
+
+`packages/core` is the framework-agnostic headless layer. `packages/vanilla` and
+`packages/svelte` are the two DOM adapters; both import core, never the reverse.
+See `plans/mitosis.md` for the remaining migration work (Phases 2–7) and the
+per-module disposition.
+
+### DOM-free rule — **decided: strictly DOM-free, compiler-enforced**
+
+Core is **vanilla TS with zero DOM and zero framework**. This is not a convention
+but a build guarantee:
+
+- `packages/core/tsconfig.json` sets `lib: ["ES2022"]` — **no `DOM`**. Any
+  accidental `document`, `HTMLElement`, `KeyboardEvent` or `window` reference
+  fails `tsc` (`error TS2584: Cannot find name 'document'`).
+- `packages/core/src/globals.ts` is the single escape hatch: it resolves
+  `queueMicrotask` through `globalThis` (the only host global core needs, used to
+  re-throw listener errors off the notify stack). It is resolved **per call**, not
+  captured at module load, so tests can stub the host global.
+- Consequence for Phase 2: `drag-session.ts` (`HTMLElement`, pointer events) does
+  **not** move into core. Drag sessions live in the adapters (`packages/vanilla`,
+  `packages/svelte`); core exposes only structural commits
+  (`PaletteLayoutTree.moveItem` / `moveToolbar` / `insertItem` / `removeItem`).
+
+### Core contracts
+
+- **Icons are opaque tokens** (`IconToken = string`). Resolution to a component or
+  glyph is an adapter concern; core never imports an icon factory.
+- **Keystrokes are normalized strings** (`"Ctrl+Shift+S"`). Core owns only the
+  headless lookup (`findKeystrokesFor`); adapters own `KeyboardEvent` →
+  keystroke normalization (`normalizePaletteKeystroke`,
+  `paletteKeystrokeFromEvent`).
+- **Virtual points** (`virtual.ts`) are end-user-defined derived points over a
+  source point: `enum-from` (present any value as an enum / enum subset) and
+  `stash` (push-aside / pop-back toggle action, single aside slot — no stack).
+  Matching uses `Object.is`, the same contract as `PaletteStateStore.set`.
+- **Layout is pure data.** `PaletteLayoutTree` holds borders / tracks / toolbars /
+  items and emits a fresh `SerializedLayout` snapshot per mutation via
+  `subscribe`. Two structurally different forms exist and must not be conflated:
+  a **serialized** region is a *flat* slot list (track boundaries are not
+  persisted), a **live** region is a list of *tracks*. `version: 1` is the
+  discriminator; hydration wraps each serialized slot in its own single-slot
+  track, cloning preserves track boundaries.
+- **Teardown**: `PaletteCore.dispose()` drops value **and** layout listeners
+  (`PaletteStateStore.clearListeners` + `PaletteLayoutTree.clearListeners`).
+  Values and layout are kept.
+- **Build**: `tsconfig.build.json` excludes `src/**/*.test.ts`, so tests never
+  land in `dist`.
+
+### Module inventory (`packages/core/src/`)
+
+One module per concern — the 980-line `palette/types.ts` was split, not copied:
+
+| Module | Contents |
+|--------|----------|
+| `index.ts` | barrel — re-exports every module below |
+| `identifiers.ts` | `IconToken`, `Keystroke`, `Unsubscribe`, listener types |
+| `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
+| `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `isActionPoint` / `isValuedPoint` |
+| `specs.ts` | `PointSpec`, `parsePointSpec`, `canonicalPointId` |
+| `store.ts` | `PaletteStateStore` |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `isDrawerItem` |
+| `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
+| `keys.ts` | `KeyBindings`, `findKeystrokesFor` (headless lookup only) |
+| `virtual.ts` | `enum-from` / `stash` derived points |
+| `errors.ts` | `PaletteError` |
+| `globals.ts` | `scheduleMicrotask` — the only host global |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` |
+
+### Packaging
+
+- Core is **library-only**: no `demo/`, no `index.html`, no `vite.config.ts`, no
+  `vite` devDep. Rollup emits esm/cjs (`dist/index.mjs`, `dist/index.cjs`,
+  `dist/index.js`).
+- `packages/vanilla` is the vanilla-DOM adapter **with** its own vite demo
+  (`demo/main.ts` + `index.html`); it declares `external: ['@palettable/core']`
+  and a `workspace:*` dep on core.
+- Unit tests run in **node** (`vitest.config.ts`, `environment: 'node'`), not
+  jsdom — core has no DOM to test against.

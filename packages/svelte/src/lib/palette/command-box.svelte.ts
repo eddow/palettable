@@ -1,5 +1,5 @@
 /**
- * Headless command-box model for svelette: lists the palette's points
+ * Headless command-box model for palettable: lists the palette's points
  * (`PaletteConfig.tools` data definitions, no layout) as executable
  * commands (command-palette usage). Binding a command to a toolbar creates a tool.
  *

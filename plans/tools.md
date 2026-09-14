@@ -97,7 +97,7 @@ divergences below:
   tool (`statusPresenter`, `StatusEditor`) is an `editors.item` variant: a
   read-only display fed by the item `config`, never bound to a point.
 - **Setter spelling.** Upstream `PaletteToolSpec` is `toolId | toolId|value |
-  toolId:action`; svelette adds `toolId=value` as the preferred spelling
+  toolId:action`; palettable adds `toolId=value` as the preferred spelling
   (`findSetterSeparator`, `=` wins, `|` legacy) and uses `=` in generated
   command entries. `commandRunner` throws `PaletteError` here vs plain `Error`
   upstream.

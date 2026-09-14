@@ -20,7 +20,7 @@
 	import '$lib/palette/styles/palette.css'
 	import '$lib/head/styles/head-default.css'
 
-	const LAYOUT_STORAGE_KEY = 'svelette-demo-layout-v1'
+	const LAYOUT_STORAGE_KEY = 'palettable-demo-layout-v1'
 
 	// Preset loads are plain commands, not toggle state: each button loads a
 	// fresh clone of its configuration's layout. The demo seeds `rw-combobox`

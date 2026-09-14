@@ -1105,8 +1105,8 @@
 .palette-default-theme-light .palette-default-add-inline-value > input,
 .palette-default-theme-light .palette-default-add-inline-value > select,
 .palette-default-theme-light .palette-default-command-close,
-.palette-default-theme-light.svelette-palette-drawer__popup,
-.palette-default-theme-light .svelette-palette-drawer__popup {
+.palette-default-theme-light.palettable-drawer__popup,
+.palette-default-theme-light .palettable-drawer__popup {
 	border-color: rgba(148, 163, 184, 0.9);
 	background: rgba(241, 245, 249, 0.96);
 	color: #0f172a;
@@ -1118,8 +1118,8 @@
 .palette-default-theme-light .palette-default-command-panel,
 .palette-default-theme-light .palette-default-command-popover,
 .palette-default-theme-light .palette-default-menu,
-.palette-default-theme-light.svelette-palette-drawer__popup,
-.palette-default-theme-light .svelette-palette-drawer__popup {
+.palette-default-theme-light.palettable-drawer__popup,
+.palette-default-theme-light .palettable-drawer__popup {
 	background: rgba(255, 255, 255, 0.98);
 }
 

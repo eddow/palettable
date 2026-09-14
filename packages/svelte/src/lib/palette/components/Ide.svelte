@@ -71,7 +71,7 @@
 		// → neither border nor mask. Note: the console overlay background
 		// itself carries `role="dialog"`, so it must NOT be excluded — only
 		// the panel counts as modal; the overlay background is the mask.
-		if (target.closest('.palette-default-command-panel, .svelette-palette-drawer__popup, dialog')) {
+		if (target.closest('.palette-default-command-panel, .palettable-drawer__popup, dialog')) {
 			maskHover = false
 			return
 		}

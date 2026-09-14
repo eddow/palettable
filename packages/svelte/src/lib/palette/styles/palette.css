@@ -438,13 +438,13 @@
 
 /* ── Drawer Popup ── */
 
-.svelette-palette-drawer__overlay {
+.palettable-drawer__overlay {
 	position: fixed;
 	inset: 0;
 	z-index: 210;
 }
 
-.svelette-palette-drawer__trigger {
+.palettable-drawer__trigger {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.25rem;
@@ -453,7 +453,7 @@
 	white-space: nowrap;
 }
 
-.svelette-palette-drawer__popup {
+.palettable-drawer__popup {
 	position: fixed;
 	z-index: 211;
 	padding: 0.25rem;
@@ -468,19 +468,19 @@
 }
 
 /* Suppress toolbar ::before overflow inside popups (avoids phantom scrollbar) */
-.svelette-palette-drawer__popup .toolbar::before {
+.palettable-drawer__popup .toolbar::before {
 	content: none;
 }
 
-.svelette-palette-drawer__popup.is-vertical .toolbar {
+.palettable-drawer__popup.is-vertical .toolbar {
 	flex-direction: column;
 	align-items: stretch;
 }
 
-.svelette-palette-drawer__popup.is-horizontal .toolbar {
+.palettable-drawer__popup.is-horizontal .toolbar {
 	flex-direction: row;
 }
 
-.svelette-palette-drawer__popup .toolbar-item-space {
+.palettable-drawer__popup .toolbar-item-space {
 	display: none;
 }

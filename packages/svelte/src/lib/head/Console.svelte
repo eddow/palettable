@@ -181,7 +181,7 @@
 			return
 		}
 		// On a popup/dialog → neither parking nor mask.
-		if (target.closest('.svelette-palette-drawer__popup, dialog')) {
+		if (target.closest('.palettable-drawer__popup, dialog')) {
 			parkingMaskHover = false
 			return
 		}

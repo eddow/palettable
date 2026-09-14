@@ -60,7 +60,7 @@ Interactions to try:
    same shortcut closes it); parking + add-to-toolbar live in the console.
 4. **Presets / save-load**: the demo bar loads each preset configuration, and a
    save/load button group round-trips the layout through `localStorage`
-   (`svelette-demo-layout-v1`).
+   (`palettable-demo-layout-v1`).
 
 Theme control: the `theme` tool (`light`/`dark`/`system`) resolves via
 `prefers-color-scheme` and syncs `.palette-default-theme-light` + `data-theme` +

@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"outDir": "./dist",
+		"rootDir": "./src",
+		// Build resolves workspace deps via node_modules (dist .d.ts),
+		// not via the dev source alias in tsconfig.json.
+		"paths": {}
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["src/umd.ts", "dist", "node_modules"]
+}

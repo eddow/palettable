@@ -33,7 +33,7 @@ test('console opens in edit mode (commandBox is displayed)', async ({ page }) =>
 
 test('drawer opens with axis inversion and closes on Escape', async ({ page }) => {
 	await page.getByRole('button', { name: 'More' }).click()
-	const popup = page.locator('.svelette-palette-drawer__popup')
+	const popup = page.locator('.palettable-drawer__popup')
 	await expect(popup).toBeVisible()
 	// Left drawer inverts to a horizontal popup.
 	await expect(popup.first()).toHaveClass(/is-horizontal/)

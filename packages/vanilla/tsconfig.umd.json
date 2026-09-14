@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.build.json",
+	"compilerOptions": {
+		"declaration": false,
+		"declarationMap": false
+	},
+	"include": ["src/umd.ts", "src/index.ts"],
+	"exclude": ["dist", "node_modules"]
+}
