@@ -97,66 +97,25 @@ test('add-to-toolbar flow selects entry + variant', async ({ page }) => {
 	await expect(panel.locator('select').first()).toBeVisible()
 })
 
-test('add-box results list draggable entries', async ({ page }) => {
+test('add-box results list addable tools (not draggable)', async ({ page }) => {
 	await openConsole(page)
 	const results = page.getByTestId('console-results')
-	await expect(results.locator('.palette-default-command-result').first()).toBeVisible()
-	const draggable = await results
-		.locator('.palette-default-command-result[draggable="true"]')
-		.count()
-	expect(draggable).toBeGreaterThan(0)
+	const rows = results.locator('.palette-default-command-result')
+	await expect(rows.first()).toBeVisible()
+	expect(await rows.count()).toBeGreaterThan(0)
+	// Catalogue drag was stripped (movement restart): rows are
+	// click-to-select, not draggable — mirrors the svelte unit assertion
+	// (`console.test.ts`: `getAttribute('draggable')` is null).
+	await expect(results.locator('.palette-default-command-result[draggable="true"]')).toHaveCount(0)
 })
 
-test('add-box drop lands an item in a toolbar gap', async ({ page }) => {
+test('add-box click selects an entry for adding', async ({ page }) => {
 	await openConsole(page)
 	const results = page.getByTestId('console-results')
-	const source = results
+	await results
 		.locator('.palette-default-command-result', { hasText: 'Life Support' })
 		.first()
-	await expect(source).toBeVisible()
-	// `dispatchEvent('dragstart', { dataTransfer: {} })` cannot construct a
-	// real `DataTransfer` (Chromium rejects the init dict), so drive the real
-	// `ondragstart` handler with a synthetic `DragEvent` carrying a stub
-	// transfer: the handler sets the catalogue MIME + starts the
-	// `catalogInsert` session, then the gap's `dragover`/`drop` handlers run
-	// the same session path a native drag would.
-	const topBorder = page.locator('.toolbar-border[data-region="top"]').first()
-	const before = await topBorder.locator('.toolbar-item').count()
-	const dropped = await topBorder
-		.locator('.toolbar-item-space')
-		.first()
-		.evaluate((gap) => {
-			const catalogueRow = document.querySelector(
-				'[data-testid="console-results"] .palette-default-command-result[draggable="true"]'
-			) as HTMLElement | null
-			if (!catalogueRow) return 'no-source'
-			// `new DragEvent(..., { dataTransfer })` rejects non-native
-			// transfers, so build plain `Event`s and shadow `dataTransfer`
-			// with a stub: the handlers only touch `effectAllowed`,
-			// `dropEffect`, `types`, `setData`, `getData`.
-			const store = new Map<string, string>()
-			const transfer = {
-				effectAllowed: 'none',
-				dropEffect: 'none',
-				types: [] as string[],
-				setData: (type: string, value: string) => {
-					store.set(type, value)
-					if (!(transfer.types as string[]).includes(type)) (transfer.types as string[]).push(type)
-				},
-				getData: (type: string) => store.get(type) ?? '',
-			}
-			const fire = (target: Element, type: string) => {
-				const event = new Event(type, { bubbles: true, cancelable: true }) as Event & {
-					dataTransfer?: unknown
-				}
-				event.dataTransfer = transfer
-				target.dispatchEvent(event)
-			}
-			fire(catalogueRow, 'dragstart')
-			fire(gap, 'dragover')
-			fire(gap, 'drop')
-			return 'dropped'
-		})
-	expect(dropped).toBe('dropped')
-	await expect(topBorder.locator('.toolbar-item')).toHaveCount(before + 1)
+		.click()
+	await expect(page.getByTestId('console-add-panel')).toBeVisible()
+	await expect(page.getByTestId('console-details-panel')).toContainText('Life Support')
 })

@@ -1,10 +1,9 @@
 # Mitosis — split `svelte` into `core` + `vanilla` + `vue` + `svelte`
 
-> Status: **active plan — Phases 2–8 landed; remaining in execution order:
-> Phase 9 (optimization, empty) → Phase 10 (vanilla parity) →
+> Status: **active plan — Phases 2–10 landed; remaining in execution order:
 > Phase 11 (vue parity) → Phase 12 (thin svelte).**
 > `packages/core` (headless, DOM-free) and `packages/vanilla` (vanilla-DOM
-> adapter + demo) exist and are green; `packages/svelte` is still
+> adapter + parity demo) exist and are green; `packages/svelte` is still
 > self-contained and does **not** import core yet. Order: finish `core`
 > (SSR + context) → reach demo parity (`vanilla`, then `vue`) → only then
 > make `svelte` depend on `core`
@@ -341,15 +340,15 @@ packages/svelte/src/lib/
 
 ## Execution order (remaining work)
 
-Phases 2–8 are landed. What is left runs in this order (numbers are
+Phases 2–9 are landed. What is left runs in this order (numbers are
 topological, not sequential — the old 6b/6c labels sort early but execute as 10/11):
 
 1. **Phase 7** (SSR render model — landed 2026-09-14) — needed only the landed Phases 3–5 surface.
 2. **Phase 8** (context — landed 2026-09-14) — needed Phases 3–5 + 7; landed **before** the parity
    expansion so the vanilla spike can ride the Phase 10 demo work instead of
    requiring a second pass.
-3. **Phase 9** (optimization — empty, scope TBD) — placeholder between
-   context and adapters; no work item may block parity on it.
+3. **Phase 9** (optimization — landed 2026-09-14) — internal cleanup
+   between context and adapters; no work item blocks parity on it.
 4. **Phase 10** (vanilla parity) → **Phase 11** (vue parity) — same demo,
    same e2e suite; both stay context-free and SSR-independent.
 5. **Phase 12** (thin svelte) — the only phase that edits `packages/svelte/src`.
@@ -387,50 +386,101 @@ topological, not sequential — the old 6b/6c labels sort early but execute as 1
 - [x] **`points.ts`** — `NothingPoint` + `isNothingPoint` + functional `can` — landed 2026-09-14.
 - [x] **Wire bags into `PaletteCore`** — landed 2026-09-14 (registry + `evaluateCan` + `subscribeContext` + `subscribeCan` + `dispose`).
 - [x] **`core/context-display.ts`** — landed 2026-09-14.
-- [ ] **Adapter spike (vanilla first)** — deferred to Phase 10 demo work (dirty-set + rAF + one context-bound control).
-- [ ] **Command-box context pass** — shaped (entries carry `uses`, filter at render); full pass rides Phase 10.
+- [x] **Adapter spike (vanilla first)** — rode the Phase 10 demo work (landed 2026-09-14 as `vanilla/src/ide.ts` + `head.ts`: values/layout/console subscriptions drive full re-render; no dirty-set/rAF batching — plain re-render is fast enough at demo scale).
+- [x] **Command-box context pass** — shaped (entries carry `uses`, filter at render); full pass rides Phase 10 — landed 2026-09-14 as shaped-only (parity demos stay context-free, root bag only; coverage from Phase 8 core tests).
 - [x] **Docs per repo rule (`AGENTS.md`)** — landed 2026-09-14 (`docs/core-concepts.md` `uses` contract + architecture §"Phase 8 status"; `plans/context.md` retirement still open).
 
-## Phase 9 — optimization (empty placeholder, scope TBD)
+## Phase 9 — optimization pass (landed 2026-09-14)
 
-> TODO: description
-> Purpose:
-> - program optimization - both in amount of objects created/deleted, memory, calculation time
-> - hunting down any redundancy
-> - simplification of structures and algorithms
+> Internal cleanup — no API-surface changes, no new modules, no svelte edits.
+> See `docs/architecture.md` §"Phase 9 status" for the landed deltas.
+> Checklist below is retired.
 
-## Phase 10 — vanilla demo parity (first parity gate)
+### JSDoc staleness
 
-> This is the acceptance criterion for stages 1–2 of the evolution strategy:
-> the vanilla demo must be the **same demo** as the svelte one, because
-> `tests/e2e/` will attack all demos with the same specs.
+- [x] `PaletteCore.readActionCan` — docstring fixed (functional-`can` read);
+      stale "Phase N" markers refreshed across `command-box` / `console` /
+      `errors` / `palette` / `points` / `presenters` / `render`.
+
+### Dead code removal
+
+- [x] **`PaletteStateStore.update`** — deleted (tests-only, zero production
+      callers) + its test.
+- [x] **`PaletteStateStore.getOr`** — deleted (same) + its test.
+- [x] **`resolveRenderTree` `const config`** — wired through: the resolver
+      now applies the pinned `trackGapMinGrow` floor to slot `space`;
+      pinning test asserts the floor + ignores singleton mutations.
+- [x] **`snapshotPalette` `input.points?`** — removed (accepted, never read).
+
+### Allocation reductions
+
+- [x] **`PaletteCore.points` / `virtualPoints` getters** — cached arrays,
+      invalidated on `defineVirtual` / `removeVirtual`; test updated.
+- [x] **Listener `[...set]` snapshot iteration** — kept deliberately (safe
+      unsubscribe-during-notify; `Set` iteration during deletion would skip
+      not-yet-visited listeners; ≤ 3 listeners typical).
+
+### Structural simplification
+
+- [x] **Fold `context-display-types.ts`** into `context-display.ts` — done,
+      file deleted.
+- [x] **`liveToSnapshot`/`liveItemToSerialized`** — deleted; `snapshotPalette`
+      routes live layouts through canonical `layout.snapshotLayout` (exported).
+- [x] **`PaletteCore.bagForwards`** — dropped; replace/remove/dispose rely on
+      `clearListeners()`.
+
+### Verification gates
+
+- [x] `pnpm --filter @palettable/core check/build/test` green
+- [x] `npx biome check packages/core` clean
+- [x] `pnpm --filter @palettable/vanilla check/build/test` green
+- [x] `packages/svelte/src` untouched (frozen-until-Phase-12 rule)
+- [x] `render.ts` import-graph test still passes (SSR §4.7)
+
+## Phase 10 — vanilla demo parity (landed 2026-09-14, first parity gate)
+
+> This was the acceptance criterion for stages 1–2 of the evolution strategy:
+> the vanilla demo is the **same demo** as the svelte one, because
+> `tests/e2e/` attacks all demos with the same specs. See
+> `docs/architecture.md` §"Phase 10 status" for the landed surface
+> (`vanilla/src/keys.ts` + `head.ts` + `ide.ts`, `demo/palette.ts` +
+> `demo/main.ts`; 33 e2e green on both demos). Checklist below is retired.
 >
 > SSR note: the parity demos are client-rendered; SSR coverage comes from the
-> Phase 7 render-model tests (core, node), not from e2e. Do not gate parity on
-> SSR output — but do not break the Phase 7 import-graph rule while building
-> the demo (demo code lives in adapters, never in the render path).
+> Phase 7 render-model tests (core, node), not from e2e. Parity was not gated
+> on SSR output — and the Phase 7 import-graph rule held (demo code lives in
+> adapters, never in the render path).
 >
 > Context note: the parity demos stay context-free (root bag only) — Phase 8
-> lands first, so the vanilla spike rides this phase's demo work; context
+> landed first, so the vanilla spike rode this phase's demo work; context
 > coverage comes from the Phase 8 core tests + vanilla spike, not from e2e.
-> Do not gate parity on context output.
+> Parity was not gated on context output.
 
 Note: demo will over-come svelte's demo by using contexts. Vue will have parity with the vanilla's demo, and the e2e tests about context will simply fail (or be skipped at first) on svelte until svelte is refactored
 
-Idea on interface (discussable): the createIDE should take a container html element (plus the options, ...) and just add it the classes and the children (tool-stacks) while wrapping its children in the workspace' div
+Idea on interface (discussable): the createIDE should take a container html element (plus the options, ...) and just add it the classes and the children (tool-stacks) while wrapping its children in the workspace' div — landed as `createIDE(container, options)` (`vanilla/src/ide.ts`).
 
-- [ ] Port the svelte demo to `packages/vanilla/demo/` feature-for-feature:
+- [x] Port the svelte demo to `packages/vanilla/demo/` feature-for-feature:
       same points, same initial layout, same editors, same console, same drag
       behaviour. Reference: `packages/svelte/src/routes/+page.svelte` (430) +
-      `packages/svelte/src/demo/palette.svelte.ts` (563).
-- [ ] Reproduce the same DOM contract the e2e specs assert (headings, console
+      `packages/svelte/src/demo/palette.svelte.ts` (563). — landed 2026-09-14:
+      `demo/palette.ts` (same 15 points/keys/3 configs/layouts) + `demo/main.ts`
+      (parity page). Drag behaviour is the stripped static layout
+      (`plans/movement.md` restart — no drag sessions run; guards inspect only).
+- [x] Reproduce the same DOM contract the e2e specs assert (headings, console
       overlay, toolbar/parking structure, drag targets) — the specs query
-      concrete selectors, so "similar" is not enough.
-- [ ] Extend `playwright.config.ts` to one project per demo (svelte on `:4173`,
+      concrete selectors, so "similar" is not enough. — landed: `ide.ts` +
+      `head.ts` reproduce the contract (testids, editing chrome, inert, dimming,
+      drawer axis inversion); the 2 catalogue-drag specs were stale (zero
+      `draggable=` in `src`, svelte unit asserts click-to-select) and were
+      replaced with click-to-select assertions.
+- [x] Extend `playwright.config.ts` to one project per demo (svelte on `:4173`,
       vanilla on its own port) and run the **same** `tests/e2e/*.spec.ts`
-      against both.
-- [ ] Gate: `tests/e2e/` green against **both** demos (svelte reference +
-      vanilla). This unlocks Phase 11, not Phase 12.
+      against both. — landed: `svelte` + `vanilla` projects run the shared
+      suite, `vanilla-smoke` runs the vanilla-only spec.
+- [x] Gate: `tests/e2e/` green against **both** demos (svelte reference +
+      vanilla). This unlocks Phase 11, not Phase 12. — landed 2026-09-14:
+      33 passed (16 + 16 + 1 smoke).
 
 ## Phase 11 — vue adapter + demo parity (second parity gate)
 

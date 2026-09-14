@@ -242,6 +242,10 @@
 	box-sizing: border-box;
 }
 
+.palette-default-command-popover[hidden] {
+	display: none;
+}
+
 .palette-default-command-box.is-floating .palette-default-command-popover {
 	position: absolute;
 	inset-inline: 0;

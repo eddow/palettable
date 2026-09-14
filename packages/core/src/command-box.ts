@@ -5,7 +5,7 @@
  * itself is client-only — the box shell is SSR, entries are not; see
  * `plans/ssr.md` §8). Entries carry `uses` and the renderer filters/resolves
  * at render time, never build-time precompile (Context §2.7); commands on
- * nothing-points with `uses: []`/`undefined` are always present (Phase 9).
+ * nothing-points with `uses: []`/`undefined` are always present.
  *
  * Headless port of the svelte adapter's `command-box.svelte.ts` builders
  * (which stay adapter-owned until Phase 7). Deltas from the reference:

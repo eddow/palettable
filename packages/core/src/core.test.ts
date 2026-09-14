@@ -68,9 +68,19 @@ describe('PaletteCore construction', () => {
 		expect(core.keys).not.toBe(keys)
 	})
 
-	it('points and virtualPoints return fresh arrays', () => {
+	it('points and virtualPoints return cached arrays, invalidated on mutation', () => {
 		const core = new PaletteCore(points())
-		expect(core.points).not.toBe(core.points)
+		expect(core.points).toBe(core.points)
+		expect(core.virtualPoints).toEqual([])
+		core.defineVirtual({
+			id: 'pause',
+			label: 'Pause',
+			source: 'fontSize',
+			kind: 'stash',
+			stashedValue: 0,
+		})
+		expect(core.virtualPoints.map((virtual) => virtual.id)).toEqual(['pause'])
+		core.removeVirtual('pause')
 		expect(core.virtualPoints).toEqual([])
 	})
 

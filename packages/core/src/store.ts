@@ -31,12 +31,6 @@ export class PaletteStateStore {
 		return this.values.get(id) as TypeMap[K] | undefined
 	}
 
-	/** Read with an explicit fallback (e.g. the point default). */
-	getOr<K extends PointType>(id: string, fallback: TypeMap[K]): TypeMap[K] {
-		const value = this.values.get(id) as TypeMap[K] | undefined
-		return value === undefined ? fallback : value
-	}
-
 	/** Write a value; no-op when `Object.is`-equal. Notifies global + key listeners. */
 	set<K extends PointType>(id: string, value: TypeMap[K]): void {
 		const previous = this.values.get(id)
@@ -45,22 +39,14 @@ export class PaletteStateStore {
 		this.notify(id, value)
 	}
 
-	/** Functional update helper (`set(id, update(get(id)))`). */
-	update<K extends PointType>(
-		id: string,
-		updater: (previous: TypeMap[K] | undefined) => TypeMap[K]
-	): void {
-		this.set(id, updater(this.get<K>(id)))
-	}
-
 	/**
 	 * Apply many pairs at once, then notify once per changed key in a single
 	 * flush pass (all writes land before any listener runs — no interleaved
 	 * write+notify like N× `set()` would produce). Pairs whose value is
 	 * `Object.is`-equal to the current value are skipped (same echo-loop
-	 * guard as `set`). Returns the `Object.is`-changed key array (Phase 9
-	 * `ValuesBag` notifies with this array directly; the store keeps its
-	 * existing `(id, value)` / `(value)` listener contract this phase).
+	 * guard as `set`). Returns the `Object.is`-changed key array (mirrored
+	 * by `ValuesBag`, which notifies with this array directly; the store
+	 * keeps its existing `(id, value)` / `(value)` listener contract).
 	 * Unknown ids are written as-is (same leniency as `set`); validation
 	 * against point definitions happens in `PaletteCore`
 	 * (`initialValues` / `setMany`), not here.

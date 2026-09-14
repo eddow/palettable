@@ -483,7 +483,13 @@ function cloneItem(item: ToolbarItem): ToolbarItem {
 	}
 }
 
-function snapshotLayout(layout: PaletteLayout): SerializedLayout {
+/**
+ * Serialize a live `PaletteLayout` into a JSON-safe `SerializedLayout`
+ * (flat slot list per region — track boundaries are not persisted).
+ * Exported for the SSR snapshot path (`render.ts`), which accepts either
+ * layout form; the tree's own `getSnapshot()` routes through here too.
+ */
+export function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	const borders = {} as SerializedLayout['borders']
 	for (const region of regions) {

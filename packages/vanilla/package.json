@@ -3,6 +3,24 @@
 	"version": "0.0.1",
 	"description": "Palettable vanilla-DOM adapter — headless core with plain DOM rendering (rolled-up)",
 	"private": true,
+	"author": "François Marie De Mey <eeddow@gmail.com>",
+	"license": "AGPL-3.0-only",
+	"homepage": "https://github.com/eddow/palettable#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/eddow/palettable.git",
+		"directory": "packages/vanilla"
+	},
+	"bugs": {
+		"url": "https://github.com/eddow/palettable/issues"
+	},
+	"keywords": [
+		"palette",
+		"toolbar",
+		"headless",
+		"command-palette",
+		"vanilla"
+	],
 	"type": "module",
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.mjs",

@@ -18,7 +18,7 @@
  * the wire in either form.
  *
  * Custom `TypeConstraints` entries participating in SSR must be
- * `JSON.stringify`-stable (or wait for the Phase 8 `ValueCodec` registry).
+ * `JSON.stringify`-stable (or provide a per-type `ValueCodec`).
  * Stash aside slots stay excluded from the snapshot **by documented decision**
  * (rendering a stash button needs only current-vs-stashed pressed state).
  */

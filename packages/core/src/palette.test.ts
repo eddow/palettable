@@ -192,7 +192,7 @@ describe('PaletteCore.resolveEditablePoint / readActionCan', () => {
 	})
 })
 
-describe('Phase 3 readiness stubs', () => {
+describe('uses contract + write errors', () => {
 	it('PointBase accepts uses without behaviour change', () => {
 		const core = new PaletteCore([
 			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },

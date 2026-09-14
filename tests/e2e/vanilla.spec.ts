@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 
-// Vanilla demo smoke: asserts the current barrel-only demo renders. This is
-// the only spec the `vanilla` project runs until the vanilla demo reaches
-// parity with the svelte demo (mitosis plan) — at that point the shared
-// suite runs unfiltered against both demos.
-test('vanilla demo renders its points', async ({ page }) => {
+// Vanilla demo parity smoke: the vanilla demo is the same Stellar Outpost
+// demo as the svelte one (mitosis Phase 10) — heading, IDE chrome, and the
+// toolbar command-box combobox render on first paint.
+test('vanilla demo renders the Stellar Outpost IDE', async ({ page }) => {
 	await page.goto('/')
-	await expect(page.locator('[data-palettable-vanilla] li')).toHaveCount(1)
-	await expect(page.locator('[data-palettable-vanilla] li').first()).toContainText('Save game')
+	await expect(page.getByRole('heading', { name: 'Stellar Outpost' })).toBeVisible()
+	await expect(page.locator('.palette-ide').first()).toBeVisible()
+	await expect(page.getByTestId('command-box-combobox')).toBeVisible()
+	await expect(page.getByTestId('work-zone')).toBeVisible()
 })

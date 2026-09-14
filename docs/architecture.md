@@ -409,29 +409,33 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   component init; stored-layout restore splices plain data in `onMount`, never in handlers.
 - Gates: `check` 0/0, `lint` clean, `test` 117 pass, `build` ok.
 
-## 19. E2E coverage (Phase 10 — complete)
+## 19. E2E coverage (Phase 10 — both demos green)
 
-- `e2e/palette.spec.ts` (5): command launcher opens the edit-only console +
+- `e2e/palette.spec.ts` (5): command-box combobox runs commands inline +
   `.palette-ide.editing` chrome, drawer open with axis inversion (left drawer →
   `is-horizontal` popup) + Escape close, presentation-only inspector via
   `pointerdown` on the edit-mode `.toolbar-item-guard` (highlighted item +
   configurator in the console details panel), layout save → reload → "restored"
-  badge → reset, pointer drag reorder (synthetic `PointerEvent` `pointerdown` on
-  the autoOxygen guard + `pointermove`/`pointerup` on `window` with a shared
-  `pointerId`, drop on the gap after alertLevel → order flips to `[commandBox,
-  emergencyProtocol, shieldGenerator, alertLevel, autoOxygen]`).
-- `e2e/console.spec.ts` (8): backtick opens the edit-only console (Ide root
-  focused first — `paletteRoot` listens on the root `keydown`, so a bare
-  body-level press never reaches it), Console button open + Escape close
+  badge → preset switch → load.
+- `e2e/console.spec.ts` (9): backtick opens the edit-only console (Ide root
+  focused first — the IDE listens on the root `keydown`, so a bare
+  body-level press never reaches it), Terminal button open + Escape close
   (+ work-zone `is-dimmed` while open), **command-first mode** (no combobox →
   console command-first + square edit button toggles to edit), **read-only mode**
   (no edit button, stays command-first), **edit-inert** (toolbar item content is
   `inert` while editing), no mode button when a `commandBox` tool is displayed,
   add flow (Life Support entry → variant card → value select in the single
-  details panel), tools-panel rows carry `draggable="true"`,
-  tools-panel drop (synthetic `dragstart`/`dragover`/`drop` with a `dataTransfer`
-  stub → session path inserts the row's item into the first toolbar gap,
-  count + 1).
+  details panel), add-box rows are click-to-select (not draggable — catalogue
+  drag was stripped for the movement restart, locked by the svelte unit test
+  `console.test.ts` `getAttribute('draggable')` → null), add-box click selects
+  an entry (add panel + details show the entry).
+- `e2e/drag-invariants.spec.ts` (1): movement stripped — locks the static
+  edit-mode layout (5 top tools, no empty toolbars/tracks).
+- `e2e/smoke.spec.ts` (1) + `e2e/vanilla.spec.ts` (1, vanilla-only smoke):
+  heading + IDE chrome + combobox + work-zone on first paint.
+- Both demos run the **same** shared suite (`svelte` on `:4173`,
+  `vanilla` on `:4174`, plus a `vanilla-smoke` project for the vanilla-only
+  spec): 33 passed (16 svelte + 16 vanilla + 1 smoke).
 - E2E lessons: `paletteItemDrag` inspects on `pointerdown`, so tests dispatch
   `pointerdown`/`pointerup` on the guard instead of `click({ force: true })`; keyboard
   shortcut tests must focus `.palette-ide` (tabindex=0) before pressing. Trusted
@@ -559,8 +563,8 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
 | `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `NothingPoint` (`type: 'nothing'` — context + enablement only; `isNothingPoint` guard), `isActionPoint` / `isValuedPoint` (both `false` for nothing-points); `PointBase.uses` (optional bags, load-bearing in Phase 8) + functional `can(...bags)` on all kinds (omitted = enabled) |
 | `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
-| `store.ts` | `PaletteStateStore` + `setTree` batching (Phase 3: all writes land before any listener runs, returns changed keys) |
-| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
+| `store.ts` | `PaletteStateStore` + `setTree` batching (all writes land before any listener runs, returns changed keys). Phase 9 removed the dead `getOr` / `update` helpers (tests-only, zero production callers). |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
 | `gap-dwell.ts` | `GapDwell` hover-dwell state machine + `GapDwellState` (Phase 2; timers via `globals.ts` so `lib` stays `ES2022`-only) |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
@@ -568,14 +572,14 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `virtual.ts` | `enum-from` / `stash` derived points |
 | `errors.ts` | `PaletteError` + `PaletteWriteError` (thrown by locked-bag `set`/`setTree`; adapters catch for UI feedback) |
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll`, context registry (`setContext`/`removeContext` replace-never-append, `getBag`/`resolveBags` never-throw, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners) |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll`, context registry (`setContext`/`removeContext` replace-never-append via `clearListeners` — no forward map, `getBag`/`resolveBags` never-throw, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners) |
 | `palette.ts` | `ServerPointDescriptor` (action/valued/nothing — no `run`, no functional `can`) + `to/fromServerDescriptor` (action rebuild by name via `runners`; nothing-points round-trip), `validateInitialValues` (rejects actions + nothing-points), `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
 | `command-box.ts` | `paletteCommandEntries` / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
 | `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
 | `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
-| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`) |
+| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`) |
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`''` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
-| `context-display.ts` (+ `context-display-types.ts`) | pure `(boundValues, boundBags)` resolvers: `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (Phase 8; no mirroring, no virtual chaining) |
+| `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
 | `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
 | `theme/head-default.css` | dark base + light override (Phase 6, verbatim from svelte; stay in sync per `docs/theming.md`) |
 
@@ -641,6 +645,90 @@ for Phase 10; step 9 is this doc update):
   always present. The vanilla spike (step 7: dirty-set + rAF + one
   context-bound control) rides the Phase 10 demo work.
 
+### Phase 9 status (optimization — landed 2026-09-14)
+
+Internal cleanup, no API-surface changes, no new modules, `packages/svelte/src`
+untouched. Net: −2 files (`context-display-types.ts` folded,
+`liveToSnapshot`/`liveItemToSerialized` deleted), −2 dead methods
+(`store.getOr`/`update`), −1 dead field (`snapshotPalette.points?`), −1 dead
+map (`bagForwards`):
+
+- JSDoc: `readActionCan` docstring fixed (functional-`can` read, not a static
+  flag); stale "Phase N" markers refreshed across `command-box` / `console` /
+  `errors` / `palette` / `points` / `presenters` / `render` (`palette.test.ts`
+  suite renamed to "uses contract + write errors").
+- Dead code: `PaletteStateStore.getOr` + `update` deleted (tests-only, zero
+  production callers — verified by grep across `packages/*/src`); their tests
+  deleted. `snapshotPalette` `input.points?` removed (accepted, never read).
+- Config wiring: `resolveRenderTree` now reads the pinned
+  `trackGapMinGrow` floor (`Math.max(slot.space, gapFloor)`) instead of
+  `void config` — the pinning test asserts the floor applies and ignores
+  later singleton mutations. `trackGapSplit` stays adapter-side
+  (`insertToolbar` param, svelte `ToolbarTrack`/`layout.svelte.ts` readers).
+- Allocations: `points` / `virtualPoints` getters cache (invalidated on
+  `defineVirtual` / `removeVirtual`); test updated to cached-identity +
+  invalidation. Listener `[...set]` snapshot iteration kept deliberately —
+  `Set` iteration during deletion skips not-yet-visited entries the adapter
+  still expects to be notified, and typical adapters have ≤ 3 listeners.
+- Structure: `context-display-types.ts` folded into `context-display.ts`
+  (type-only import tree-shakes identically); `liveToSnapshot` /
+  `liveItemToSerialized` deleted in favour of the canonical exported
+  `layout.snapshotLayout` (same flat-slot serialization + `cloneValue` on
+  inline definitions); `bagForwards` map dropped — `setContext` /
+  `removeContext` / `dispose` rely on `clearListeners()` (the forward was
+  stored but never invoked as a subscription).
+
+### Phase 10 status (vanilla demo parity — landed 2026-09-14)
+
+First parity gate: the vanilla demo is the **same** Stellar Outpost demo as
+the svelte one, and both run the **same** `tests/e2e/` suite
+(`playwright.config.ts`: `svelte` on `:4173`, `vanilla` on `:4174`, plus a
+`vanilla-smoke` project for the vanilla-only spec). `packages/svelte/src`
+untouched. Net: +4 files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`,
+`demo/palette.ts`), demo rewritten (`demo/main.ts`), 2 stale drag specs
+retired, 33 e2e green (16 + 16 + 1 smoke):
+
+- `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (mitosis
+  Phase 2 split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases),
+  `keystrokeFromEvent`, `createVanillaKeys` (normalized map + `findByTool` +
+  `resolve`), `isEditableTarget`. Covered in `keys.test.ts` (3 tests).
+- `vanilla/src/head.ts` — plain-DOM head editors mirroring the svelte head +
+  demo overrides: `renderButton/Toggle/Select/Segmented/Slider(showValue
+  badge)/Stepper/Stars(radiogroup)/Status/CommandBox/Drawer` + `renderHeadItem`
+  dispatch + `surfaceForRegion`. Drawer: trigger `aria-label = label || hint`,
+  chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}` +
+  `data-placement=center` + role dialog, body-portaled overlay, Escape closes
+  + focus trigger. CommandBox: `command-box-combobox/input/results` testids,
+  ✎ open-editor button → console edit mode, Enter runs first filtered entry.
+- `vanilla/src/ide.ts` — `createIDE(container, options)` per the Phase 10
+  interface note: adds `palette-ide` + tabindex + `data-palette-id`, wraps
+  existing children (work-zone) in `palette-ide-middle > palette-ide-center`,
+  renders the 4 borders from `core.layout` (direction/inverse, stack/track
+  spaces with `actualTrackSpaceAt` + `trackGapMinGrow` floor, slots,
+  `toolbar-item-guard` pointerdown→inspect, `inert` content while editing),
+  parking (commandBox-filtered rows + 🗑 remove), console overlay
+  (`console-overlay/input/results/mode-toggle/details-panel/add-panel`
+  testids, `is-dimmed` work-zone, edit-only vs command-first vs read-only,
+  click-to-select add flow, presentation-only configurator + delete). Keydown:
+  `isEditableTarget` guard, Escape closes, editing suppresses bindings, else
+  boolean-toggle or `core.run(spec)`. Subscribes values/layout/console.
+- `vanilla/demo/palette.ts` — plain-data port of the svelte demo: same 15
+  points (incl. `console` toggle point), same `demoKeys`, same 3 configs
+  (`rw-combobox` / `rw-command-first` / `ro-combobox`) + layouts, `demoState`
+  + `resetColony`/`isColonyDirty`.
+- `vanilla/demo/main.ts` — parity page: demo-bar (heading, 3 mode buttons,
+  save/load, last-action), `PaletteCore` + `ConsoleStore` +
+  `bindConsoleToggle`, `createIDE` + work-zone (hero, pills, status panel,
+  hint), `core.values` → `demoState` sync + theme + mm:ss clock, `localStorage`
+  persistence (`palettable-demo-layout-v1` + `validateSerializedLayout`).
+- E2E: the 2 catalogue-drag specs were stale (movement stripped for restart —
+  `plans/movement.md`; svelte unit `console.test.ts` asserts rows are
+  click-to-select, zero `draggable=` in `src`). Replaced with click-to-select
+  assertions; both demos green on the same suite. This unlocks Phase 11,
+  not Phase 12.
+- Gates: core `check`/`build`/`test` (212/15) green, vanilla `check`/`test`
+  (4/2) green, `biome check` clean, `test:e2e` 33 passed.
+
 ### Phase 2 status (landed 2026-09-14)
 `configuration.ts`, `gap-dwell.ts`, and the pure track-space math in
 `layout.svelte.ts` now live in core (`configuration.ts`, `gap-dwell.ts`,
@@ -681,3 +769,7 @@ for Phase 10; step 9 is this doc update):
   and a `workspace:*` dep on core.
 - Unit tests run in **node** (`vitest.config.ts`, `environment: 'node'`), not
   jsdom — core has no DOM to test against.
+- `packages/vanilla/src/` module inventory: `adapter.ts` (minimal
+  `<ul>`-renderer — predates the IDE, kept for the barrel smoke test),
+  `keys.ts` / `head.ts` / `ide.ts` (Phase 10 — the real adapter surface),
+  `keys.test.ts` + `adapter.test.ts` (4 jsdom tests across 2 files).

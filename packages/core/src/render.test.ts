@@ -300,23 +300,31 @@ describe('action isolation', () => {
 })
 
 describe('configuration pinning', () => {
-	it('ignores later singleton mutations when config is pinned', () => {
+	it('applies the pinned gap floor, ignoring later singleton mutations', () => {
 		const core = new PaletteCore(points())
-		const pinned = { ...configuration }
+		const layout = defaultLayoutFromPoints(['theme'])
+		const zeroed = {
+			...layout,
+			borders: {
+				...layout.borders,
+				top: [{ ...layout.borders.top[0]!, space: 0 }],
+			},
+		}
+		const pinned = { ...configuration, trackGapMinGrow: 0.5 }
 		const input = {
 			points: core.points,
-			layout: defaultLayoutFromPoints(['theme']),
+			layout: zeroed,
 			values: core.values.asObject(),
 			editors: registry,
 			configuration: pinned,
 		}
-		const before = JSON.stringify(resolveRenderTree(input))
-		const saved = configuration.trackGapSplit
-		configuration.trackGapSplit = saved + 0.25
+		expect(resolveRenderTree(input).borders.top.slots[0]?.space).toBe(0.5)
+		const saved = configuration.trackGapMinGrow
+		configuration.trackGapMinGrow = 0.9
 		try {
-			expect(JSON.stringify(resolveRenderTree(input))).toBe(before)
+			expect(resolveRenderTree(input).borders.top.slots[0]?.space).toBe(0.5)
 		} finally {
-			configuration.trackGapSplit = saved
+			configuration.trackGapMinGrow = saved
 		}
 	})
 })

@@ -11,9 +11,8 @@
  * only pure modules — never `globals.ts`, `gap-dwell.ts`, or `umd.ts`
  * (enforced by `render.test.ts` import-graph test).
  *
- * Context readiness: the input shape stays bag-extensible (param-array
- * `(boundValues, boundBags)` flows through, not a single-store assumption)
- * so Phase 8 plugs bags in without re-shaping.
+ * Context: the input shape is bag-extensible (optional `bags`, threaded
+ * through for Phase 8 resolvers — not a single-store assumption).
  */
 import type { PaletteConfiguration } from './configuration.js'
 import { configuration } from './configuration.js'
@@ -29,7 +28,7 @@ import type {
 	SurfaceContext,
 	ToolbarItem,
 } from './layout.js'
-import { isDrawerItem, validateSerializedLayout } from './layout.js'
+import { isDrawerItem, snapshotLayout, validateSerializedLayout } from './layout.js'
 import type { ServerPointDescriptor } from './palette.js'
 import type { ActionPoint, AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isValuedPoint } from './points.js'
@@ -100,9 +99,15 @@ export type RenderInput = {
 	readonly keys?: KeyBindings
 	readonly editors?: EditorRegistry
 	readonly editorDefaults?: EditorDefaults
-	/** Pinned configuration (defaults to the live singleton for back-compat). */
+	/**
+	 * Pinned configuration (defaults to the live singleton for back-compat).
+	 * Only `trackGapMinGrow` affects resting geometry: track-gap slots with
+	 * `space` below the floor resolve to the floor (adapters apply the same
+	 * floor at render, see `configuration.trackGapMinGrow`). The two `…Ms`
+	 * timeouts never affect SSR output but are pinned for the hydration check.
+	 */
 	readonly configuration?: PaletteConfiguration
-	/** Optional context bags (Phase 8 extensibility — accepted, threaded through). */
+	/** Optional context bags (accepted, threaded through for resolvers). */
 	readonly bags?: readonly unknown[]
 }
 
@@ -114,7 +119,6 @@ export type RenderInput = {
  * core never mutates a snapshot it handed out.
  */
 export function snapshotPalette(input: {
-	readonly points?: readonly AnyPoint[]
 	readonly virtuals?: readonly VirtualPoint[]
 	readonly layout: SerializedLayout | PaletteLayout
 	readonly values: Readonly<Record<string, unknown>>
@@ -136,38 +140,14 @@ function structuredCloneLayout(layout: SerializedLayout): SerializedLayout {
 	return JSON.parse(JSON.stringify(layout)) as SerializedLayout
 }
 
+/**
+ * Serialize a live layout via the canonical `layout.ts` serializer
+ * (`snapshotLayout` — flat slot list, inline definitions deep-cloned via
+ * `cloneValue`). No private duplicate: the render path is read-only, so
+ * the same serializer the tree uses is exactly right here.
+ */
 function liveToSnapshot(layout: PaletteLayout): SerializedLayout {
-	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
-	const borders = {} as SerializedLayout['borders']
-	for (const region of regions) {
-		borders[region] = layout.borders[region].flatMap((track) =>
-			track.map((slot) => ({
-				space: slot.space,
-				toolbar: slot.toolbar.map((item) => liveItemToSerialized(item)),
-			}))
-		)
-	}
-	return {
-		version: 1,
-		borders,
-		parking: layout.parking.map((toolbar) => toolbar.map((item) => liveItemToSerialized(item))),
-	}
-}
-
-function liveItemToSerialized(item: ToolbarItem): SerializedToolbarItem {
-	if (isDrawerItem(item)) {
-		return {
-			editor: 'drawer',
-			config: item.config,
-			toolbar: item.toolbar.map((child) => liveItemToSerialized(child)),
-		}
-	}
-	const tool = (item as { tool?: unknown }).tool
-	return {
-		tool: tool as string | VirtualPoint,
-		editor: (item as { editor?: string }).editor,
-		config: (item as { config?: Record<string, unknown> }).config,
-	}
+	return snapshotLayout(layout)
 }
 
 /**
@@ -182,8 +162,7 @@ export function resolveRenderTree(input: RenderInput): ResolvedPalette {
 	for (const virtual of input.virtuals ?? []) virtuals.set(virtual.id, virtual)
 	const values = input.values
 	const keys = input.keys ?? {}
-	const config = input.configuration ?? configuration
-	void config
+	const gapFloor = input.configuration?.trackGapMinGrow ?? configuration.trackGapMinGrow
 
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	const borders = {} as Record<PaletteRegion, ResolvedRegion>
@@ -193,7 +172,7 @@ export function resolveRenderTree(input: RenderInput): ResolvedPalette {
 		const surface: SurfaceContext = { axis, region }
 		borders[region] = {
 			slots: live.borders[region].map((slot) => ({
-				space: slot.space,
+				space: Math.max(slot.space, gapFloor),
 				toolbar: {
 					items: slot.toolbar.map((item) =>
 						resolveItem(item, { definitions, virtuals, values, keys, surface, depth: 0, input })

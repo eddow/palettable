@@ -8,9 +8,13 @@
  * "context absent" → disabled + placeholder unless the resolver defines
  * otherwise).
  */
-import type { BagKeyOf, BoundBags, BoundValues } from './context-display-types.js'
+import type { ValuesBag } from './context.js'
 
-export type { BagKeyOf, BoundBags, BoundValues } from './context-display-types.js'
+/** Aligned root values in `uses` order (one slot per used name). */
+export type BoundValues = readonly unknown[]
+
+/** Aligned bags in `uses` order (`undefined` = bag not registered). */
+export type BoundBags = readonly (ValuesBag | undefined)[]
 
 /** Sentinel for a missing context bag (`undefined` slot in `boundBags`). */
 export const missingContext = undefined
@@ -44,7 +48,7 @@ export function boundValueAt(boundValues: BoundValues, index: number): unknown {
  * Resolve one bound bag by index from the param-array pair. Missing
  * index → `undefined` (missing context, never throws).
  */
-export function boundBagAt(boundBags: BoundBags, index: number): BagKeyOf | undefined {
+export function boundBagAt(boundBags: BoundBags, index: number): ValuesBag | undefined {
 	return boundBags[index]
 }
 

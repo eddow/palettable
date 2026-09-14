@@ -7,3 +7,6 @@
  * components live here — never in core.
  */
 export * from './adapter.js'
+export * from './head.js'
+export * from './ide.js'
+export * from './keys.js'

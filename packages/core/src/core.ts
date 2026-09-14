@@ -81,6 +81,9 @@ export class PaletteCore {
 	readonly editorDefaults: EditorDefaults | undefined
 	private definitions = new Map<string, AnyPoint>()
 	private virtuals = new Map<string, VirtualPoint>()
+	/** Cached definition arrays (invalidated on registry mutation). */
+	private pointsCache: readonly AnyPoint[] | undefined
+	private virtualPointsCache: readonly VirtualPoint[] | undefined
 	/** Single aside slot per stash id (there is no stack). */
 	private stashAsides = new Map<string, StashAside>()
 
@@ -109,14 +112,14 @@ export class PaletteCore {
 		this.editorDefaults = options.editorDefaults
 	}
 
-	/** All registered point definitions (fresh array each call). */
+	/** All registered point definitions (cached; invalidated on registry mutation). */
 	get points(): readonly AnyPoint[] {
-		return [...this.definitions.values()]
+		return (this.pointsCache ??= [...this.definitions.values()])
 	}
 
-	/** All registered virtual definitions (fresh array each call). */
+	/** All registered virtual definitions (cached; invalidated on registry mutation). */
 	get virtualPoints(): readonly VirtualPoint[] {
-		return [...this.virtuals.values()]
+		return (this.virtualPointsCache ??= [...this.virtuals.values()])
 	}
 
 	getDefinition(id: string): AnyPoint | undefined {
@@ -145,10 +148,9 @@ export class PaletteCore {
 	}
 
 	/**
-	 * Read the static `can` flag of an action point (`undefined` = enabled).
-	 * Stays a plain read this phase — the static→functional migration lands
-	 * in Phase 9 (adapters switch to `evaluateCan(id)` then, not now).
-	 * Throws `PaletteError` on unknown ids and non-action points.
+	 * Evaluate the functional `can` of an action point with the
+	 * currently-registered bags (missing → `undefined` slot; omitted `can`
+	 * = enabled). Throws `PaletteError` on unknown ids and non-action points.
 	 */
 	readActionCan(id: string): boolean | undefined {
 		const pointId = canonicalPointId(id)
@@ -163,7 +165,6 @@ export class PaletteCore {
 	// are host-owned via `setContext` / `removeContext` (replace-never-append).
 
 	private bags = new Map<ContextName, ValuesBag>()
-	private bagForwards = new Map<ContextName, Unsubscribe>()
 	private contextListeners = new Set<ContextListener>()
 	private canListeners = new Set<CanListener>()
 	private canCache = new Map<string, boolean>()
@@ -175,12 +176,11 @@ export class PaletteCore {
 	 * (re-resolve bags, re-evaluate `can`, re-run display resolvers).
 	 */
 	setContext(name: ContextName, bag: ValuesBag): void {
-		const oldForward = this.bagForwards.get(name)
-		oldForward?.()
-		this.bagForwards.delete(name)
+		// Replace-never-append (§1.3): the old bag's listeners (including
+		// core's forward) are cleared; the new bag gets a fresh forward.
+		this.bags.get(name)?.clearListeners()
 		this.bags.set(name, bag)
-		const forward = bag.subscribe((changed) => this.onBagChanged(name, changed))
-		this.bagForwards.set(name, forward)
+		bag.subscribe((changed) => this.onBagChanged(name, changed))
 		this.refreshCanForBag(name)
 		this.emitContext(name, [])
 	}
@@ -191,11 +191,7 @@ export class PaletteCore {
 	 * unless their `can` / resolvers define otherwise).
 	 */
 	removeContext(name: ContextName): void {
-		const forward = this.bagForwards.get(name)
-		forward?.()
-		this.bagForwards.delete(name)
-		const bag = this.bags.get(name)
-		bag?.clearListeners()
+		this.bags.get(name)?.clearListeners()
 		this.bags.delete(name)
 		this.refreshCanForBag(name)
 		this.emitContext(name, [])
@@ -311,12 +307,14 @@ export class PaletteCore {
 		if (this.virtuals.has(virtual.id)) ids.delete(virtual.id)
 		assertValidVirtual(virtual, this.definitions, ids)
 		this.virtuals.set(virtual.id, virtual)
+		this.virtualPointsCache = undefined
 		this.stashAsides.delete(virtual.id)
 	}
 
 	/** Remove a virtual point (drops its stash aside slot). */
 	removeVirtual(id: string): void {
 		this.virtuals.delete(id)
+		this.virtualPointsCache = undefined
 		this.stashAsides.delete(id)
 	}
 
@@ -430,8 +428,6 @@ export class PaletteCore {
 	dispose(): void {
 		this.values.clearListeners()
 		this.layout.clearListeners()
-		for (const forward of this.bagForwards.values()) forward?.()
-		this.bagForwards.clear()
 		for (const bag of this.bags.values()) bag.clearListeners()
 		this.bags.clear()
 		this.contextListeners.clear()

@@ -20,9 +20,10 @@
  *   editor choices, set-text/tone/editor payloads) land here as
  *   `configuratorModel`.
  * - Presenters take the param-array display shape `(boundValues, boundBags)`
- *   (Context §2.2, §4 step 6) so Phase 9 resolvers plug in without
- *   re-shaping; context flows down into drawer child tools (Context §1.2).
- *   This phase the bags array is accepted and ignored (no bags yet).
+ *   (Context §2.2, §4 step 6); context flows down into drawer child tools
+ *   (Context §1.2). `BoundDisplay.bags` carries the bags in `uses` order
+ *   (`undefined` = unregistered) — `buttonPresenter` evaluates functional
+ *   `can` against them unless an explicit `can` override is passed.
  *
  * SSR (§4.3): this module also lands `resolveEditorVariant()` — the
  * single-id fallback chain the render model needs — alongside the
@@ -149,8 +150,8 @@ export type BoundDisplay = {
 	readonly value: unknown
 	/**
 	 * Context bags in `uses` order (`undefined` = unregistered).
-	 * Phase 8 load-bearing: `buttonPresenter` evaluates functional `can`
-	 * against these when no explicit `can` override is passed.
+	 * `buttonPresenter` evaluates functional `can` against these when no
+	 * explicit `can` override is passed.
 	 */
 	readonly bags?: readonly (import('./context.js').ValuesBag | undefined)[]
 }

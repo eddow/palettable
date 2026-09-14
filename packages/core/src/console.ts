@@ -6,8 +6,7 @@
  * state + listener set: adapters subscribe and mirror reactively.
  *
  * SSR: console is resting-state only (no timers/popups/interactivity on
- * the server). Context: `consoleTool` stays a run point this phase; its
- * nothing-point form lands in Phase 9.
+ * the server).
  */
 import type { Unsubscribe } from './identifiers.js'
 
@@ -127,7 +126,7 @@ export class ConsoleStore {
 /**
  * Build a `console` action-point descriptor (run point, no svelte import).
  * The adapter binds `run` to a `ConsoleStore` toggle; `label`/`icon` are
- * overridable. Stays a run point this phase (nothing-point form in Phase 9).
+ * overridable.
  */
 export function consolePointDescriptor(options?: { label?: string; icon?: string }): {
 	readonly id: 'console'

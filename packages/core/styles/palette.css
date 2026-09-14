@@ -57,6 +57,7 @@
 	height: 100%;
 	/* Base drop-zone highlight size; doubled when directly hovered. */
 	--palette-dz-size: 0.5em;
+	overflow: hidden;
 }
 
 .palette-ide-middle {

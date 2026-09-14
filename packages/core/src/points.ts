@@ -18,7 +18,7 @@ export type PointBase<K extends PointType = PointType> = {
 	readonly keywords?: readonly string[]
 	readonly icon?: IconToken
 	/**
-	 * Optional context bags this point operates on (Phase 8 load-bearing).
+	 * Optional context bags this point operates on.
 	 * Each name resolves to `ValuesBag | undefined` (`undefined` = bag not
 	 * registered). `undefined` uses = root bag only, as before. `''` may
 	 * appear explicitly to receive the root bag as an argument.

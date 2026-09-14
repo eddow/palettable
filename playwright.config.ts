@@ -14,8 +14,8 @@ export default defineConfig({
 		trace: 'on-first-retry',
 	},
 	// One project per demo, both running the same specs (mitosis parity
-	// target). The vanilla demo is not at parity yet, so its project only
-	// runs the vanilla smoke spec until it catches up.
+	// target). The vanilla demo is at parity now, so both projects run the
+	// shared suite; the vanilla smoke spec is vanilla-only.
 	projects: [
 		{
 			name: 'svelte',
@@ -24,6 +24,11 @@ export default defineConfig({
 		},
 		{
 			name: 'vanilla',
+			use: { baseURL: 'http://localhost:4174' },
+			testIgnore: /vanilla\.spec\.ts/,
+		},
+		{
+			name: 'vanilla-smoke',
 			use: { baseURL: 'http://localhost:4174' },
 			testMatch: /vanilla\.spec\.ts/,
 		},

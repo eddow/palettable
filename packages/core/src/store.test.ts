@@ -18,12 +18,6 @@ describe('PaletteStateStore', () => {
 		expect(state.get('unknown')).toBeUndefined()
 	})
 
-	it('getOr falls back for unknown ids', () => {
-		const state = new PaletteStateStore(points)
-		expect(state.getOr('theme', 'dark')).toBe('light')
-		expect(state.getOr('unknown', 'dark')).toBe('dark')
-	})
-
 	it('set writes and notifies global + key listeners', () => {
 		const state = new PaletteStateStore(points)
 		const global = vi.fn()
@@ -53,12 +47,6 @@ describe('PaletteStateStore', () => {
 		state.set('theme', Number.NaN as never)
 		state.set('theme', Number.NaN as never)
 		expect(global).toHaveBeenCalledTimes(1)
-	})
-
-	it('update applies the updater function', () => {
-		const state = new PaletteStateStore(points)
-		state.update<'number'>('fontSize', (previous) => (previous ?? 0) + 1)
-		expect(state.get('fontSize')).toBe(15)
 	})
 
 	it('reset restores one default; resetAll restores every valued point', () => {
