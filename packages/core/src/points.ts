@@ -17,6 +17,13 @@ export type PointBase<K extends PointType = PointType> = {
 	readonly categories?: readonly string[]
 	readonly keywords?: readonly string[]
 	readonly icon?: IconToken
+	/**
+	 * Optional context bags this point operates on (Phase 9 readiness stub).
+	 * `undefined` = root bag only, as today. No behaviour change this phase —
+	 * `run` / `can` keep today's signatures; Phase 9 makes `uses` load-bearing
+	 * (`ValuesBag` registry, `NothingPoint`, functional `can`).
+	 */
+	readonly uses?: readonly string[]
 }
 
 /** Runnable point: an imperative action (e.g. `saveGame`, `console`). */

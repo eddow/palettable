@@ -26,7 +26,7 @@ export class VanillaAdapter {
 	/** Mount: subscribe to the value store and render once. Idempotent. */
 	mount(): void {
 		if (this.unsubscribe !== null) return
-		this.unsubscribe = this.core.subscribe(() => this.render())
+		this.unsubscribe = this.core.values.subscribe(() => this.render())
 		this.render()
 	}
 

@@ -1,6 +1,6 @@
-# Mitosis — split `svelte` into `core` + `vanilla` + `svelte`
+# Mitosis — split `svelte` into `core` + `vanilla` + `vue` + `svelte`
 
-> Status: **active plan — Phase 2 landed, Phases 3–7 + SSR + Context remaining.**
+> Status: **active plan — Phase 2 landed, Phases 3–7 + 6c + SSR + Context remaining.**
 > `packages/core` (headless, DOM-free) and `packages/vanilla` (vanilla-DOM
 > adapter + demo) exist and are green; `packages/svelte` is still
 > self-contained and does **not** import core yet. Order: build `core`+
@@ -23,7 +23,8 @@
 
 The migration is deliberately **additive first, subtractive last**. `packages/svelte`
 is the working reference implementation and stays **untouched** until the new
-stack is proven. Three stages, in this order:
+stack is proven — svelte is kept as reference until we have `vanilla` + one
+reactive framework (`vue`). Four stages, in this order:
 
 1. **Build `core` + `vanilla` without touching `svelte`.**
    Every capability is implemented fresh in `core` (headless) and `vanilla`
@@ -40,9 +41,16 @@ stack is proven. Three stages, in this order:
    `svelte build && preview` on `:4173`, specs `page.goto('/')`). The target is
    one project per demo, all running the same specs. A demo that is merely
    "similar" is worthless there — the specs assert concrete DOM, so parity must
-   be exact. Passing the same e2e suite against both demos is what proves `core`
+   be exact. Passing the same e2e suite against all demos is what proves `core`
    is a faithful extraction rather than a plausible rewrite.
-3. **Only then rewrite `svelte` to depend on `core`.**
+3. **Build `core` + `vue` without touching `svelte`, then reach vue demo parity.**
+   `packages/vue` is the second adapter — the one reactive framework (besides
+   vanilla) required before `svelte` may move. Same rule as stage 1: additive
+   only, `svelte` stays the untouched oracle. The `packages/vue` demo must
+   reproduce the same Stellar Outpost demo feature-for-feature and pass the
+   same `tests/e2e/` suite (own playwright project, own port). Svelte is kept
+   as reference until **both** `vanilla` and `vue` parities are green.
+4. **Only then rewrite `svelte` to depend on `core`.**
    With parity proven, `svelte` becomes a thin adapter: delete its duplicated
    implementation and re-export / delegate to `core` (Phases 3–7). Any
    behavioural difference that surfaces at this point is a `core` bug, not a
@@ -50,15 +58,17 @@ stack is proven. Three stages, in this order:
 
 Consequences for how work is sequenced:
 
-- Phases 2–5 + 8 + 9 are **additive**: they add to `core`/`vanilla` and leave `svelte`
+- Phases 2–6c + 8 + 9 are **additive**: they add to `core`/`vanilla`/`vue` and leave `svelte`
   alone. Nothing in `packages/svelte/src` is edited until Phase 7.
 - The vanilla demo is built up **alongside** the core phases, not after them —
   each capability that lands in `core` should show up in the vanilla demo so
-  parity is tracked continuously rather than assessed at the end.
-- `svelte`'s existing tests stay green throughout stages 1–2 (they are the
+  parity is tracked continuously rather than assessed at the end. The vue demo
+  follows the same rule once `packages/vue` is scaffolded (Phase 6c).
+- `svelte`'s existing tests stay green throughout stages 1–3 (they are the
   regression net for the reference implementation).
 - Phase 7 is the only phase allowed to delete svelte code, and it is gated on
-  the e2e suite passing against **both** demos.
+  the e2e suite passing against **all three** demos (svelte reference + vanilla
+  + vue — Phases 6b + 6c).
 - SSR never reorders the phases (`plans/ssr.md` §4–§7 map onto Phases 3–5 + 8,
   never before them). Each phase keeps the core import-safe under plain Node
   (no `document`, no timers firing, no `run()` reachable from the render path);
@@ -86,6 +96,11 @@ Consequences for how work is sequenced:
   pointer math / drag sessions / head components (as they land), and the
   vite demo (`demo/main.ts` + `index.html`). Rolled-up cjs/mjs/umd
   (`external: ['@palettable/core']`), vitest `jsdom`.
+- **`packages/vue` (Vue adapter + demo — Phase 6c):**
+  imports `core` only (never the reverse); owns Vue reactive wrappers
+  (`ref`/`computed`/`watch`), directives/actions, layout/head components,
+  demo. Proves the core works with a reactive framework other than svelte
+  before `svelte` is thinned.
 - **`packages/svelte` (Svelte adapter + head + demo):**
   imports `core` only (never the reverse); owns `.svelte.ts` reactive
   wrappers (`$state`/`$derived`/`$effect`), Svelte actions, layout/head
@@ -115,9 +130,10 @@ packages/core/src/              # landed 2026-09-14 — see docs/architecture.md
   globals.ts        # scheduleMicrotask + scheduleHostTimeout/clearHostTimeout + cloneValue
   configuration.ts  # Phase 2: configuration magic numbers (verbatim)
   gap-dwell.ts      # Phase 2: GapDwell state machine (timers via globals.ts)
-  core.ts           # PaletteCore (registry + store + layout + virtuals + resolveTargetVirtual)
-  *.test.ts         # 132 node tests across 9 files (phase2.test.ts: 27)
-  # target additions (Phases 3–6 + 8 + 9):
+  core.ts           # PaletteCore (registry + values store + layout + virtuals + resolveTargetVirtual + canRunAction)
+  palette.ts        # Phase 3: ServerPointDescriptor + to/fromServerDescriptor + validateInitialValues + readSetterValue
+  *.test.ts         # 150 node tests across 10 files
+  # target additions (Phases 4–6 + 8 + 9):
   # palette.ts, command-box.ts, console.ts, presenters.ts,
   # render.ts (Phase 8: resolveRenderTree + snapshotPalette + descriptors),
   # context.ts (Phase 9: ValuesBag + bag registry surface),
@@ -185,8 +201,8 @@ packages/svelte/src/lib/
       commit fns + drag actions (Phase 5, rebuilt — do NOT port the old
       slide engine). `keys.ts` already split per the Phase 2 decision
       (core: headless lookup; adapter: `KeyboardEvent` normalization).
-- [x] Verified: core `check` + `build` + `test` green (125 node tests,
-      incl. new `phase2.test.ts` with 26), svelte `check` (0 errors) +
+- [x] Verified: core `check` + `build` + `test` green (149 node tests),
+      svelte `check` (0 errors) +
       `vitest run` (179) green untouched, vanilla `check` + `test` green,
       `biome check packages/core` clean. `packages/svelte/src` unedited.
 - [x] Point-spec union (follow-up 2026-09-14): a spec is `PointTarget`
@@ -199,7 +215,7 @@ packages/svelte/src/lib/
       `globals.cloneValue`), `keys.ts` (`findKeystrokesForTarget`; `KeyBindings`
       values stay strings — a key to an inline stash uses its `id`),
       `core.ts` (`resolveTargetVirtual`: registered-by-id or inline-validated).
-      Verified: core `check` + `build` + `test` green (132 node tests),
+      Verified: core `check` + `build` + `test` green (149 node tests),
       `biome check` clean. `packages/svelte/src` unedited.
 
 ## Phase 3 — `Palette` runtime (de-rune) + SSR hydration inputs
@@ -208,21 +224,27 @@ packages/svelte/src/lib/
 > in `core/src/` as `core.ts` (+ `layout.ts` for the tree, `store.ts` for the
 > store). This phase now means: move the remaining svelte runtime bits below.
 
-- [ ] Move `valueActions`, `valueReader`, `resolveEditableTool`,
+- [x] Move `valueActions`, `valueReader`, `resolveEditableTool`,
       `paletteTool*` helpers, `serializePaletteLayout` / `validatePaletteLayout` /
       `hydratePaletteLayout` (return plain objects; svelte wraps with `$state` at
-      the call site — see `palette.svelte.ts:1245` `$state(plain)` pattern).
-- [ ] `Palette` class: keep config/tools/keys/editors resolution verbatim;
+      the call site — see `palette.svelte.ts:1245` `$state(plain)` pattern) — landed 2026-09-14 as headless core ports (svelte keeps its own copies until Phase 7):
+  - `valueActions` (number `inc`/`dec` with `step`) **and** its bounds-checked `can`, reviewed + fixed 2026-09-14: `run('id:inc'|'id:dec')` applies the step via `core.ts:applyNamedAction` (a private method — it needs the store), and `PaletteCore.canRunAction(id, action)` exposes the pure bounds check (`inc` vs `max`, `dec` vs `min`, `undefined` bound = unlimited) mirroring the svelte reference's `valueActions.number.inc.get can()`. Unknown action → `PaletteError`, not a silent `true`. `valueReader` (boolean `1`/`true`/`0`/`false`, `Number` with finite/blank rejection, string passthrough) landed as `palette.ts:readSetterValue` and is **the single coercion path** — `coerceSetterValue` was deleted (it was a second, weaker copy: it accepted blank → `0` and `Infinity`, diverging from the oracle); `resolveEditableTool` (unknown/action/family-mismatch throws) landed as `core.ts:resolveEditablePoint`. Deliberate divergence: an unrecognized boolean token (`"maybe"`) throws instead of silently coercing to `false`.
+  - `serializePaletteLayout` / `hydratePaletteLayout` already lived in `core/layout.ts` as `getSnapshot` / `setLayout` / `fromSerializedLayout` (flat slot list, each slot in its own track, deep-clone, inline definitions verbatim); `validatePaletteLayout` landed as `layout.ts:validateSerializedLayout` (version/regions/items/inline-tool/config/drawer checks, never throws). Covered in `layout.test.ts` + `palette.test.ts`; 150 node tests green.
+  - Deliberately **not** ported: the `Palette` class itself (config/tools/keys/editors resolution over live component-bearing tool objects + `runner`/`setter` wrapper hooks — adapter-owned, components never cross into core), `paletteTool*` runner factories returning `{ can, run }` closures over live tool objects (core's `run(spec)` is the headless equivalent), the `setter` toggle-restore `WeakMap` behaviour (svelte-only value semantics, no core counterpart), `palettes = $state(…)` (svelte reactive mirror — core exposes `values.subscribe`/`subscribeLayout` instead), `resolveItemPlacementTarget` (border/track terms — movement rebuilds it in Phase 5), `describeItemConfiguration` / `resolveEditor` / `renderEditor` / `renderConfigurator` (editor-registry + component surface — Phase 5 presenters).
+- [x] `Palette` class: keep config/tools/keys/editors resolution verbatim;
       replace `get editing()` `$state` read with injected store predicate
-      (`store.editing === this`); keep `dispose()` no-op for parity.
-- [ ] Svelte keeps `palettes = $state(…)` as the reactive mirror of the core store.
-- [ ] Context readiness (from `plans/context.md` — no bags yet, just don't block Phase 9):
-  - `PointBase` gains `uses?: readonly ContextName[]` (optional bags; `undefined` = root only as today). No behaviour change — `run`/`can` keep today's signatures this phase.
-  - `PaletteStateStore` gains `setTree(patch)` (apply all pairs, collect `Object.is`-changed keys, notify once with the changed-key array). Existing `set()`/`notify()` unchanged. Tests in `store.test.ts`.
-  - `errors.ts` gains `PaletteWriteError extends PaletteError` (thrown by bag writes; adapters catch for UI feedback). No other error change.
+      (`store.editing === this`); keep `dispose()` no-op for parity. — decided 2026-09-14: **not ported** (see above — the class is adapter-owned; core's `PaletteCore` + `values.subscribe`/`subscribeLayout` + `dispose` (drops value **and** layout listeners) is the headless equivalent).
+- [x] Svelte keeps `palettes = $state(…)` as the reactive mirror of the core store. — confirmed: core exposes `values.subscribe`/`subscribeLayout`, svelte keeps `$state palettes` until Phase 7.
+- [x] **No duplicated value surface** (review fix 2026-09-14): `PaletteCore` does **not** re-implement get/set/events. The former `getValue` / `setValue` / `resetValue` / `subscribe` wrappers were deleted and the store is exposed as `PaletteCore.values` (`PaletteStateStore`) — adapters read/write/subscribe there directly. Only what the raw store cannot do stays on core: virtual resolution (`resolveTargetVirtual`), command execution (`run` / `runStash` / `canRunAction`), core-owned stash aside slots, validated batch hydration (`setMany` / `initialValues`), and `resetAll` (bridges store reset + stash-aside clear). This removes the old footgun where `core.subscribe('someVirtual', …)` never fired (it proxied the virtual-unaware store) while `core.getValue('someVirtual')` did resolve.
+  - `run()` is **synchronous** (review fix): `PaletteError`s are thrown, not rejected, matching the svelte oracle. Action-point `run()` may return a promise; core does not await it — the caller decides.
+- [x] Context readiness (from `plans/context.md` — no bags yet, just don't block Phase 9) — landed 2026-09-14:
+  - `PointBase` gains `uses?: readonly ContextName[]` (optional bags; `undefined` = root only as today). No behaviour change — `run`/`can` keep today's signatures this phase. Landed: `points.ts` (`uses?: readonly string[]`).
+  - `PaletteStateStore` gains `setTree(patch)` (apply all pairs, collect `Object.is`-changed keys, notify once with the changed-key array). Existing `set()`/`notify()` unchanged. Tests in `store.test.ts`. Landed: `store.ts` (`setTree` — all writes land before any listener runs, returns changed keys; covered in `palette.test.ts`).
+  - `errors.ts` gains `PaletteWriteError extends PaletteError` (thrown by bag writes; adapters catch for UI feedback). No other error change. Landed: `errors.ts` (stub — no core code throws it yet; covered in `palette.test.ts`).
   - `ActionPoint.can` stays readable as today this phase — the static→functional migration lands in Phase 9 (adapters switch to `evaluateCan(id)` then, not now).
-- [ ] SSR inputs (from `plans/ssr.md` §4.1–§4.2 — land here because they touch
-      the same `core.ts`/`store.ts`/`points.ts` surface, not as a separate pass):
+  - NOTE for Phase 9: `PaletteCore.canRunAction` is the named-action `can`; the Phase 9 functional `can`/`evaluateCan` is a different channel (point-level, bag-aware) — keep them distinct.
+- [x] SSR inputs (from `plans/ssr.md` §4.1–§4.2 — land here because they touch
+      the same `core.ts`/`store.ts`/`points.ts` surface, not as a separate pass) — landed 2026-09-14 (`core/palette.ts`: `ServerPointDescriptor` + `to/fromServerDescriptor` + `validateInitialValues` + `readSetterValue`; `core.ts`: `initialValues` + `setMany` + `resolveEditablePoint` + `readActionCan` + `canRunAction`; `layout.ts`: `validateSerializedLayout`; covered in `palette.test.ts` + `layout.test.ts`; 150 node tests green):
   - `initialValues?: Readonly<Record<string, unknown>>` on `PaletteCoreOptions`
     (and/or `PaletteStateStore`), applied after defaults, validated per point
     (`unknown id` → throw, `action` id → throw, `Object.is`-equal → skip
@@ -419,7 +441,7 @@ packages/svelte/src/lib/
       `docs/core-concepts.md`; migrate context decisions to
       `docs/architecture.md` (new §23); retire `plans/context.md` once landed.
 
-## Phase 6b — vanilla demo parity (gate for Phase 7)
+## Phase 6b — vanilla demo parity (first parity gate)
 
 > This is the acceptance criterion for stages 1–2 of the evolution strategy:
 > the vanilla demo must be the **same demo** as the svelte one, because
@@ -444,12 +466,40 @@ packages/svelte/src/lib/
 - [ ] Extend `playwright.config.ts` to one project per demo (svelte on `:4173`,
       vanilla on its own port) and run the **same** `tests/e2e/*.spec.ts`
       against both.
-- [ ] Gate: `tests/e2e/` green against **both** demos. Only then may Phase 7
-      delete svelte code.
+- [ ] Gate: `tests/e2e/` green against **both** demos (svelte reference +
+      vanilla). This unlocks Phase 6c, not Phase 7.
 
-## Phase 7 — thin the adapter, close out
+## Phase 6c — vue adapter + demo parity (second parity gate)
 
-> **Only phase allowed to edit `packages/svelte/src`.** Gated on Phase 6b:
+> This is the acceptance criterion for stage 3 of the evolution strategy:
+> `svelte` is kept as reference until we have `vanilla` **+ one reactive
+> framework** (`vue`). Gated on Phase 6b (vanilla parity green) — the vue
+> adapter builds on the same core surface the vanilla parity already proved.
+>
+> SSR note: the vue demo is client-rendered like the others; SSR coverage
+> stays in the Phase 8 render-model tests (core, node). Do not gate vue
+> parity on SSR output — but do not break the Phase 8 import-graph rule
+> (demo code lives in the adapter, never in the render path).
+>
+> Context note: the vue demo stays context-free (root bag only); context
+> coverage comes from the Phase 9 vanilla spike + core tests, not from e2e.
+
+- [ ] Scaffold `packages/vue/` (Vue adapter + vite demo): imports `core`
+      only (never the reverse); owns Vue reactive wrappers
+      (`ref`/`computed`/`watch`), directives/actions, layout/head components.
+      Add to `pnpm-workspace.yaml` (`packages/*` already covers it) +
+      `playwright.config.ts` (own project, own port).
+- [ ] Port the same Stellar Outpost demo to `packages/vue/demo/`
+      feature-for-feature (same reference as Phase 6b:
+      `packages/svelte/src/routes/+page.svelte` +
+      `src/demo/palette.svelte.ts`): same points, same initial layout, same
+      editors, same console, same drag behaviour, same DOM contract the e2e
+      specs assert.
+- [ ] Run the **same** `tests/e2e/*.spec.ts` against all three demos.
+- [ ] Gate: `tests/e2e/` green against **all three** demos (svelte reference
+      + vanilla + vue). Only then may Phase 7 delete svelte code.
+
+> **Only phase allowed to edit `packages/svelte/src`.** Gated on Phase 6c:
 > with parity proven, `svelte` becomes a thin adapter over `core`. Any
 > behavioural difference that surfaces here is a `core` bug — fix `core`, do
 > not keep the old implementation.
@@ -465,12 +515,13 @@ packages/svelte/src/lib/
 - [ ] Docs per repo rule (`AGENTS.md`): remove completed items here, migrate
       permanent contracts to `docs/architecture.md` (+ `theming.md`,
       `layout-and-drag.md`, `core-concepts.md` as touched).
-- [ ] Done = `tests/e2e/` green against **both** demos (Phase 6b gate),
+- [ ] Done = `tests/e2e/` green against **all three** demos (Phase 6b + 6c gates),
       Phase 8 render-model tests green (SSR gate),
       Phase 9 context tests green (`context.test.ts`, `context-display.test.ts`,
       store `setTree`, core bag/`can` channels, vanilla spike — Context gate),
       `pnpm --filter @palettable/core check/build/test` green,
       `pnpm --filter @palettable/vanilla check/build/test` green,
+      `pnpm --filter @palettable/vue check/build/test` green,
       `pnpm --filter @palettable/svelte check/test` green, `biome check` clean,
       no `svelte` import in `packages/core/src`, no `HTMLElement`/`document`
       in `packages/core/src` (compiler-enforced — see `docs/architecture.md §21`),
@@ -597,10 +648,11 @@ packages/svelte/src/lib/
 
 ## Non-goals / guardrails
 
-- **Order is not negotiable**: additive first (`core` + `vanilla`), parity
-  second (same demo, same e2e suite), subtractive last (`svelte` depends on
-  `core`). Do not start Phase 7 before Phase 6b is green.
-- **`packages/svelte/src` is frozen during Phases 2–6b + 8 + 9.** It is the reference
+- **Order is not negotiable**: additive first (`core` + `vanilla`, then
+  `core` + `vue`), parity second (same demo, same e2e suite — vanilla parity
+  6b, then vue parity 6c), subtractive last (`svelte` depends on `core`).
+  Do not start Phase 7 before Phase 6c is green.
+- **`packages/svelte/src` is frozen during Phases 2–6c + 8 + 9.** It is the reference
   implementation and the oracle for parity; editing it early destroys the
   comparison. (Phases 8–9 are additive-only like Phases 2–5.)
 - No new movement behaviour in this plan — the engine restart builds on core

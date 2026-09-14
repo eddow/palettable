@@ -2,13 +2,13 @@
  * `@palettable/core` — main entry point: point registry + virtual points +
  * value store + layout tree.
  *
- * Framework adapters subscribe to `state` / `layout` and render; all pointer
- * math, DOM and components live outside this class.
+ * Framework adapters read/write through `values` and subscribe to `layout`;
+ * all pointer math, DOM and components live outside this class.
  */
 
 import type { EditorDefaults, EditorRegistry } from './editors.js'
 import { PaletteError } from './errors.js'
-import type { GlobalValueListener, KeyValueListener, Unsubscribe } from './identifiers.js'
+import type { Unsubscribe } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
 import {
 	defaultLayoutFromPoints,
@@ -17,15 +17,14 @@ import {
 	PaletteLayoutTree,
 	type SerializedLayout,
 } from './layout.js'
+import { readSetterValue, validateInitialValues } from './palette.js'
 import type { AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isValuedPoint } from './points.js'
 import { canonicalPointId, isInlineSpec, type PointTarget, parsePointSpec } from './specs.js'
 import { PaletteStateStore } from './store.js'
-import type { PointType, TypeMap } from './type.js'
 import {
 	assertValidVirtual,
 	computeStashTransition,
-	isEnumFromPoint,
 	isStashPoint,
 	readEnumFrom,
 	resolveEnumSourceValue,
@@ -41,15 +40,29 @@ export type PaletteCoreOptions = {
 	readonly initialLayout?: SerializedLayout | PaletteLayout
 	/** End-user-defined virtual points (`enum-from` / `stash`). */
 	readonly virtuals?: readonly VirtualPoint[]
+	/**
+	 * Value hydration (SSR §4.2): applied after defaults, validated per
+	 * point (`unknown id` → throw, `action` id → throw, `Object.is`-equal
+	 * → skip). Zero listener notifications during construction (listeners
+	 * attach after — the store is fresh here, so none exist yet).
+	 */
+	readonly initialValues?: Readonly<Record<string, unknown>>
 }
 
 /**
  * Main entry point: point registry + value store + layout tree.
- * Framework adapters subscribe to `state` / `layout` and render; all pointer
- * math, DOM and components live outside this class.
+ *
+ * Value access is **not** re-implemented here: adapters read/write/subscribe
+ * through the public `values` store (`core.values.get` / `set` / `subscribe`),
+ * which is the single source of truth for valued-point state. `PaletteCore`
+ * only adds what the raw store cannot: virtual-point resolution
+ * (`resolveTargetVirtual`), command execution (`run` / `runStash`), stash
+ * aside slots, validated batch hydration (`setMany` / `initialValues`), and
+ * layout. All pointer math, DOM and components live outside this class.
  */
 export class PaletteCore {
-	readonly state: PaletteStateStore
+	/** Valued-point store — the single value surface (raw, virtual-unaware). */
+	readonly values: PaletteStateStore
 	readonly layout: PaletteLayoutTree
 	readonly keys: KeyBindings
 	readonly editors: EditorRegistry | undefined
@@ -68,7 +81,13 @@ export class PaletteCore {
 			assertValidVirtual(virtual, this.definitions, this.allIds())
 			this.virtuals.set(virtual.id, virtual)
 		}
-		this.state = new PaletteStateStore(points)
+		this.values = new PaletteStateStore(points)
+		if (options.initialValues !== undefined) {
+			const entries = validateInitialValues(options.initialValues, this.definitions)
+			// Direct `setTree` on the fresh store: no listeners exist yet, so
+			// this is silent by construction (zero notifications).
+			this.values.setTree(Object.fromEntries(entries))
+		}
 		this.layout =
 			options.initialLayout !== undefined
 				? new PaletteLayoutTree(options.initialLayout)
@@ -94,6 +113,37 @@ export class PaletteCore {
 
 	getVirtual(id: string): VirtualPoint | undefined {
 		return this.virtuals.get(canonicalPointId(id))
+	}
+
+	/**
+	 * Resolve an editable (valued) point by id for spec runners.
+	 * Headless port of the svelte adapter's `resolveEditableTool` (which
+	 * stays adapter-owned until Phase 7): throws `PaletteError` on unknown
+	 * ids, action points, and (with `family`) family mismatches.
+	 */
+	resolveEditablePoint(id: string, family?: string): AnyValuedPoint {
+		const pointId = canonicalPointId(id)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (!isValuedPoint(def))
+			throw new PaletteError(`Palette point "${id}" does not support editing`)
+		if (family !== undefined && def.type !== family)
+			throw new PaletteError(`Palette point "${id}" is "${def.type}", expected "${family}"`)
+		return def
+	}
+
+	/**
+	 * Read the static `can` flag of an action point (`undefined` = enabled).
+	 * Stays a plain read this phase — the static→functional migration lands
+	 * in Phase 9 (adapters switch to `evaluateCan(id)` then, not now).
+	 * Throws `PaletteError` on unknown ids and non-action points.
+	 */
+	readActionCan(id: string): boolean | undefined {
+		const pointId = canonicalPointId(id)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (!isActionPoint(def)) throw new PaletteError(`Palette point "${id}" is not an action`)
+		return def.can
 	}
 
 	/**
@@ -132,54 +182,52 @@ export class PaletteCore {
 		this.stashAsides.delete(id)
 	}
 
-	getValue<K extends PointType>(id: string): TypeMap[K] | undefined {
-		const virtual = this.virtuals.get(canonicalPointId(id))
-		if (virtual !== undefined && isEnumFromPoint(virtual)) {
-			const source = resolveVirtualSource(virtual, this.definitions)
-			const key = readEnumFrom(virtual, this.state.get(source.id))
-			return key as TypeMap[K] | undefined
-		}
-		return this.state.get<K>(canonicalPointId(id))
-	}
-
-	setValue<K extends PointType>(id: string, value: TypeMap[K]): void {
-		const pointId = canonicalPointId(id)
-		const virtual = this.virtuals.get(pointId)
-		if (virtual !== undefined) {
-			if (!isEnumFromPoint(virtual))
-				throw new PaletteError(`setValue: virtual "${pointId}" is a stash action`)
-			const source = resolveVirtualSource(virtual, this.definitions)
-			this.state.set(source.id, resolveEnumSourceValue(virtual, value as string) as never)
-			return
-		}
-		const def = this.definitions.get(pointId)
-		if (def === undefined) throw new PaletteError(`setValue: unknown point "${id}"`)
-		if (isActionPoint(def)) throw new PaletteError(`setValue: point "${id}" is an action`)
-		this.state.set(pointId, value)
-	}
-
-	/** Restore one point (or virtual source) to its default. */
-	resetValue(id: string): void {
-		const virtual = this.virtuals.get(canonicalPointId(id))
-		if (virtual !== undefined) {
-			if (isStashPoint(virtual)) this.stashAsides.delete(virtual.id)
-			this.state.reset(resolveVirtualSource(virtual, this.definitions))
-			return
-		}
-		this.state.reset(this.getDefinition(id))
-	}
-
-	/** Restore every valued point to its default (clears all stash aside slots). */
+	/**
+	 * Restore every valued point to its default **and** clear every stash
+	 * aside slot. Not a store pass-through: stash asides are core-owned
+	 * virtual state, so a full reset has to bridge both.
+	 */
 	resetAll(): void {
-		this.state.resetAll(this.points)
+		this.values.resetAll(this.points)
 		this.stashAsides.clear()
+	}
+
+	/**
+	 * Can a named action (`id:action`) run? Bounds-checked for `number`
+	 * actions (`inc` stops at `max`, `dec` stops at `min`), mirroring the
+	 * Svelte reference's `valueActions.number.inc.get can()`.
+	 * Throws `PaletteError` on unknown points/actions.
+	 */
+	canRunAction(id: string, action: string): boolean {
+		const def = this.definitions.get(canonicalPointId(id))
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is an action`)
+		const can = namedActionCan(def, this.values.get(def.id), action)
+		if (can === undefined) throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
+		return can
+	}
+
+	/**
+	 * Client-hydration sibling of `initialValues` (SSR §4.2): validated
+	 * writes applied via `setTree` (all writes land before any listener
+	 * runs — no interleaved write+notify like N× `set()` would produce).
+	 * Same strictness as construction: unknown ids and action ids throw.
+	 * Returns the `Object.is`-changed key array.
+	 */
+	setMany(values: Readonly<Record<string, unknown>>): readonly string[] {
+		const entries = validateInitialValues(values, this.definitions)
+		return this.values.setTree(Object.fromEntries(entries))
 	}
 
 	/**
 	 * Run an action point, setter spec (`id=value`), action spec (`id:action`),
 	 * virtual `enum-from` setter (`virtualId=key`), or a `stash` virtual id.
+	 *
+	 * Synchronous: `PaletteError`s are thrown, not rejected. Action-point
+	 * `run()` may return a promise; core does not await it — the caller
+	 * decides whether to `await`.
 	 */
-	async run(spec: string): Promise<void> {
+	run(spec: string): void {
 		const parsed = parsePointSpec(spec)
 		const virtual = this.virtuals.get(parsed.pointId)
 		if (virtual !== undefined) {
@@ -191,30 +239,30 @@ export class PaletteCore {
 			}
 			const source = resolveVirtualSource(virtual, this.definitions)
 			if (parsed.kind === 'point') {
-				const key = readEnumFrom(virtual, this.state.get(source.id))
+				const key = readEnumFrom(virtual, this.values.get(source.id))
 				if (key === undefined)
 					throw new PaletteError(`run: virtual "${virtual.id}" has no option for the current value`)
-				this.state.set(source.id, resolveEnumSourceValue(virtual, key) as never)
+				this.values.set(source.id, resolveEnumSourceValue(virtual, key) as never)
 				return
 			}
 			if (parsed.kind === 'action')
 				throw new PaletteError(`run: virtual "${virtual.id}" supports no actions`)
-			this.state.set(source.id, resolveEnumSourceValue(virtual, parsed.value) as never)
+			this.values.set(source.id, resolveEnumSourceValue(virtual, parsed.value) as never)
 			return
 		}
 		const def = this.definitions.get(parsed.pointId)
 		if (def === undefined) throw new PaletteError(`run: unknown point "${parsed.pointId}"`)
 		if (parsed.kind === 'point') {
 			if (!isActionPoint(def)) throw new PaletteError(`run: point "${spec}" is not an action`)
-			await def.run()
+			def.run()
 			return
 		}
 		if (!isValuedPoint(def)) throw new PaletteError(`run: point "${parsed.pointId}" is an action`)
 		if (parsed.kind === 'setter') {
-			this.state.set(parsed.pointId, coerceSetterValue(def, parsed.value) as never)
+			this.values.set(parsed.pointId, readSetterValue(def, parsed.value) as never)
 			return
 		}
-		applyNamedAction(this, def, parsed.action)
+		this.applyNamedAction(def, parsed.action)
 	}
 
 	/** Run a `stash` virtual by id (pure toggle, see `computeStashTransition`). */
@@ -225,25 +273,14 @@ export class PaletteCore {
 		const source = resolveVirtualSource(virtual, this.definitions)
 		const aside = this.stashAsides.get(virtual.id) ?? { has: false }
 		const transition = computeStashTransition(
-			this.state.get(source.id),
+			this.values.get(source.id),
 			virtual.stashedValue,
 			aside,
 			source.defaultValue
 		)
-		this.state.set(source.id, transition.next as never)
+		this.values.set(source.id, transition.next as never)
 		if (transition.asideAfter.has) this.stashAsides.set(virtual.id, transition.asideAfter)
 		else this.stashAsides.delete(virtual.id)
-	}
-
-	/** Value subscription (global or per-id) — proxied to the store. */
-	subscribe(listener: GlobalValueListener): Unsubscribe
-	subscribe<V>(id: string, listener: KeyValueListener<V>): Unsubscribe
-	subscribe<V>(
-		idOrListener: string | GlobalValueListener,
-		listener?: KeyValueListener<V>
-	): Unsubscribe {
-		if (typeof idOrListener === 'function') return this.state.subscribe(idOrListener)
-		return this.state.subscribe(idOrListener, listener as KeyValueListener)
 	}
 
 	/** Layout subscription — fresh `SerializedLayout` snapshot per mutation. */
@@ -253,7 +290,7 @@ export class PaletteCore {
 
 	/** Adapter teardown: drop every listener. Values + layout are kept. */
 	dispose(): void {
-		this.state.clearListeners()
+		this.values.clearListeners()
 		this.layout.clearListeners()
 	}
 
@@ -265,38 +302,45 @@ export class PaletteCore {
 	private allPointIds(): Set<string> {
 		return new Set(this.definitions.keys())
 	}
-}
 
-/** Coerce a setter string (`id=value`) to the point's value type. */
-function coerceSetterValue(def: AnyValuedPoint, raw: string): unknown {
-	switch (def.type) {
-		case 'boolean':
-			if (raw === 'true') return true
-			if (raw === 'false') return false
-			throw new PaletteError(`setter: cannot coerce "${raw}" to boolean`)
-		case 'number': {
-			const value = Number(raw)
-			if (Number.isNaN(value)) throw new PaletteError(`setter: cannot coerce "${raw}" to number`)
-			return value
+	/** Apply a named action (`id:action`) to a valued point. */
+	private applyNamedAction(def: AnyValuedPoint, action: string): void {
+		const constraints = def.constraints as
+			| { readonly min?: number; readonly max?: number; readonly step?: number }
+			| undefined
+		const step = constraints?.step ?? 1
+		const current = (this.values.get(def.id) as number | undefined) ?? (def.defaultValue as number)
+		if (def.type === 'number') {
+			if (action === 'inc') {
+				this.values.set(def.id, (current + step) as never)
+				return
+			}
+			if (action === 'dec') {
+				this.values.set(def.id, (current - step) as never)
+				return
+			}
 		}
-		default:
-			return raw
+		throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
 	}
 }
 
-/** Built-in named actions (`id:action`). Only `number` ships `inc`/`dec` for now. */
-function applyNamedAction(core: PaletteCore, def: AnyValuedPoint, action: string): void {
+/**
+ * Pure `can` for a named action over a valued point: returns `true` / `false`
+ * for a known action, `undefined` for an unknown action. `inc` / `dec` are
+ * bounds-checked against `max` / `min` (`undefined` bound = unlimited).
+ */
+function namedActionCan(
+	def: AnyValuedPoint,
+	current: unknown,
+	action: string
+): boolean | undefined {
 	if (def.type === 'number') {
-		const step = (def.constraints as { readonly step?: number } | undefined)?.step ?? 1
-		const current = (core.getValue(def.id) as number | undefined) ?? (def.defaultValue as number)
-		if (action === 'inc') {
-			core.setValue(def.id, (current + step) as never)
-			return
-		}
-		if (action === 'dec') {
-			core.setValue(def.id, (current - step) as never)
-			return
-		}
+		const constraints = def.constraints as
+			| { readonly min?: number; readonly max?: number; readonly step?: number }
+			| undefined
+		const value = (current as number | undefined) ?? (def.defaultValue as number)
+		if (action === 'inc') return constraints?.max === undefined || value < constraints.max
+		if (action === 'dec') return constraints?.min === undefined || value > constraints.min
 	}
-	throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
+	return undefined
 }

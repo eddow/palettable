@@ -62,7 +62,7 @@ or operate on (still 1:1 — one tool, one nothing-point):
 - A **drawer** binds a nothing-point and renders a nested toolbar; context
   flows down to child tools.
 
-Core semantics on a nothing-point: `getValue` returns `undefined`, `setValue`
+Core semantics on a nothing-point: `values.get` returns `undefined`, `values.set`
 throws `PaletteError`, `reset` is a no-op, and nothing-point bindings are
 excluded from layout value serialization (only the binding itself serializes).
 
@@ -74,7 +74,9 @@ Two-tier ownership with clear lifecycle boundaries:
   (wrapping a `PaletteStateStore` generalized to the `ValuesBag` interface),
   hydrates it from valued-point defaults at construction, and runs `reset()` /
   `resetAll()` / persistence against it. It is the *only* bag core hydrates or
-  persists. `PaletteCore.getValue` / `setValue` survive as root-bag sugar.
+  persists. The root bag **is** `PaletteCore.values` (the `PaletteStateStore`
+  itself — core does not re-implement get/set/events; see `plans/mitosis.md`
+  Phase 3 "No duplicated value surface").
 - **Context bags** are **host-owned**. The host application (IDE, editor)
   creates, populates, and disposes them independently. They are registered with
   core via `palette.setContext(name, bagInstance)`. Core never hydrates
@@ -150,7 +152,7 @@ resolvers. Each slot resolves to `ValuesBag | undefined`:
   no bag arguments. `''` may appear explicitly in `uses` to receive the root
   bag as an argument (e.g. `uses: ['', 'activeFile']` → `run(rootBag,
   activeFileBag)`); valued-point value access always stays on the root bag
-  via the existing `getValue` / `setValue` sugar regardless of `uses` —
+  via `core.values.get/set` (the root bag) regardless of `uses` —
   `uses` only controls which bags are passed to `run` / `can` / resolvers.
 - Render never throws on a missing bag: resolvers and `can` must treat
   `undefined` as "context absent" and fall back (disabled + placeholder
@@ -377,7 +379,7 @@ from them.
 - [ ] **4. `points.ts`** — `NothingPoint` kind
   (`{ type: 'nothing', id, label, uses, can?, description?, categories?, keywords?, icon? }`)
   + `isNothingPoint` guard. Update `AnyPoint` union. Core semantics wired in
-  `PaletteCore`: `getValue` → `undefined`, `setValue` throws `PaletteError`,
+  `PaletteCore`: `values.get` → `undefined`, `values.set` throws `PaletteError`,
   `reset` no-op, excluded from `asObject()` value serialization (only the
   binding itself serializes). Add `uses?: readonly ContextName[]` to
   `PointBase`. Change `can` on action points from static `can?: boolean` to
@@ -409,8 +411,10 @@ from them.
   - `subscribeCan(listener)` — derived channel; listener receives
     `(pointId, can)` only when a context notify flips a point's evaluated
     `can` (see §2.8).
-  - `getValue` / `setValue` survive as root-bag sugar (delegate to
-    `this.bags.get('')!.get/set`).
+  - `getValue` / `setValue` survive as root-bag sugar — after the Phase 3
+    review this is `PaletteCore.values` (the store **is** the root bag;
+    no separate `get/set` wrappers are re-implemented, see
+    `plans/mitosis.md` "No duplicated value surface").
   - `dispose()` clears root bag + layout listeners; unsubscribes from all
     context bags (host disposes them).
   - Tests in `core.test.ts`.

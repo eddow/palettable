@@ -53,6 +53,31 @@ export class PaletteStateStore {
 		this.set(id, updater(this.get<K>(id)))
 	}
 
+	/**
+	 * Apply many pairs at once, then notify once per changed key in a single
+	 * flush pass (all writes land before any listener runs — no interleaved
+	 * write+notify like N× `set()` would produce). Pairs whose value is
+	 * `Object.is`-equal to the current value are skipped (same echo-loop
+	 * guard as `set`). Returns the `Object.is`-changed key array (Phase 9
+	 * `ValuesBag` notifies with this array directly; the store keeps its
+	 * existing `(id, value)` / `(value)` listener contract this phase).
+	 * Unknown ids are written as-is (same leniency as `set`); validation
+	 * against point definitions happens in `PaletteCore`
+	 * (`initialValues` / `setMany`), not here.
+	 * Existing `set()` / `notify()` behaviour is unchanged.
+	 */
+	setTree(patch: Readonly<Record<string, unknown>>): readonly string[] {
+		const changed: string[] = []
+		for (const [id, value] of Object.entries(patch)) {
+			const previous = this.values.get(id)
+			if (Object.is(previous, value)) continue
+			this.values.set(id, value)
+			changed.push(id)
+		}
+		for (const id of changed) this.notify(id, this.values.get(id))
+		return changed
+	}
+
 	/** Restore one point to its definition default (no-op for actions / unknown ids). */
 	reset(def: AnyPoint | undefined): void {
 		if (isValuedPoint(def)) this.set(def.id, def.defaultValue)

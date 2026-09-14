@@ -557,18 +557,19 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `index.ts` | barrel — re-exports every module below |
 | `identifiers.ts` | `IconToken`, `Keystroke`, `Unsubscribe`, listener types |
 | `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
-| `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `isActionPoint` / `isValuedPoint` |
+| `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `isActionPoint` / `isValuedPoint`; `PointBase.uses` stub (Phase 3 readiness, load-bearing in Phase 9) |
 | `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
-| `store.ts` | `PaletteStateStore` |
-| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `isDrawerItem`, pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
+| `store.ts` | `PaletteStateStore` + `setTree` batching (Phase 3: all writes land before any listener runs, returns changed keys) |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
 | `gap-dwell.ts` | `GapDwell` hover-dwell state machine + `GapDwellState` (Phase 2; timers via `globals.ts` so `lib` stays `ES2022`-only) |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
 | `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
 | `virtual.ts` | `enum-from` / `stash` derived points |
-| `errors.ts` | `PaletteError` |
+| `errors.ts` | `PaletteError` + `PaletteWriteError` (Phase 3 stub for Phase 9 bag writes; adapters catch for UI feedback) |
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions`, `resolveTargetVirtual` |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` hydration, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan`, `canRunAction` (bounds-checked named-action `can`), sync `run` / `runStash`, `resetAll` |
+| `palette.ts` | `ServerPointDescriptor` + `to/fromServerDescriptor` (action rebuild by name via `runners`), `validateInitialValues`, `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
 
 ### Phase 2 status (landed 2026-09-14)
 

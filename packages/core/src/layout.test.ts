@@ -7,6 +7,7 @@ import {
 	type PaletteLayout,
 	PaletteLayoutTree,
 	type SerializedLayout,
+	validateSerializedLayout,
 } from './layout.js'
 
 function twoItemLayout(): SerializedLayout {
@@ -51,6 +52,62 @@ describe('defaultLayoutFromPoints', () => {
 		const layout = defaultLayoutFromPoints([])
 		expect(layout.borders.top).toEqual([])
 		expect(layout.parking).toEqual([])
+	})
+
+	it('validates serialized layouts (version, regions, items, inline tools)', () => {
+		expect(validateSerializedLayout(twoItemLayout())).toBe(true)
+		expect(validateSerializedLayout({ version: 2, borders: {} })).toBe(false)
+		expect(validateSerializedLayout({ version: 1 })).toBe(false)
+		expect(validateSerializedLayout({ version: 1, borders: { top: [] } })).toBe(false)
+		expect(
+			validateSerializedLayout({
+				version: 1,
+				borders: { top: [{ space: 'x', toolbar: [] }], right: [], bottom: [], left: [] },
+			})
+		).toBe(false)
+		expect(
+			validateSerializedLayout({
+				version: 1,
+				borders: { top: [{ space: 1, toolbar: [{ tool: 123 }] }], right: [], bottom: [], left: [] },
+			})
+		).toBe(false)
+		expect(
+			validateSerializedLayout({
+				version: 1,
+				borders: {
+					top: [
+						{
+							space: 1,
+							toolbar: [
+								{
+									tool: {
+										id: 'pause',
+										label: 'Pause',
+										source: 'gameSpeed',
+										kind: 'stash',
+										stashedValue: 0,
+									},
+								},
+							],
+						},
+					],
+					right: [],
+					bottom: [],
+					left: [],
+				},
+			})
+		).toBe(true)
+		expect(
+			validateSerializedLayout({
+				version: 1,
+				borders: {
+					top: [{ space: 1, toolbar: [{ tool: { kind: 'bogus' } }] }],
+					right: [],
+					bottom: [],
+					left: [],
+				},
+			})
+		).toBe(false)
 	})
 })
 

@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 132 tests, 9 files
+## Core unit (Vitest, node) — 150 tests, 10 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -11,11 +11,12 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/action forms) + `PointTarget` (`isInlineSpec`, `canonicalSpecId`) |
 | `src/keys.test.ts` | `findKeystrokesFor` (spec-prefix match) + `findKeystrokesForTarget` (inline targets by own id) + `PaletteError` name |
 | `src/points.test.ts` | `isActionPoint` / `isValuedPoint` guards + null-safety |
-| `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation |
+| `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation, `setTree` batching |
+| `src/palette.test.ts` | `initialValues` / `setMany` validation + batching, `ServerPointDescriptor` round-trip + action rebuild by name, `readSetterValue` (strict coercion: blank/∞ boolean-token → throw), `resolveEditablePoint` / `readActionCan`, `uses` stub, `PaletteWriteError` |
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
-| `src/layout.test.ts` | `defaultLayoutFromPoints`, tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners`, inline-virtual snapshot round-trip |
+| `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners`, inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
-| `src/core.test.ts` | `PaletteCore` registry, values, `run` (setters/actions/virtuals/stash), `resolveTargetVirtual` (registered + inline), subscriptions, `dispose` |
+| `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked), `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
 | `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration`, `GapDwell` |
 
 Gotchas:

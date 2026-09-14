@@ -9,7 +9,7 @@
 import { PaletteError } from './errors.js'
 import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
-import { canonicalSpecId, type PointTarget } from './specs.js'
+import { canonicalSpecId, isInlineSpec, type PointTarget } from './specs.js'
 
 /** Listener invoked with a fresh layout snapshot after each structural mutation. */
 export type LayoutListener = (snapshot: SerializedLayout) => void
@@ -148,6 +148,72 @@ export function defaultLayoutFromPoints(pointIds: readonly string[]): Serialized
 		},
 		parking: [],
 	}
+}
+
+/**
+ * Validate that an unknown value is a properly structured `SerializedLayout`.
+ *
+ * Headless port of the svelte adapter's `validatePaletteLayout` (which stays
+ * adapter-owned until Phase 7): checks `version: 1`, the four region slot
+ * lists (`space` number + `toolbar` array), and per-item shape (`tool` as a
+ * string reference or an inline virtual definition object, `editor` string,
+ * `config` plain object, drawer `toolbar` array). Returns `false` for
+ * anything else — never throws.
+ */
+export function validateSerializedLayout(layout: unknown): layout is SerializedLayout {
+	if (typeof layout !== 'object' || layout === null) return false
+	const obj = layout as Record<string, unknown>
+	if (obj.version !== 1) return false
+	if (typeof obj.borders !== 'object' || obj.borders === null) return false
+	const borders = obj.borders as Record<string, unknown>
+	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
+	for (const region of regions) {
+		const border = borders[region]
+		if (!Array.isArray(border)) return false
+		for (const slot of border) {
+			if (typeof slot !== 'object' || slot === null) return false
+			const slotObj = slot as Record<string, unknown>
+			if (typeof slotObj.space !== 'number') return false
+			if (!Array.isArray(slotObj.toolbar)) return false
+			for (const item of slotObj.toolbar) {
+				if (!isSerializedItem(item)) return false
+			}
+		}
+	}
+	if (obj.parking !== undefined) {
+		if (!Array.isArray(obj.parking)) return false
+		for (const toolbar of obj.parking) {
+			if (!Array.isArray(toolbar)) return false
+			for (const item of toolbar) {
+				if (!isSerializedItem(item)) return false
+			}
+		}
+	}
+	return true
+}
+
+function isSerializedItem(item: unknown): boolean {
+	if (typeof item !== 'object' || item === null) return false
+	const itemObj = item as Record<string, unknown>
+	if (itemObj.tool !== undefined) {
+		if (typeof itemObj.tool === 'string') {
+			// String reference — nothing more to check.
+		} else if (!isInlineSpec(itemObj.tool)) {
+			return false
+		}
+	}
+	if (itemObj.editor !== undefined && typeof itemObj.editor !== 'string') return false
+	if (itemObj.config !== undefined) {
+		if (typeof itemObj.config !== 'object' || itemObj.config === null) return false
+		if (Array.isArray(itemObj.config)) return false
+	}
+	if (itemObj.toolbar !== undefined) {
+		if (!Array.isArray(itemObj.toolbar)) return false
+		for (const child of itemObj.toolbar) {
+			if (!isSerializedItem(child)) return false
+		}
+	}
+	return true
 }
 
 // ── Structural locators (abstract ids, no coordinates) ──────────────────────

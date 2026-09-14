@@ -8,3 +8,12 @@
 export class PaletteError extends Error {
 	override name = 'PaletteError'
 }
+
+/**
+ * Thrown by rejected bag writes (Phase 9 readiness stub — see `plans/context.md`
+ * §2.4–§2.5). Adapters catch it to surface error feedback or revert a local
+ * optimistic UI update. No core code throws it yet.
+ */
+export class PaletteWriteError extends PaletteError {
+	override name = 'PaletteWriteError'
+}
