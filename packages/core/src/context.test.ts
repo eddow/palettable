@@ -9,7 +9,7 @@ import {
 } from './context-display.js'
 import { PaletteCore } from './core.js'
 import { PaletteError, PaletteWriteError } from './errors.js'
-import { isNothingPoint } from './points.js'
+import { isNothingPoint, ROOT_CONTEXT } from './points.js'
 import { buttonPresenter } from './presenters.js'
 
 describe('ValuesBag', () => {
@@ -93,7 +93,7 @@ describe('NothingPoint', () => {
 describe('PaletteCore context registry', () => {
 	it('setContext replaces (never appends); removeContext resolves undefined', () => {
 		const core = new PaletteCore([
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },
+			{ id: 'bold', label: 'Bold', type: 'boolean', uses: ['activeFile'] },
 		])
 		expect(core.getBag('activeFile')).toBeUndefined()
 		expect(core.resolveBags(['activeFile'])).toEqual([undefined])
@@ -120,18 +120,26 @@ describe('PaletteCore context registry', () => {
 		expect(core.resolveBags(['activeFile'])).toEqual([undefined])
 	})
 
-	it('root bag resolves via getBag("") and resolveBags', () => {
-		const core = new PaletteCore([
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false },
-		])
-		expect(core.getBag('')).toBe(core.values as never)
-		expect(core.resolveBags(['', 'missing'])[0]).toBe(core.values as never)
-		expect(core.resolveBags(['', 'missing'])[1]).toBeUndefined()
+	it('root bag resolves via getBag(ROOT_CONTEXT) and resolveBags (+ root alias)', () => {
+		const core = new PaletteCore([{ id: 'bold', label: 'Bold', type: 'boolean' }])
+		expect(core.getBag(ROOT_CONTEXT)).toBe(core.values as never)
+		expect(core.getBag('root')).toBe(core.values as never)
+		expect(core.resolveBags([ROOT_CONTEXT, 'missing'])[0]).toBe(core.values as never)
+		expect(core.resolveBags([ROOT_CONTEXT, 'missing'])[1]).toBeUndefined()
+		expect(core.resolveBags(['root'])[0]).toBe(core.values as never)
+	})
+
+	it('setContext/removeContext throw on the root name', () => {
+		const core = new PaletteCore([{ id: 'bold', label: 'Bold', type: 'boolean' }])
+		expect(() => core.setContext(ROOT_CONTEXT, new ValuesBag())).toThrow('core-owned root')
+		expect(() => core.setContext('root', new ValuesBag())).toThrow('core-owned root')
+		expect(() => core.removeContext(ROOT_CONTEXT)).toThrow('core-owned root')
+		expect(() => core.removeContext('root')).toThrow('core-owned root')
 	})
 
 	it('forwards bag changes to subscribeContext with (name, changedKeys)', () => {
 		const core = new PaletteCore([
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },
+			{ id: 'bold', label: 'Bold', type: 'boolean', uses: ['activeFile'] },
 		])
 		const bag = new ValuesBag({ fileName: 'a.ts' })
 		core.setContext('activeFile', bag)
@@ -147,11 +155,10 @@ describe('PaletteCore context registry', () => {
 				id: 'bold',
 				label: 'Bold',
 				type: 'boolean',
-				defaultValue: false,
 				uses: ['activeFile'],
 				can: (bag) => bag?.get('readOnly') !== true,
 			},
-			{ id: 'plain', label: 'Plain', type: 'boolean', defaultValue: false },
+			{ id: 'plain', label: 'Plain', type: 'boolean' },
 		])
 		expect(core.evaluateCan('bold')).toBe(true)
 		expect(core.evaluateCan('plain')).toBe(true)
@@ -166,7 +173,6 @@ describe('PaletteCore context registry', () => {
 				id: 'bold',
 				label: 'Bold',
 				type: 'boolean',
-				defaultValue: false,
 				uses: ['activeFile'],
 				can: (bag) => bag?.get('readOnly') !== true,
 			},
@@ -191,7 +197,7 @@ describe('PaletteCore context registry', () => {
 
 	it('dispose clears context subscriptions', () => {
 		const core = new PaletteCore([
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },
+			{ id: 'bold', label: 'Bold', type: 'boolean', uses: ['activeFile'] },
 		])
 		const bag = new ValuesBag({ fileName: 'a.ts' })
 		core.setContext('activeFile', bag)

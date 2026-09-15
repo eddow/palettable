@@ -18,16 +18,16 @@ afterEach(() => {
 function setup(editable = false) {
 	const core = new PaletteCore(
 		[
-			{ id: 'lamp', label: 'Lamp', type: 'boolean', defaultValue: false },
+			{ id: 'lamp', label: 'Lamp', type: 'boolean' },
 			{
 				id: 'speed',
 				label: 'Speed',
 				type: 'number',
-				defaultValue: 1,
 				constraints: { min: 0, max: 10, step: 1 },
 			},
 		],
 		{
+			initialValues: { lamp: false, speed: 1 },
 			initialLayout: {
 				version: 1,
 				borders: {
@@ -145,6 +145,53 @@ describe('editing chrome without rebuild', () => {
 		)
 		ide.dispose()
 	})
+
+	it('hovering a tool paints no drop-zone without a drag session', () => {
+		const { consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const bar = host.querySelector('.toolbar') as HTMLElement | null
+		expect(bar).not.toBe(null)
+		expect(host.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		const item = bar!.querySelector('.toolbar-item') as HTMLElement | null
+		item!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+		// No drag session runs (movement engine stripped): core gates every
+		// highlight on `editing && dragging`, so hover alone stays dark.
+		expect(host.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		bar!.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
+		expect(host.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		ide.dispose()
+	})
+
+	it('hovering a track paints no stack DZ without a drag session', () => {
+		const { consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const border = host.querySelector('.toolbar-border[data-region="top"]') as HTMLElement | null
+		expect(border).not.toBe(null)
+		// Dispatch on the track background (a track-space gap, not a
+		// toolbar): with no drag session the flanking stacks stay dark.
+		const tracks = border!.querySelectorAll('.toolbar-track')
+		expect(tracks.length).toBe(2)
+		const bg = (tracks[1] as HTMLElement).querySelector(
+			'.toolbar-track-space.toolbar-drop-zone'
+		) as HTMLElement | null
+		expect(bg).not.toBe(null)
+		bg!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+		expect(
+			border!.querySelectorAll('.toolbar-stack-space.toolbar-drop-zone.highlighted').length
+		).toBe(0)
+		border!.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
+		expect(border!.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		ide.dispose()
+	})
+
+	it('no highlight when not editing', () => {
+		const { ide, host } = setup(false)
+		const border = host.querySelector('.toolbar-border[data-region="top"]') as HTMLElement | null
+		const track = border!.querySelector('.toolbar-track') as HTMLElement | null
+		track!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+		expect(host.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		ide.dispose()
+	})
 })
 
 describe('can flips', () => {
@@ -172,7 +219,7 @@ describe('can flips', () => {
 				},
 			}
 		)
-		const bag = new PaletteStateStore([])
+		const bag = new PaletteStateStore()
 		bag.set('armed' as never, false as never)
 		core.setContext('mode', bag as never)
 		const consoleStore = new ConsoleStore()

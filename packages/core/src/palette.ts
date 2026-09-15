@@ -74,8 +74,9 @@ export function toServerDescriptor(points: readonly AnyPoint[]): ServerPointDesc
  * Rebuild runtime points from wire descriptors + client-injected runners.
  * Throws `PaletteError` on duplicate ids, action descriptors without a
  * runner, runner ids without a matching action descriptor, or valued
- * descriptors missing `defaultValue`. Order = descriptor array order
- * (deterministic `Map` iteration, see SSR §5).
+ * descriptors of unknown shape. Absent `defaultValue` = skeleton tool
+ * (no rejection — SSR with `values: {}` renders skeletons). Order =
+ * descriptor array order (deterministic `Map` iteration, see SSR §5).
  */
 export function fromServerDescriptor(
 	descriptors: readonly ServerPointDescriptor[],
@@ -102,7 +103,7 @@ export function fromServerDescriptor(
 				continue
 			}
 			throw new PaletteError(
-				`fromServerDescriptor: valued point "${descriptor.id}" is missing defaultValue`
+				`fromServerDescriptor: point "${descriptor.id}" has unknown type "${(descriptor as { type?: unknown }).type}"`
 			)
 		}
 		points.push({ ...(descriptor as ServerValuedDescriptor) })

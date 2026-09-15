@@ -11,10 +11,11 @@
  *
  * Presentation only: all reads go through core builders/presenters, all
  * writes through `core.run` / `core.values` / `core.layout` / `ConsoleStore`.
- * Drag sessions run here (adapter-owned): `pointerdown` → `startSession`,
- * window `pointermove` → `GapDwell` → `commitDraggedTo*` + gap-class paint,
- * rAF slide-follow with a single `resizeToolbar` commit on release; guards
- * inspect (`pointerdown` selects for the configurator).
+ * Drop-zone highlight is paint-only: `pointerdown` on a guard opens a
+ * single-tool drag session, `pointermove` asks core `itemSpaceHighlight`
+ * which gaps paint and applies it via `syncGapClasses`; no session means
+ * core returns empty, so hover alone never paints. Guards also inspect
+ * (`pointerdown` selects for the configurator).
  */
 
 import {
@@ -22,22 +23,14 @@ import {
 	type AnyPoint,
 	actualTrackSpaceAt,
 	axisForRegion,
-	borderStackHighlight,
 	buttonPresenter,
 	type ConsoleStore,
 	commitDraggedToItemSpace,
-	commitDraggedToParking,
-	commitDraggedToParkingRow,
-	commitDraggedToStackSpace,
-	commitDraggedToTrackSpace,
 	configuration,
 	configuratorEditorCleanup,
-	createGapDwellState,
 	type DraggingState,
 	editorChoicesFor,
 	filterCommandEntries,
-	GapDwell,
-	type GapDwellState,
 	isActionPoint,
 	isItemSpaceFree,
 	isValuedPoint,
@@ -48,9 +41,7 @@ import {
 	paletteAddItemEntries,
 	paletteCommandEntries,
 	paletteDerivedVariants,
-	parkingGapHighlight,
 	parsePointSpec,
-	resizeToolbar,
 	type SurfaceContext,
 	selectPresenter,
 	sliderPresenter,
@@ -61,13 +52,11 @@ import {
 	type Unsubscribe,
 	validateSerializedLayout,
 } from '@palettable/core'
-import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
 import { renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses, syncGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
-import { clampSlideDelta, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
 
 export type IdeOptions = {
 	readonly core: PaletteCore
@@ -76,8 +65,6 @@ export type IdeOptions = {
 	/** Editor-only item ids for the console add-box (`editors.item` keys). */
 	readonly itemEditors?: readonly string[]
 	readonly paletteId?: string
-	/** Drag-end save hook: called once per drag session that mutated layout. */
-	readonly onLayoutChange?: () => void
 }
 
 export type IdeHandle = {
@@ -141,8 +128,11 @@ function updateToolNode(
 			const view = togglePresenter(item, { point, value, bags })
 			const button = node.querySelector('button')
 			if (!button) return
-			button.classList.toggle('is-selected', view.pressed)
-			button.setAttribute('aria-pressed', view.pressed ? 'true' : 'false')
+			button.classList.toggle('is-selected', view.pressed === true)
+			button.setAttribute(
+				'aria-pressed',
+				view.pressed === undefined ? 'mixed' : view.pressed ? 'true' : 'false'
+			)
 			button.title = view.title
 			return
 		}
@@ -152,7 +142,8 @@ function updateToolNode(
 			if (!(select instanceof HTMLSelectElement)) return
 			// Guard: never clobber an open dropdown mid-interaction.
 			if (document.activeElement === select) return
-			if (select.value !== view.value) select.value = view.value
+			const nextSelect = view.value ?? ''
+			if (select.value !== nextSelect) select.value = nextSelect
 			for (const option of select.options) {
 				const spec = view.options.find((entry) => entry.value === option.value)
 				if (spec) option.disabled = !spec.can
@@ -176,9 +167,10 @@ function updateToolNode(
 			const buttons = node.querySelectorAll('button[role="radio"]')
 			buttons.forEach((button, index) => {
 				const star = index + 1
-				button.classList.toggle('is-selected', star <= view.value)
+				const filled = view.value !== undefined && star <= view.value
+				button.classList.toggle('is-selected', filled)
 				button.setAttribute('aria-checked', star === view.value ? 'true' : 'false')
-				button.textContent = star <= view.value ? '▶' : '▷'
+				button.textContent = view.value !== undefined && star <= view.value ? '▶' : '▷'
 			})
 			return
 		}
@@ -188,7 +180,7 @@ function updateToolNode(
 			if (!(input instanceof HTMLInputElement)) return
 			// Guard: keep a dragged thumb alive — never rewrite while focused.
 			if (document.activeElement === input) return
-			const next = String(view.value)
+			const next = String(view.value ?? view.min)
 			if (input.value !== next) input.value = next
 			const badge = node.querySelector('.palette-default-slider-badge')
 			if (badge) badge.textContent = next
@@ -200,8 +192,10 @@ function updateToolNode(
 			const readout = node.querySelector('.palette-default-stepper-value')
 			const minus = buttons[0]
 			const plus = buttons[1]
-			if (minus instanceof HTMLButtonElement) minus.disabled = view.value - view.step < view.min
-			if (plus instanceof HTMLButtonElement) plus.disabled = view.value + view.step > view.max
+			if (minus instanceof HTMLButtonElement)
+				minus.disabled = view.value === undefined || view.value - view.step < view.min
+			if (plus instanceof HTMLButtonElement)
+				plus.disabled = view.value === undefined || view.value + view.step > view.max
 			if (readout) {
 				readout.childNodes.forEach((child) => {
 					if (child.nodeType === Node.TEXT_NODE) child.textContent = String(view.value)
@@ -398,13 +392,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 	}
 
-	function dropBindingsFor(content: HTMLElement): void {
-		const unsubs = toolBindings.get(content)
-		if (!unsubs) return
-		for (const unsub of unsubs) unsub()
-		toolBindings.delete(content)
-	}
-
 	function dropAllBindings(): void {
 		for (const unsubs of toolBindings.values()) {
 			for (const unsub of unsubs) unsub()
@@ -456,286 +443,93 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	let lastEditing: boolean | undefined
 	/** Live drag session (adapter-owned; core takes it as an explicit param). */
 	let dragging: DraggingState | undefined
-	/** Set on every mid-drag commit; drag-end pulls one snapshot when set. */
-	let dragDirty = false
-	/** Per-container dwell states for stack-gap hover (border × 4 + parking). */
-	const dwellByContainer = new Map<string, { state: GapDwellState; dwell: GapDwell }>()
-	/** Idempotency memo: last track-space gap committed (same gap = no-op). */
-	let hoveredTrackSpace: number | undefined
-	/** Slide-follow session for whole-toolbar drags (rAF transform only). */
-	let slide:
-		| {
-				track: Track
-				toolbar: Toolbar
-				toolbarElement: HTMLElement
-				direction: 'horizontal' | 'vertical'
-				bounds: { start: number; available: number }
-				offset0: number
-		  }
-		| undefined
-	/** Latest pointer (written on move, drained by the rAF loop). */
-	let latestPointer = { x: 0, y: 0 }
-	let slideDirty = false
-	/**
-	 * Fan-out callbacks drained + cleared with `slideDirty` each frame
-	 * (slide + highlight + badge when one move fans out).
-	 */
-	const slideCallbacks = new Set<() => void>()
-	let slideFrame = 0
-	let slideStopped = true
-	let grabOffset: number | undefined
-	/** Open drawer popups (trigger → popup) for layout-change repositioning. */
-	const openDrawers = new Map<
-		HTMLElement,
-		{ popup: HTMLElement; surfaceAxis: 'horizontal' | 'vertical' }
-	>()
-
-	function dwellFor(key: string): { state: GapDwellState; dwell: GapDwell } {
-		let entry = dwellByContainer.get(key)
-		if (!entry) {
-			entry = { state: createGapDwellState(), dwell: new GapDwell() }
-			dwellByContainer.set(key, entry)
-		}
-		return entry
-	}
-
-	function resetAllDwells(): void {
-		for (const entry of dwellByContainer.values()) entry.dwell.reset(entry.state)
-		hoveredTrackSpace = undefined
-	}
-
-	function clearSlideElement(): void {
-		if (slide?.toolbarElement.isConnected) slide.toolbarElement.style.transform = ''
-	}
-
-	function clearSlide(): void {
-		clearSlideElement()
-		slide = undefined
-	}
-
-	function stopSlideLoop(): void {
-		slideStopped = true
-		if (slideFrame !== 0 && typeof cancelAnimationFrame !== 'undefined') {
-			cancelAnimationFrame(slideFrame)
-		}
-		slideFrame = 0
-		slideDirty = false
-		slideCallbacks.clear()
-	}
-
-	function flushSlideTransform(): void {
-		const live = slide
-		const session = dragging
-		if (!live || !session) return
-		if (session.origin.kind !== 'border') return
-		if (live.toolbar !== session.origin.toolbar || live.track !== session.origin.track) return
-		if (!live.toolbarElement.isConnected) return
-		const horizontal = live.direction === 'horizontal'
-		const pointer = horizontal ? latestPointer.x : latestPointer.y
-		const delta = clampSlideDelta(live.bounds, live.offset0, pointer, grabOffset ?? 0)
-		live.toolbarElement.style.transform =
-			delta === 0
-				? ''
-				: horizontal
-					? `translate3d(${delta}px, 0, 0)`
-					: `translate3d(0, ${delta}px, 0)`
-	}
-
-	function slideLoopTick(): void {
-		if (slideStopped) {
-			slideFrame = 0
-			return
-		}
-		if (slideDirty) {
-			slideDirty = false
-			for (const callback of [...slideCallbacks]) callback()
-			slideCallbacks.clear()
-		}
-		slideFrame = requestAnimationFrame(slideLoopTick)
-	}
-
-	function ensureSlideLoop(): void {
-		if (typeof requestAnimationFrame === 'undefined') {
-			flushSlideTransform()
-			return
-		}
-		if (slideFrame !== 0) return
-		slideStopped = false
-		slideFrame = requestAnimationFrame(slideLoopTick)
-	}
 
 	/**
-	 * (Re)arm slide-follow over `toolbar` in `track` at the current pointer.
-	 * Called at grab time (whole-toolbar) and after every gap commit that
-	 * (re)locates the dragged toolbar — including the first gap commit of a
-	 * tool drag, which promotes the drag into sliding over the fresh
-	 * singleton. A restructure drag recenters the grab on the new toolbar's
-	 * middle (`recenter`).
+	 * Find the live toolbar array holding `item` (borders + parking).
+	 * Identity scan — position is never trusted across renders.
 	 */
-	function retargetSlide(options: {
-		track: Track
-		toolbar: Toolbar
-		toolbarElement: HTMLElement
-		direction: 'horizontal' | 'vertical'
-		clientX: number
-		clientY: number
-		recenter?: boolean
-	}): boolean {
-		const session = dragging
-		if (!session) return false
-		if (!options.toolbarElement.isConnected) return false
-		const rect = options.toolbarElement.getBoundingClientRect()
-		const horizontal = options.direction === 'horizontal'
-		if (options.recenter) {
-			const size = horizontal ? rect.width : rect.height
-			if (size > 0) grabOffset = size / 2
-		}
-		const bounds = toolbarSlideBounds(options.toolbarElement, options.direction)
-		if (!bounds) return false
-		const resting = (horizontal ? rect.left : rect.top) - bounds.start
-		if (slide?.toolbarElement !== options.toolbarElement) clearSlideElement()
-		slide = {
-			track: options.track,
-			toolbar: options.toolbar,
-			toolbarElement: options.toolbarElement,
-			direction: options.direction,
-			bounds,
-			offset0: resting,
-		}
-		// Land under the cursor at arm time — not on the next pointer move.
-		const pointer = horizontal ? options.clientX : options.clientY
-		const delta = clampSlideDelta(slide.bounds, resting, pointer, grabOffset ?? 0)
-		options.toolbarElement.style.transform =
-			delta === 0
-				? ''
-				: horizontal
-					? `translate3d(${delta}px, 0, 0)`
-					: `translate3d(0, ${delta}px, 0)`
-		return true
-	}
-
-	/** Resolve the live `.toolbar` element for a toolbar object (slide re-arm). */
-	function toolbarElementOf(toolbar: Toolbar): HTMLElement | undefined {
-		const node = nodes.get(toolbar)
-		return node instanceof HTMLElement ? node : undefined
-	}
-
-	/** Mark the session dirty after a commit (drag-end pulls one snapshot). */
-	function markDragDirty(): void {
-		dragDirty = true
-	}
-
-	function endDragSession(): void {
-		resetAllDwells()
-		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
-			clearGapClasses(host)
-		}
-		// Single commit on release: resize the gaps once from the visual
-		// position, then clear the transform so layout takes over.
-		const live = slide
-		const session = dragging
-		if (
-			live &&
-			session?.origin.kind === 'border' &&
-			live.toolbar === session.origin.toolbar &&
-			live.track === session.origin.track
-		) {
-			const slot = session.origin.track.findIndex((entry) => entry.toolbar === live.toolbar)
-			if (slot >= 0) {
-				const horizontal = live.direction === 'horizontal'
-				const pointer = horizontal ? latestPointer.x : latestPointer.y
-				const delta = clampSlideDelta(live.bounds, live.offset0, pointer, grabOffset ?? 0)
-				const offset = live.offset0 + delta
-				if (live.bounds.available > 0) {
-					resizeToolbar(session.origin.track, slot, offset / live.bounds.available)
+	function findToolbarOf(
+		live: ReturnType<PaletteCore['layout']['getLayout']>,
+		item: ToolbarItem
+	): Toolbar | undefined {
+		for (const region of REGIONS) {
+			for (const track of live.borders[region]) {
+				for (const slot of track) {
+					if (slot.toolbar.includes(item)) return slot.toolbar
 				}
 			}
-			if (live.toolbarElement.isConnected) live.toolbarElement.style.transform = ''
-		} else if (live?.toolbarElement.isConnected) {
-			live.toolbarElement.style.transform = ''
 		}
-		slide = undefined
-		stopSlideLoop()
-		dragging = undefined
-		grabOffset = undefined
-		container.classList.remove('dragging')
-		delete container.dataset.dragging
-		if (dragDirty) {
-			dragDirty = false
-			options.onLayoutChange?.()
+		for (const toolbar of live.parking) {
+			if (toolbar.includes(item)) return toolbar
 		}
+		return undefined
 	}
 
 	/**
-	 * Start a drag session: `dragging` holds the tool list, the pointer is
-	 * tracked on the window, and release clears the session. While the mode
-	 * is `'slide'` the toolbar follows the pointer via `transform` (gaps
-	 * untouched) with a single `resizeToolbar` commit on release.
+	 * Open a drag session for one tool. Core decides *which* gaps paint
+	 * (`itemSpaceHighlight`); this adapter only applies the decision as
+	 * classes (`syncGapClasses`). No session → core returns empty → dark,
+	 * so hover alone never paints. Hovering a free gap commits the move
+	 * via `commitDraggedToItemSpace` (core mutates the live arrays); the
+	 * layout op re-renders the affected border so tools reorganize
+	 * mid-drag. No slide, no dwell.
 	 */
-	function startSession(options: {
-		event: PointerEvent
-		tools: ToolbarItem[]
-		origin: DraggingState['origin']
-		mode: DraggingState['mode']
-		track?: Track
-		toolbar?: Toolbar
-		toolbarElement?: HTMLElement
-		direction?: 'horizontal' | 'vertical'
-		offset?: number
-	}): void {
-		dragging = { tools: options.tools, origin: options.origin, mode: options.mode }
-		dragDirty = false
+	function startToolDrag(event: PointerEvent, toolbar: Toolbar, item: ToolbarItem): void {
+		if (event.button !== 0) return
+		if (isEditableTarget(event.target)) return
+		if (!computeEditing()) return
+		event.preventDefault()
+		dragging = {
+			tools: [item],
+			origin: {
+				kind: 'border',
+				toolbar,
+				track: [],
+				border: core.layout.getLayout().borders.top,
+			},
+			mode: toolbar.length === 1 ? 'slide' : 'restructure',
+		}
 		container.classList.add('dragging')
 		container.dataset.dragging = 'true'
-		grabOffset = options.offset
-		latestPointer = { x: options.event.clientX, y: options.event.clientY }
-		if (
-			options.track &&
-			options.toolbar &&
-			options.toolbarElement &&
-			options.direction &&
-			options.mode === 'slide'
-		) {
-			retargetSlide({
-				track: options.track,
-				toolbar: options.toolbar,
-				toolbarElement: options.toolbarElement,
-				direction: options.direction,
-				clientX: options.event.clientX,
-				clientY: options.event.clientY,
-			})
-		} else {
-			clearSlide()
-		}
-		slideDirty = false
-		ensureSlideLoop()
 		startDragSession({
-			event: options.event,
-			onMove: (_snapshot, moveEvent) => {
-				latestPointer = { x: moveEvent.clientX, y: moveEvent.clientY }
-				// Fan-out point: one move enqueues every per-frame callback
-				// (slide today; highlight/badge enqueue here when needed).
-				// `Set` dedupes so repeated moves before a frame collapse.
-				slideCallbacks.add(flushSlideTransform)
-				slideDirty = true
-				if (typeof requestAnimationFrame === 'undefined') flushSlideTransform()
-			},
-			onStop: () => endDragSession(),
+			event,
+			onMove: () => {},
+			onStop: () => endToolDrag(),
 		})
 	}
 
-	/** Reposition every open drawer popup from its trigger's live rect. */
-	function repositionDrawers(): void {
-		for (const [trigger, open] of [...openDrawers]) {
-			if (!trigger.isConnected || !open.popup.isConnected) {
-				openDrawers.delete(trigger)
-				continue
-			}
-			const rect = trigger.getBoundingClientRect()
-			const offset = 6
-			open.popup.style.left = `${(open.surfaceAxis === 'vertical' ? rect.right : rect.left) + offset}px`
-			open.popup.style.top = `${(open.surfaceAxis === 'vertical' ? rect.top : rect.bottom) + offset}px`
+	/** End the session: drop paint classes, forget the session. */
+	function endToolDrag(): void {
+		dragging = undefined
+		container.classList.remove('dragging')
+		delete container.dataset.dragging
+		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
+			clearGapClasses(host)
 		}
+	}
+
+	/**
+	 * Item-space highlight as a class-toggle pass: direct gap hover wins,
+	 * else the nearest free gap on each side of the hovered item (core
+	 * `itemSpaceHighlight`). No rebuild — just `highlighted` / `hovered`
+	 * flips on the existing gap nodes.
+	 */
+	function paintItemSpaces(
+		bar: HTMLElement,
+		toolbar: Toolbar,
+		activeItem: number | undefined,
+		hovered: number | undefined
+	): void {
+		const session = dragging
+		if (!computeEditing() || !session) {
+			clearGapClasses(bar)
+			return
+		}
+		syncGapClasses(
+			bar,
+			itemSpaceHighlight({ toolbar, activeItem, hovered, editing: true, dragging: session }),
+			'itemSpaceIndex'
+		)
 	}
 
 	container.classList.add('palette-ide')
@@ -750,6 +544,16 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	const center = el('div', 'palette-ide-center')
 	const rightHost = document.createElement('div')
 	const bottomHost = document.createElement('div')
+	// Hosts are layout-transparent: `display: contents` makes the rendered
+	// `.toolbar-border` elements direct flex participants of `.palette-ide`
+	// (top/bottom) and `.palette-ide-middle` (left/right), mirroring the
+	// svelte `Ide` (which renders `ToolbarBorder` with no wrappers). Without
+	// this the bare hosts are `display: block`, so a vertical border's height
+	// collapses to its content and track gaps (`space`) never distribute —
+	// a single `space: 1` toolbar sticks to the top instead of the bottom.
+	for (const host of [topHost, leftHost, rightHost, bottomHost]) {
+		host.style.display = 'contents'
+	}
 	for (const child of previousChildren) center.append(child)
 	middle.append(leftHost, center, rightHost)
 	container.append(topHost, middle, bottomHost)
@@ -808,114 +612,70 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					readonly slotIndex: number
 			  }
 			| { readonly container: 'parking'; readonly toolbarIndex: number },
-		dragTarget?:
-			| {
-					readonly track: Track
-					readonly border: import('@palettable/core').Border
-					readonly trackIndex: number
-					readonly parking?: undefined
-			  }
-			| {
-					readonly parking: import('@palettable/core').Parking
-					readonly toolbarIndex: number
-					readonly track?: undefined
-					readonly border?: undefined
-			  }
+		dragTarget?: {
+			readonly track: Track
+			readonly border: import('@palettable/core').Border
+		}
 	): HTMLElement {
 		const bar = el('div', 'toolbar')
 		bar.dataset.paletteId = paletteId
 		if (editing) bar.dataset.editing = 'true'
 		bar.dataset.container = containerKind
 		nodes.setToolbar(toolbar, bar)
-		const direction = directionFor(region)
-		if (editing) {
-			bar.addEventListener('pointerdown', (event) => {
-				if (event.button !== 0) return
-				if (isEditableTarget(event.target)) return
-				// Whole-toolbar grab: mousedown on the bar itself (not on a
-				// tool) slides the toolbar along its track until release.
-				if ((event.target as HTMLElement | null)?.closest?.('.toolbar-item')) return
-				event.preventDefault()
-				const live = core.layout.getLayout()
-				if (containerKind === 'parking' || dragTarget?.parking !== undefined) {
-					const parking = live.parking
-					const toolbarIndex =
-						basePath.container === 'parking' ? basePath.toolbarIndex : parking.indexOf(toolbar)
-					if (toolbarIndex < 0) return
-					startSession({
-						event,
-						tools: [...toolbar],
-						origin: { kind: 'parking', toolbar, parking, index: toolbarIndex },
-						mode: 'slide',
-					})
-					return
-				}
-				const target = dragTarget?.track !== undefined ? dragTarget : undefined
-				if (!target) return
-				startSession({
-					event,
-					tools: [...toolbar],
-					origin: { kind: 'border', toolbar, track: target.track, border: target.border },
-					mode: 'slide',
-					track: target.track,
+		// Bound unconditionally: bars render before the console opens
+		// (editing=false), and `syncEditing` flips chrome without a rebuild —
+		// so an `if (editing)` gate here would leave pre-edit bars with no
+		// paint handlers. The handler itself gates on `dragging` (+ editing
+		// inside `paintItemSpaces`), so hover alone stays dark.
+		bar.addEventListener('pointermove', (event) => {
+			if (!dragging) return
+			const target = event.target
+			if (!(target instanceof HTMLElement)) return
+			// Inside a nested toolbar → that toolbar owns the item DZs.
+			if (target.closest('.toolbar') !== bar) return
+			const spaceEl = target.closest('[data-item-space-index]')
+			if (!spaceEl || !bar.contains(spaceEl)) {
+				// Hovering a tool (not a gap): highlight the nearest free
+				// gaps flanking it (active-item fallback).
+				const itemEl = target.closest('[data-item-index]')
+				const active =
+					itemEl && bar.contains(itemEl)
+						? Number((itemEl as HTMLElement).dataset.itemIndex)
+						: undefined
+				paintItemSpaces(bar, toolbar, Number.isInteger(active) ? active : undefined, undefined)
+				return
+			}
+			const index = Number((spaceEl as HTMLElement).dataset.itemSpaceIndex)
+			const at = Number.isInteger(index) ? index : undefined
+			paintItemSpaces(bar, toolbar, undefined, at)
+			// Commit on DZ hover: move dragged tools into this toolbar at
+			// this position (core decides legality via `isItemSpaceFree`).
+			// The layout op re-renders the affected border, so the tools
+			// visibly reorganize mid-drag.
+			if (at === undefined || !dragging || !isItemSpaceFree(dragging, toolbar, at)) return
+			if (dragTarget !== undefined) {
+				const moved = commitDraggedToItemSpace(
+					dragging,
 					toolbar,
-					toolbarElement: bar,
-					direction,
-					offset: toolbarGrabOffset({
-						toolbarElement: bar,
-						clientX: event.clientX,
-						clientY: event.clientY,
-						direction,
-					}),
-				})
-			})
-			bar.addEventListener('pointermove', (event) => {
-				if (!editing || !dragging) return
-				const target = event.target
-				if (!(target instanceof HTMLElement)) return
-				// Inside a nested toolbar → that toolbar owns the item DZs.
-				if (target.closest('.toolbar') !== bar) return
-				const spaceEl = target.closest('[data-item-space-index]')
-				if (!spaceEl || !bar.contains(spaceEl)) {
-					// Hovering a tool (not a gap): highlight the nearest free
-					// gaps flanking it (active-item fallback).
-					const itemEl = target.closest('[data-item-index]')
-					const active =
-						itemEl && bar.contains(itemEl)
-							? Number((itemEl as HTMLElement).dataset.itemIndex)
-							: undefined
-					paintItemSpaces(bar, toolbar, Number.isInteger(active) ? active : undefined, undefined)
-					return
+					dragTarget.track,
+					dragTarget.border,
+					at
+				)
+				if (moved) {
+					// `commitDraggedTo*` mutates the live arrays silently (no
+					// layout op) — re-render the border so the move shows.
+					// The session (`dragging.tools`) survives by item identity.
+					const region = bar
+						.closest('.toolbar-border')
+						?.getAttribute('data-region') as PaletteRegion | null
+					if (region) syncBorder(region)
+					else syncStructure()
 				}
-				const index = Number((spaceEl as HTMLElement).dataset.itemSpaceIndex)
-				const at = Number.isInteger(index) ? index : undefined
-				paintItemSpaces(bar, toolbar, undefined, at)
-				if (at === undefined || !isItemSpaceFree(dragging, toolbar, at)) return
-				if (dragTarget?.track !== undefined && dragTarget.border !== undefined) {
-					if (
-						commitDraggedToItemSpace(dragging, toolbar, dragTarget.track, dragTarget.border, at)
-					) {
-						markDragDirty()
-						rearmSlideAfterCommit()
-					}
-				} else if (dragTarget?.parking !== undefined) {
-					if (
-						commitDraggedToParking(
-							dragging,
-							toolbar,
-							dragTarget.parking,
-							dragTarget.toolbarIndex,
-							at
-						)
-					) {
-						markDragDirty()
-					}
-				}
-			})
-			bar.addEventListener('pointerleave', () => {
-				paintItemSpaces(bar, toolbar, undefined, undefined)
-			})
-		}
+			}
+		})
+		bar.addEventListener('pointerleave', () => {
+			paintItemSpaces(bar, toolbar, undefined, undefined)
+		})
 		const appendSpace = (index: number) => {
 			const space = el('div', 'toolbar-item-space toolbar-drop-zone')
 			space.dataset.paletteId = paletteId
@@ -955,12 +715,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				region,
 				onOpenConsole: (mode) => consoleStore.open(mode),
 				onInspect: () => setInspecting(path),
-				onOpenDrawer: (trigger, popup, surfaceAxis) => {
-					openDrawers.set(trigger, { popup, surfaceAxis })
-				},
-				onCloseDrawer: (trigger) => {
-					openDrawers.delete(trigger)
-				},
 				renderToolbar: (childTrack: Track, childAxis, childRegion) =>
 					renderDrawerTrack(childTrack, childAxis, childRegion, editing),
 			})
@@ -972,32 +726,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				guard.dataset.paletteId = paletteId
 				guard.setAttribute('aria-hidden', 'true')
 				guard.addEventListener('pointerdown', (event) => {
-					event.stopPropagation()
 					setInspecting(path)
-					if (event.button !== 0) return
-					// Tool grab: a single tool; slide when alone in its toolbar.
-					const live = core.layout.getLayout()
-					if (containerKind === 'parking' || dragTarget?.parking !== undefined) {
-						const parking = live.parking
-						const toolbarIndex =
-							basePath.container === 'parking' ? basePath.toolbarIndex : parking.indexOf(toolbar)
-						if (toolbarIndex < 0) return
-						startSession({
-							event,
-							tools: [item],
-							origin: { kind: 'parking', toolbar, parking, index: toolbarIndex },
-							mode: toolbar.length === 1 ? 'slide' : 'restructure',
-						})
-						return
-					}
-					const target = dragTarget?.track !== undefined ? dragTarget : undefined
-					if (!target) return
-					startSession({
-						event,
-						tools: [item],
-						origin: { kind: 'border', toolbar, track: target.track, border: target.border },
-						mode: toolbar.length === 1 ? 'slide' : 'restructure',
-					})
+					startToolDrag(event, toolbar, item)
 				})
 				wrapper.append(guard)
 			}
@@ -1006,58 +736,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		})
 		void axis
 		return bar
-	}
-
-	/**
-	 * Item-space highlight as a class-toggle pass: direct hover wins, else
-	 * the nearest free gap on each side of the hovered item. No rebuild —
-	 * just `highlighted` / `hovered` flips on the existing gap nodes.
-	 */
-	function paintItemSpaces(
-		bar: HTMLElement,
-		toolbar: Toolbar,
-		activeItem: number | undefined,
-		hovered: number | undefined
-	): void {
-		const session = dragging
-		if (!computeEditing() || !session) {
-			clearGapClasses(bar)
-			return
-		}
-		syncGapClasses(
-			bar,
-			itemSpaceHighlight({ toolbar, activeItem, hovered, editing: true, dragging: session }),
-			'itemSpaceIndex'
-		)
-	}
-
-	/** Re-arm slide-follow over the session's relocated toolbar (mid-drag). */
-	function rearmSlideAfterCommit(): void {
-		const session = dragging
-		if (session?.origin.kind !== 'border') return
-		if (session.mode !== 'slide') {
-			clearSlide()
-			return
-		}
-		const element = toolbarElementOf(session.origin.toolbar)
-		if (!element) return
-		const live = core.layout.getLayout()
-		for (const region of REGIONS) {
-			const border = live.borders[region]
-			for (const track of border) {
-				if (track !== session.origin.track) continue
-				retargetSlide({
-					track,
-					toolbar: session.origin.toolbar,
-					toolbarElement: element,
-					direction: directionFor(region),
-					clientX: latestPointer.x,
-					clientY: latestPointer.y,
-					recenter: grabOffset === undefined,
-				})
-				return
-			}
-		}
 	}
 
 	/** Render a drawer child track (one track, several toolbars in line). */
@@ -1096,22 +774,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	function renderBorder(host: HTMLElement, region: PaletteRegion, editing: boolean): void {
-		const liveLayout = core.layout.getLayout()
-		const liveBorder = liveLayout.borders[region]
-		const existing = host.querySelector(':scope > .toolbar-border')
-		// The diff path reuses nodes but never (un)binds the editing-gated
-		// drag listeners — only the full rebuild below does. When the
-		// editing flag differs from the rendered tree, the diff would keep
-		// stale listeners (or none at all), so fall through to rebuild.
-		const renderedEditing = existing instanceof HTMLElement && existing.dataset.editing === 'true'
-		if (
-			existing instanceof HTMLElement &&
-			renderedEditing === editing &&
-			diffBorder(existing, region, editing)
-		) {
-			paintStackGaps(existing, region)
-			return
-		}
 		dropBindingsIn(host)
 		host.textContent = ''
 		const direction = directionFor(region)
@@ -1122,48 +784,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		)
 		borderEl.dataset.paletteId = paletteId
 		borderEl.dataset.region = region
-		if (editing) borderEl.dataset.editing = 'true'
-		const border = liveBorder
-		if (editing) {
-			borderEl.addEventListener('pointermove', (event) => {
-				if (!dragging) return
-				const target = event.target
-				if (!(target instanceof HTMLElement)) return
-				// Inside a toolbar/track → that container owns the DZs.
-				if (target.closest('.toolbar') ?? target.closest('.toolbar-track')) {
-					// Track hover still paints flanking stacks (active), but a
-					// direct gap hover paints only itself (hovered).
-					const trackEl = target.closest('.toolbar-track')
-					const stackEl = target.closest('[data-stack-index]')
-					const entry = dwellFor(`border:${region}`)
-					if (stackEl && borderEl.contains(stackEl)) {
-						const index = Number((stackEl as HTMLElement).dataset.stackIndex)
-						entry.dwell.hoverGap(entry.state, Number.isInteger(index) ? index : undefined)
-					} else if (trackEl && borderEl.contains(trackEl)) {
-						const index = Number((trackEl as HTMLElement).dataset.trackIndex)
-						entry.dwell.hoverRow(entry.state, Number.isInteger(index) ? index : undefined)
-					} else {
-						entry.dwell.hoverGap(entry.state, undefined)
-					}
-					paintStackGaps(borderEl, region)
-					return
-				}
-				const stackEl = target.closest('[data-stack-index]')
-				const entry = dwellFor(`border:${region}`)
-				if (stackEl && borderEl.contains(stackEl)) {
-					const index = Number((stackEl as HTMLElement).dataset.stackIndex)
-					entry.dwell.hoverGap(entry.state, Number.isInteger(index) ? index : undefined)
-				} else {
-					entry.dwell.hoverGap(entry.state, undefined)
-				}
-				paintStackGaps(borderEl, region)
-			})
-			borderEl.addEventListener('pointerleave', () => {
-				const entry = dwellFor(`border:${region}`)
-				entry.dwell.reset(entry.state)
-				clearGapClasses(borderEl)
-			})
-		}
+		const live = core.layout.getLayout()
+		const border = live.borders[region]
+		// No highlight while the movement engine is stripped: hover alone
+		// must never paint. The leave pass only clears stale classes.
+		borderEl.addEventListener('pointerleave', () => {
+			clearGapClasses(borderEl)
+		})
 		const ordered = inverse ? [...border].reverse() : border
 		const stackSpace = (index: number) => {
 			const space = el('div', 'toolbar-stack-space toolbar-drop-zone')
@@ -1179,40 +806,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			trackEl.dataset.trackIndex = String(trackIndex)
 			trackEl.dataset.paletteId = paletteId
 			nodes.setTrack(track, trackEl)
-			if (editing) {
-				trackEl.addEventListener('pointermove', (event) => {
-					if (!dragging) return
-					const target = event.target
-					if (!(target instanceof HTMLElement)) return
-					// Inside a toolbar → that toolbar owns the item-space DZs.
-					// Keep the memo: after a commit the fresh toolbar sits
-					// under the pointer, and clearing would re-arm on the
-					// very next move (double toolbar for one gap).
-					if (target.closest('.toolbar')) return
-					const spaceEl = target.closest('[data-track-space-index]')
-					if (!spaceEl || !trackEl.contains(spaceEl)) {
-						hoveredTrackSpace = undefined
-						return
-					}
-					const index = Number((spaceEl as HTMLElement).dataset.trackSpaceIndex)
-					const next = Number.isInteger(index) ? index : undefined
-					const prev = hoveredTrackSpace
-					if (
-						next !== undefined &&
-						next !== prev &&
-						commitDraggedToTrackSpace(dragging, track, border, next)
-					) {
-						markDragDirty()
-						hoveredTrackSpace = next
-						rearmSlideAfterCommit()
-					} else {
-						hoveredTrackSpace = next
-					}
-				})
-				trackEl.addEventListener('pointerleave', () => {
-					hoveredTrackSpace = undefined
-				})
-			}
 			const trackSpace = (index: number) => {
 				const gap = el('div', 'toolbar-track-space toolbar-drop-zone')
 				gap.dataset.paletteId = paletteId
@@ -1239,7 +832,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 							trackIndex,
 							slotIndex,
 						},
-						{ track, border, trackIndex }
+						{ track, border }
 					)
 				)
 				trackEl.append(slotEl)
@@ -1250,312 +843,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		})
 		if (inverse) stackSpace(0)
 		host.append(borderEl)
-		paintStackGaps(borderEl, region)
-	}
-
-	/**
-	 * Per-node border diff: reconcile the existing `.toolbar-border` element
-	 * against the live border — create/drop delta nodes only, move existing
-	 * nodes with `insertBefore`/`appendChild`, update track-space flex in
-	 * place. Returns `true` when the diff applied (no rebuild needed).
-	 * Falls back to `false` (full rebuild) when the stack-space framing
-	 * disagrees — e.g. inverse-order flips or a replaced border element.
-	 */
-	function diffBorder(borderEl: HTMLElement, region: PaletteRegion, editing: boolean): boolean {
-		const live = core.layout.getLayout()
-		const border = live.borders[region]
-		const direction = directionFor(region)
-		const inverse = region === 'right' || region === 'bottom'
-		// Collect existing children by role: stack spaces vs track elements.
-		const stackGaps: HTMLElement[] = []
-		const trackEls: HTMLElement[] = []
-		for (const child of [...borderEl.children]) {
-			if (!(child instanceof HTMLElement)) return false
-			if (child.classList.contains('toolbar-track')) trackEls.push(child)
-			else if (child.classList.contains('toolbar-stack-space')) stackGaps.push(child)
-			else return false
-		}
-		if (stackGaps.length !== border.length + 1) return false
-		if (trackEls.length !== border.length) return false
-		// Fix stack-space indices in place (no node churn).
-		for (let index = 0; index < stackGaps.length; index += 1) {
-			const gap = stackGaps[index]!
-			const want = inverse ? String(border.length - index) : String(index)
-			if (gap.dataset.stackIndex !== want) gap.dataset.stackIndex = want
-		}
-		// Reconcile tracks in live order: reuse by `===` identity, move
-		// with `insertBefore`, create/drop only the delta.
-		const liveTracks = new Set(border)
-		for (const track of border) {
-			const existing = nodes.get(track)
-			if (existing instanceof HTMLElement && existing.parentElement !== borderEl) {
-				nodes.delete(track)
-			}
-		}
-		for (const trackEl of trackEls) {
-			let owned = false
-			for (const track of border) {
-				if (nodes.get(track) === trackEl) {
-					owned = true
-					break
-				}
-			}
-			if (!owned) {
-				dropBindingsIn(trackEl)
-				trackEl.remove()
-			}
-		}
-		const anchorFor = (trackIndex: number): Node | null => {
-			// Stack gaps interleave tracks: non-inverse renders
-			// gap[i] track[i] gap[i+1]; inverse renders gap[i+1] track[i] gap[i].
-			// Either way the track sits between gap[trackIndex] and
-			// gap[trackIndex + 1] — anchor on the gap *after* the track.
-			const after = stackGaps[trackIndex + 1] ?? stackGaps[trackIndex]?.nextSibling ?? null
-			return after
-		}
-		border.forEach((track, trackIndex) => {
-			let trackEl = nodes.get(track)
-			if (!(trackEl instanceof HTMLElement) || trackEl.parentElement !== borderEl) {
-				trackEl = buildTrackElement(track, trackIndex, direction, region, editing)
-				nodes.setTrack(track, trackEl)
-				borderEl.insertBefore(trackEl, anchorFor(trackIndex))
-			} else {
-				borderEl.insertBefore(trackEl, anchorFor(trackIndex))
-				diffTrack(trackEl, track, trackIndex, direction, region, editing)
-			}
-			if (!liveTracks.has(track)) {
-				dropBindingsIn(trackEl)
-				trackEl.remove()
-			}
-		})
-		// Drop registry entries for tracks that no longer exist.
-		return true
-	}
-
-	/** Build a fresh `.toolbar-track` element (diff creation path). */
-	function buildTrackElement(
-		track: Track,
-		trackIndex: number,
-		direction: 'horizontal' | 'vertical',
-		region: PaletteRegion,
-		editing: boolean
-	): HTMLElement {
-		const trackEl = el('div', 'toolbar-track')
-		trackEl.dataset.trackIndex = String(trackIndex)
-		trackEl.dataset.paletteId = paletteId
-		if (editing) attachTrackDrag(trackEl, track, liveBorderOf(region))
-		const trackSpace = (index: number) => {
-			const gap = el('div', 'toolbar-track-space toolbar-drop-zone')
-			gap.dataset.paletteId = paletteId
-			gap.dataset.trackSpaceIndex = String(index)
-			const space = actualTrackSpaceAt(track, index)
-			gap.style.flexBasis = `${space * 100}%`
-			gap.style.flexGrow = `${Math.max(space, configuration.trackGapMinGrow)}`
-			trackEl.append(gap)
-		}
-		trackSpace(0)
-		track.forEach((slot, slotIndex) => {
-			const slotEl = el('div', 'toolbar-track-slot')
-			slotEl.dataset.toolbarSlotIndex = String(slotIndex)
-			slotEl.append(
-				renderToolbarElement(
-					slot.toolbar,
-					direction,
-					region,
-					editing,
-					'border',
-					{ container: 'border', region, trackIndex, slotIndex },
-					{ track, border: liveBorderOf(region), trackIndex }
-				)
-			)
-			trackEl.append(slotEl)
-			trackSpace(slotIndex + 1)
-		})
-		return trackEl
-	}
-
-	function liveBorderOf(region: PaletteRegion): import('@palettable/core').Border {
-		return core.layout.getLayout().borders[region]
-	}
-
-	/** Reconcile one track element: slot order, toolbar identity, gap flex. */
-	function diffTrack(
-		trackEl: HTMLElement,
-		track: Track,
-		trackIndex: number,
-		direction: 'horizontal' | 'vertical',
-		region: PaletteRegion,
-		editing: boolean
-	): void {
-		if (trackEl.dataset.trackIndex !== String(trackIndex)) {
-			trackEl.dataset.trackIndex = String(trackIndex)
-		}
-		// Update track-space flex in place.
-		let gapIndex = 0
-		for (const child of [...trackEl.children]) {
-			if (!(child instanceof HTMLElement)) continue
-			if (child.classList.contains('toolbar-track-space')) {
-				const space = actualTrackSpaceAt(track, gapIndex)
-				child.style.flexBasis = `${space * 100}%`
-				child.style.flexGrow = `${Math.max(space, configuration.trackGapMinGrow)}`
-				if (child.dataset.trackSpaceIndex !== String(gapIndex)) {
-					child.dataset.trackSpaceIndex = String(gapIndex)
-				}
-				gapIndex += 1
-			}
-		}
-		// Reconcile slots: reuse toolbar elements by `===`, move the rest.
-		const slotEls = [...trackEl.children].filter(
-			(child): child is HTMLElement =>
-				child instanceof HTMLElement && child.classList.contains('toolbar-track-slot')
-		)
-		const liveToolbars = new Set(track.map((slot) => slot.toolbar))
-		for (const slotEl of slotEls) {
-			const bar = slotEl.querySelector(':scope > .toolbar')
-			let owned = false
-			for (const toolbar of liveToolbars) {
-				if (nodes.get(toolbar) === bar) {
-					owned = true
-					break
-				}
-			}
-			if (!owned) {
-				dropBindingsIn(slotEl)
-				slotEl.remove()
-			}
-		}
-		track.forEach((slot, slotIndex) => {
-			let slotEl: HTMLElement | undefined
-			for (const candidate of trackEl.querySelectorAll(':scope > .toolbar-track-slot')) {
-				if (!(candidate instanceof HTMLElement)) continue
-				const bar = candidate.querySelector(':scope > .toolbar')
-				if (bar && nodes.get(slot.toolbar) === bar) {
-					slotEl = candidate
-					break
-				}
-			}
-			if (!slotEl) {
-				slotEl = el('div', 'toolbar-track-slot')
-				slotEl.append(
-					renderToolbarElement(
-						slot.toolbar,
-						direction,
-						region,
-						editing,
-						'border',
-						{ container: 'border', region, trackIndex, slotIndex },
-						{ track, border: liveBorderOf(region), trackIndex }
-					)
-				)
-				const gaps = [...trackEl.children].filter(
-					(child): child is HTMLElement =>
-						child instanceof HTMLElement && child.classList.contains('toolbar-track-space')
-				)
-				const anchor = gaps[slotIndex + 1] ?? null
-				trackEl.insertBefore(slotEl, anchor)
-			} else {
-				if (slotEl.dataset.toolbarSlotIndex !== String(slotIndex)) {
-					slotEl.dataset.toolbarSlotIndex = String(slotIndex)
-				}
-				const gaps = [...trackEl.children].filter(
-					(child): child is HTMLElement =>
-						child instanceof HTMLElement && child.classList.contains('toolbar-track-space')
-				)
-				const anchor = gaps[slotIndex + 1] ?? null
-				trackEl.insertBefore(slotEl, anchor)
-			}
-		})
-	}
-
-	/** Attach track-gap commit handling (shared by build + rebuild paths). */
-	function attachTrackDrag(
-		trackEl: HTMLElement,
-		track: Track,
-		border: import('@palettable/core').Border
-	): void {
-		trackEl.addEventListener('pointermove', (event) => {
-			if (!dragging) return
-			const target = event.target
-			if (!(target instanceof HTMLElement)) return
-			if (target.closest('.toolbar')) return
-			const spaceEl = target.closest('[data-track-space-index]')
-			if (!spaceEl || !trackEl.contains(spaceEl)) {
-				hoveredTrackSpace = undefined
-				return
-			}
-			const index = Number((spaceEl as HTMLElement).dataset.trackSpaceIndex)
-			const next = Number.isInteger(index) ? index : undefined
-			const prev = hoveredTrackSpace
-			if (
-				next !== undefined &&
-				next !== prev &&
-				commitDraggedToTrackSpace(dragging, track, border, next)
-			) {
-				markDragDirty()
-				hoveredTrackSpace = next
-				rearmSlideAfterCommit()
-			} else {
-				hoveredTrackSpace = next
-			}
-		})
-		trackEl.addEventListener('pointerleave', () => {
-			hoveredTrackSpace = undefined
-		})
-	}
-
-	/**
-	 * Border stack-gap highlight as a class-toggle pass: hovering a track
-	 * paints the two surrounding stacks; hovering a gap directly paints
-	 * only it. The two stacks touching the would-be-emptied track never
-	 * paint. Direct hover also arms the one-shot dwell timer → new track.
-	 */
-	function paintStackGaps(borderEl: HTMLElement, region: PaletteRegion): void {
-		const session = dragging
-		if (!computeEditing() || !session) {
-			clearGapClasses(borderEl)
-			return
-		}
-		const live = core.layout.getLayout()
-		const border = live.borders[region]
-		const entry = dwellFor(`border:${region}`)
-		syncGapClasses(
-			borderEl,
-			borderStackHighlight({
-				border,
-				active: entry.state.active,
-				hovered: entry.state.hovered,
-				editing: true,
-				dragging: session,
-			}),
-			'stackIndex'
-		)
-		// One-shot dwell arming: a directly-hovered stack DZ promotes to a
-		// track after `stackDzHoverMs`. Retargeting restarts the timer (the
-		// cleanup clears the previous one); leaving the gap or ending the
-		// drag cancels it.
-		entry.dwell.arm(entry.state, {
-			editing: true,
-			dragging: true,
-			masked: false,
-			canArm: (gap) => {
-				const decision = borderStackHighlight({
-					border: core.layout.getLayout().borders[region],
-					active: entry.state.active,
-					hovered: gap,
-					editing: true,
-					dragging,
-				})
-				return decision.highlighted.has(gap)
-			},
-			onFire: (targetStack) => {
-				const liveBorder = core.layout.getLayout().borders[region]
-				if (entry.state.hovered !== targetStack) return
-				if (commitDraggedToStackSpace(dragging!, liveBorder, targetStack)) {
-					markDragDirty()
-					rearmSlideAfterCommit()
-				}
-			},
-		})
+		clearGapClasses(borderEl)
 	}
 
 	function renderParking(host: HTMLElement, editing: boolean): void {
@@ -1564,35 +852,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const stack = el('div', 'palette-parking palette-horizontal stack-vertical')
 		stack.dataset.paletteId = paletteId
 		stack.dataset.container = 'parking'
-		if (editing) {
-			stack.addEventListener('pointermove', (event) => {
-				if (!dragging) return
-				const target = event.target
-				if (!(target instanceof HTMLElement)) return
-				// Inside a toolbar → that toolbar owns the item-space DZs.
-				if (target.closest('.toolbar')) return
-				const entry = dwellFor('parking')
-				const gapEl = target.closest('[data-parking-gap-index]')
-				if (gapEl && stack.contains(gapEl)) {
-					const index = Number((gapEl as HTMLElement).dataset.parkingGapIndex)
-					entry.dwell.hoverGap(entry.state, Number.isInteger(index) ? index : undefined)
-				} else {
-					const rowEl = target.closest('[data-parking-row-index]')
-					if (rowEl && stack.contains(rowEl)) {
-						const index = Number((rowEl as HTMLElement).dataset.parkingRowIndex)
-						entry.dwell.hoverRow(entry.state, Number.isInteger(index) ? index : undefined)
-					} else {
-						entry.dwell.hoverGap(entry.state, undefined)
-					}
-				}
-				paintParkingGaps(stack)
-			})
-			stack.addEventListener('pointerleave', () => {
-				const entry = dwellFor('parking')
-				entry.dwell.reset(entry.state)
-				clearGapClasses(stack)
-			})
-		}
+		// No highlight while the movement engine is stripped: the leave
+		// pass only clears stale classes.
+		stack.addEventListener('pointerleave', () => {
+			clearGapClasses(stack)
+		})
 		const visible = live.parking
 			.map((toolbar, index) => ({ toolbar, index }))
 			.filter(({ toolbar }) =>
@@ -1626,72 +890,16 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				row.append(remove)
 			}
 			row.append(
-				renderToolbarElement(
-					toolbar,
-					'horizontal',
-					'top',
-					editing,
-					'parking',
-					{
-						container: 'parking',
-						toolbarIndex: index,
-					},
-					{ parking: live.parking, toolbarIndex: index }
-				)
+				renderToolbarElement(toolbar, 'horizontal', 'top', editing, 'parking', {
+					container: 'parking',
+					toolbarIndex: index,
+				})
 			)
 			stack.append(row)
 			gap(index + 1)
 		}
 		host.append(stack)
-		paintParkingGaps(stack)
-	}
-
-	/**
-	 * Parking stack-gap highlight as a class-toggle pass (same protocol as
-	 * border stacks, with the would-be-emptied row veto). Direct hover arms
-	 * the one-shot dwell timer → new row.
-	 */
-	function paintParkingGaps(stack: HTMLElement): void {
-		const session = dragging
-		if (!computeEditing() || !session) {
-			clearGapClasses(stack)
-			return
-		}
-		const live = core.layout.getLayout()
-		const entry = dwellFor('parking')
-		syncGapClasses(
-			stack,
-			parkingGapHighlight({
-				parking: live.parking,
-				active: entry.state.active,
-				hovered: entry.state.hovered,
-				editing: true,
-				dragging: session,
-			}),
-			'parkingGapIndex'
-		)
-		entry.dwell.arm(entry.state, {
-			editing: true,
-			dragging: true,
-			masked: false,
-			canArm: (gap) => {
-				const decision = parkingGapHighlight({
-					parking: core.layout.getLayout().parking,
-					active: entry.state.active,
-					hovered: gap,
-					editing: true,
-					dragging,
-				})
-				return decision.highlighted.has(gap)
-			},
-			onFire: (targetGap) => {
-				if (entry.state.hovered !== targetGap) return
-				if (commitDraggedToParkingRow(dragging!, core.layout.getLayout().parking, targetGap)) {
-					markDragDirty()
-					rearmSlideAfterCommit()
-				}
-			},
-		})
+		clearGapClasses(stack)
 	}
 
 	function closeConsole(): void {
@@ -1705,17 +913,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * flips `editing`/`palette-editing` classes + `data-editing` on the
 	 * root, toggles `inert` on every `.toolbar-item-content`, and
 	 * adds/removes `.toolbar-item-guard` nodes + parking `×` buttons.
-	 * Structural renders (`renderBorder`/`renderParking`) stamp the same
-	 * chrome at creation time so first paint matches.
-	 *
-	 * NOTE: guards added here inspect only — the drag `pointerdown` →
-	 * session binding lives on the render path (`renderToolbarElement`),
-	 * which closes over the toolbar/track/border. `syncEditing` re-renders
-	 * structurally on an editing flip so drag handling is always bound.
-	 * This pass is currently unreferenced (kept for node-preserving
-	 * callers); the biome-ignore below pins it against noUnusedVariables.
+	 * Called from `syncEditing()` when `computeEditing()` flips; structural
+	 * renders (`renderBorder`/`renderParking`) still stamp the same chrome
+	 * at creation time so first paint matches.
 	 */
-	// biome-ignore lint/correctness/noUnusedVariables: kept for node-preserving callers
 	function applyEditing(editing: boolean): void {
 		container.classList.toggle('editing', editing)
 		container.classList.toggle('palette-editing', editing)
@@ -1739,8 +940,21 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				node.dataset.paletteId = paletteId
 				node.setAttribute('aria-hidden', 'true')
 				const path = inspectingPathOf(wrapper)
-				node.addEventListener('pointerdown', () => {
-					if (path) setInspecting(path)
+				node.addEventListener('pointerdown', (event) => {
+					if (path) {
+						setInspecting(path)
+						const live = core.layout.getLayout()
+						const item =
+							path.container === 'parking'
+								? live.parking[path.toolbarIndex]?.[path.itemIndex]
+								: live.borders[path.region][path.trackIndex]?.[path.slotIndex]?.toolbar[
+										path.itemIndex
+									]
+						if (item) {
+							const toolbar = findToolbarOf(live, item)
+							if (toolbar) startToolDrag(event, toolbar, item)
+						}
+					}
 				})
 				wrapper.append(node)
 			} else if (!editing && guard) {
@@ -1836,27 +1050,27 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Reconcile the editing flag with a structural re-render: drag handling
-	 * (guard `pointerdown` → session, bar/track `pointermove` commits) is
-	 * bound at render time, so the chrome-only `applyEditing` pass cannot
-	 * enable it — the borders must re-render to pick up the listeners.
+	 * Reconcile the editing flag without rebuilding: when `computeEditing()`
+	 * flips, run the chrome pass + console; otherwise leave the DOM alone.
 	 * Structural renders call this after rebuilding so `lastEditing` tracks.
-	 *
-	 * NOTE: this rebuilds the borders (node identity is not preserved
-	 * across the flip) — the value-sync suite pins the chrome flips, not
-	 * the no-rebuild property.
 	 */
 	function syncEditing(): void {
 		if (disposed) return
 		const editing = computeEditing()
 		if (editing === lastEditing) return
 		lastEditing = editing
-		if (!editing && inspecting !== undefined) {
-			const oldNode = inspectingNodeOf(inspecting)
-			if (oldNode) delete oldNode.dataset.inspected
-			inspecting = undefined
+		if (!editing) {
+			if (inspecting !== undefined) {
+				const oldNode = inspectingNodeOf(inspecting)
+				if (oldNode) delete oldNode.dataset.inspected
+				inspecting = undefined
+			}
+			for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
+				clearGapClasses(host)
+			}
 		}
-		syncStructure()
+		applyEditing(editing)
+		renderConsole()
 	}
 
 	function renderConsole(): void {
@@ -2133,61 +1347,18 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 
 	/**
 	 * Tool-owned config edit: mutate the live item in place (tool + editor
-	 * created together — no core call). Text/tone edits patch the live DOM
-	 * node in place (no rebuild); editor-type swaps rebuild just the tool
-	 * element with initial values; delete flows through `moveItem`.
+	 * created together — no core call), then re-render the borders so the
+	 * tool rebuilds with its new presentation. Editor-type swaps rebuild
+	 * the whole tool element with initial values (see renderToolbarElement).
 	 */
 	function patchLive(
 		path: InspectingPath,
-		patch: (item: import('@palettable/core').ToolbarItem) => void,
-		rebuildTool = false
+		patch: (item: import('@palettable/core').ToolbarItem) => void
 	): void {
 		const found = itemAtPath(path)
 		if (!found) return
 		patch(found.item)
-		if (!rebuildTool) {
-			const node = inspectingNodeOf(path)
-			const content = node?.querySelector(':scope > .toolbar-item-content')
-			if (node instanceof HTMLElement && content instanceof HTMLElement) {
-				const surface = surfaceForRegion(
-					path.container === 'border' ? path.region : ('top' as PaletteRegion)
-				)
-				updateToolNode(core, found.item, surface, content)
-			}
-			renderConsoleDetails()
-			return
-		}
-		// Editor-type swap: full tool rebuild with initial values.
-		const node = inspectingNodeOf(path)
-		const content = node?.querySelector(':scope > .toolbar-item-content')
-		if (!(node instanceof HTMLElement) || !(content instanceof HTMLElement)) {
-			syncStructure()
-			return
-		}
-		dropBindingsFor(content)
-		content.textContent = ''
-		const surface = surfaceForRegion(
-			path.container === 'border' ? path.region : ('top' as PaletteRegion)
-		)
-		const rendered = renderHeadItem({
-			core,
-			item: found.item,
-			surface,
-			region: path.container === 'border' ? path.region : ('top' as PaletteRegion),
-			onOpenConsole: (mode) => consoleStore.open(mode),
-			onInspect: () => setInspecting(path),
-			onOpenDrawer: (trigger, popup, surfaceAxis) => {
-				openDrawers.set(trigger, { popup, surfaceAxis })
-			},
-			onCloseDrawer: (trigger) => {
-				openDrawers.delete(trigger)
-			},
-			renderToolbar: (childTrack: Track, childAxis, childRegion) =>
-				renderDrawerTrack(childTrack, childAxis, childRegion, computeEditing()),
-		})
-		if (rendered) content.append(rendered)
-		bindTool(content, found.item, surface)
-		renderConsoleDetails()
+		syncStructure()
 	}
 
 	function renderConfigurator(
@@ -2281,21 +1452,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		editorSelect.value = currentEditor
 		editorSelect.addEventListener('change', () => {
 			const next = editorSelect.value
-			patchLive(
-				path,
-				(target) => {
-					const record = target as {
-						editor?: string
-						config?: Record<string, unknown>
-					}
-					record.editor = next
-					const cleanup = configuratorEditorCleanup(next)
-					if (record.config) {
-						for (const key of cleanup) delete record.config[key]
-					}
-				},
-				true
-			)
+			patchLive(path, (target) => {
+				const record = target as {
+					editor?: string
+					config?: Record<string, unknown>
+				}
+				record.editor = next
+				const cleanup = configuratorEditorCleanup(next)
+				if (record.config) {
+					for (const key of cleanup) delete record.config[key]
+				}
+			})
 		})
 		row('Editor', editorSelect)
 		const toneSelect = document.createElement('select')
@@ -2343,9 +1510,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 							itemIndex: path.itemIndex,
 						}
 			core.layout.moveItem(from, undefined)
-			// Deletion prunes empty toolbars/tracks via the op diff; the
-			// details panel must follow (Inspect → empty hint).
-			setInspecting(undefined)
+			inspecting = undefined
 		})
 		deleteValue.append(deleteButton)
 		deleteLine.append(deleteKey, deleteValue)
@@ -2387,56 +1552,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				consoleStore.patch({ selectedVariantId: variant.id })
 			})
 			wrap.append(trigger)
-			// The selected variant gets an insert action: build the item
-			// from the entry + variant + inline values and append it to the
-			// first toolbar of the top border (creating one when empty).
-			if (selectedVariant === variant.id) {
-				const insert = document.createElement('button')
-				insert.type = 'button'
-				insert.className = 'palette-default-add-insert'
-				insert.dataset.testid = 'console-add-insert'
-				insert.textContent = 'Add to toolbar'
-				insert.addEventListener('click', () => {
-					const snapshot = consoleStore.snapshot
-					const item = itemFromAddSelection(
-						{
-							source,
-							variant,
-							booleanValue: snapshot.booleanValue,
-							setValue: snapshot.setValue,
-						},
-						core.points,
-						core.editors,
-						core.editorDefaults
-					)
-					if (!item) return
-					const live = core.layout.getLayout()
-					const border = live.borders.top
-					if (border.length === 0 || border[0]?.length === 0) {
-						core.layout.moveToolbar(
-							undefined,
-							{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0 },
-							[item]
-						)
-					} else {
-						const toolbar = border[0]?.[0]?.toolbar
-						if (!toolbar) return
-						core.layout.moveItem(
-							undefined,
-							{
-								container: 'border',
-								region: 'top',
-								trackIndex: 0,
-								toolbarIndex: 0,
-								itemIndex: toolbar.length,
-							},
-							item
-						)
-					}
-					consoleStore.patch({ selectedEntryId: undefined, selectedVariantId: undefined })
-				})
-				wrap.append(insert)
-			}
 			if (variant.kind === 'set' && selectedVariant === variant.id) {
 				const inline = el('div', 'palette-default-add-inline-value')
 				const inlineStrong = document.createElement('strong')
@@ -2527,47 +1642,31 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 
 	/**
 	 * Layout-op interceptor: route structural mutations to the affected
-	 * border(s) via the per-node diff, so untouched borders — and untouched
-	 * nodes inside touched borders — keep DOM identity. `replace`
-	 * (whole-load) clears the registry and rebuilds everything. Every path
-	 * repositions open drawer popups (their triggers may have moved).
+	 * border(s) only, so untouched borders keep DOM identity. `replace`
+	 * (whole-load) clears the registry and rebuilds everything.
 	 */
 	function applyOp(op: LayoutOp): void {
 		if (disposed) return
-		// Drop registry entries for prune-cascade victims first: the
-		// emptied toolbar/track/row objects no longer exist.
-		if (op.kind !== 'insert-item' && op.kind !== 'replace') {
-			for (const victim of op.pruned) {
-				nodes.delete(victim.toolbar)
-			}
-		}
 		switch (op.kind) {
 			case 'replace':
 				nodes.clear()
 				syncStructure()
 				return
 			case 'move-item': {
-				// The moved item keeps `===` identity: drop its stale wrapper
-				// so the diff rebuilds it at the new position.
-				nodes.delete(op.item)
 				const regions = new Set<PaletteRegion>()
 				if (op.from.container === 'border') regions.add(op.from.region)
 				if (op.to.container === 'border') regions.add(op.to.region)
 				for (const region of regions) syncBorder(region)
-				repositionDrawers()
 				return
 			}
 			case 'remove-item': {
-				nodes.delete(op.item)
 				if (op.at.container === 'border') syncBorder(op.at.region)
 				else syncStructure()
-				repositionDrawers()
 				return
 			}
 			case 'insert-item': {
 				if (op.at.container === 'border') syncBorder(op.at.region)
 				else syncStructure()
-				repositionDrawers()
 				return
 			}
 			case 'move-toolbar': {
@@ -2587,11 +1686,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					op.pruned.some((victim) => victim.from.container === 'parking')
 				if (touchesParking) {
 					syncStructure()
-					repositionDrawers()
 					return
 				}
 				for (const region of regions) syncBorder(region)
-				repositionDrawers()
 				return
 			}
 		}
@@ -2676,19 +1773,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		refresh: syncStructure,
 		dispose() {
 			disposed = true
-			if (dragging) endDragSession()
 			opsUnsub()
 			contextUnsub()
 			consoleUnsub()
 			dropAllBindings()
-			nodes.clear()
-			slideCallbacks.clear()
 			container.removeEventListener('keydown', onKeyDown)
 			consoleHost.textContent = ''
 			for (const overlay of document.querySelectorAll('.palettable-drawer__overlay')) {
 				overlay.remove()
 			}
-			openDrawers.clear()
 			core.dispose()
 		},
 	}

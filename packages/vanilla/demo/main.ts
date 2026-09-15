@@ -1,21 +1,23 @@
 import { ConsoleStore, PaletteCore, validateSerializedLayout } from '@palettable/core'
-import { createIDE } from '@palettable/vanilla'
+import { createIDE, createValueProxy } from '@palettable/vanilla'
 import '../../core/styles/palette.css'
 import '../../core/theme/head-default.css'
 import {
 	bindConsoleToggle,
+	bindDemoLens,
+	bindResetViaCore,
+	COLONY_VALUE_KEYS,
+	CONSUMER_DEFAULTS,
 	type DemoMode,
 	type DemoState,
 	demoKeys,
 	demoLayoutFor,
 	demoPoints,
 	demoState,
-	resetColony,
+	resetColonyValues,
 } from './palette.js'
 
 const LAYOUT_STORAGE_KEY = 'palettable-demo-layout-v1'
-
-void resetColony
 
 function qs<T extends HTMLElement>(selector: string): T {
 	const el = document.querySelector(selector)
@@ -33,20 +35,17 @@ const grid = qs<HTMLElement>('.demo-state-grid')
 const chip = qs<HTMLElement>('[data-testid="elapsed"]')
 
 function renderLastAction(): void {
-	lastAction.textContent = `Last action: ${demoState.lastAction}`
+	lastAction.textContent = `Last action: ${demo.lastAction}`
 }
 
 let editable = true
 const consoleStore = new ConsoleStore()
-bindConsoleToggle(() => {
-	if (consoleStore.snapshot.open) consoleStore.close()
-	else {
-		const hasCommandBox = hasCommandBoxTool()
-		consoleStore.open(!editable || hasCommandBox ? 'edit' : 'run')
-	}
-})
 
 const initial = demoLayoutFor('rw-combobox')
+// Single source: core starts empty (skeleton), then the consumer hydrates
+// via live `setMany` (never `initialValues` — that path stays the one-shot
+// SSR/hydration constructor fill). `demoState` is only the backing object;
+// all reads/writes go through the `demo` proxy below.
 const core = new PaletteCore(demoPoints(), {
 	keys: demoKeys,
 	initialLayout: {
@@ -58,19 +57,6 @@ const core = new PaletteCore(demoPoints(), {
 			left: initial.borders.left.flat(),
 		},
 		parking: initial.parking,
-	},
-	initialValues: {
-		autoOxygen: demoState.autoOxygen,
-		shieldGenerator: demoState.shieldGenerator,
-		fastMode: demoState.fastMode,
-		colonyTheme: demoState.colonyTheme,
-		alertLevel: demoState.alertLevel,
-		powerPriority: demoState.powerPriority,
-		theme: demoState.theme,
-		gameSpeed: demoState.gameSpeed,
-		taxRate: demoState.taxRate,
-		solarEfficiency: demoState.solarEfficiency,
-		satisfaction: demoState.satisfaction,
 	},
 })
 
@@ -88,39 +74,68 @@ function hasCommandBoxTool(): boolean {
 	return false
 }
 
-function syncDemoState(): void {
-	demoState.autoOxygen = (core.values.get('autoOxygen') as boolean | undefined) ?? true
-	demoState.shieldGenerator = (core.values.get('shieldGenerator') as boolean | undefined) ?? false
-	demoState.fastMode = (core.values.get('fastMode') as boolean | undefined) ?? false
-	demoState.colonyTheme =
-		(core.values.get('colonyTheme') as DemoState['colonyTheme'] | undefined) ?? 'mars'
-	demoState.alertLevel =
-		(core.values.get('alertLevel') as DemoState['alertLevel'] | undefined) ?? 'green'
-	demoState.powerPriority =
-		(core.values.get('powerPriority') as DemoState['powerPriority'] | undefined) ?? 'balanced'
-	demoState.theme = (core.values.get('theme') as DemoState['theme'] | undefined) ?? 'system'
-	demoState.gameSpeed = (core.values.get('gameSpeed') as number | undefined) ?? 1
-	demoState.taxRate = (core.values.get('taxRate') as number | undefined) ?? 15
-	demoState.solarEfficiency = (core.values.get('solarEfficiency') as number | undefined) ?? 1.2
-	demoState.satisfaction = (core.values.get('satisfaction') as number | undefined) ?? 3
+bindConsoleToggle(() => {
+	if (consoleStore.snapshot.open) consoleStore.close()
+	else {
+		const hasCommandBox = hasCommandBoxTool()
+		consoleStore.open(!editable || hasCommandBox ? 'edit' : 'run')
+	}
+})
+
+function renderChrome(): void {
 	renderLastAction()
 	renderPills()
 	applyTheme()
 }
 
+// Single render path: every HTML update flows from the proxy `onChange`
+// event, never from a setter directly. Bag keys (colony values) render via
+// bag-notify; local keys (`lastAction`, `missionElapsed`) render via the
+// same `onChange` callback. No second `core.values.subscribe` render pass.
+const bagKeys = new Set<string>(COLONY_VALUE_KEYS as readonly string[])
+const valueLens = createValueProxy<DemoState>(
+	core.values as never,
+	demoState,
+	() => renderChrome(),
+	{
+		isBagKey: (key) => bagKeys.has(key),
+	}
+)
+bindDemoLens(valueLens.proxy)
+const demo = valueLens.proxy
+// Hydrate BEFORE createIDE: the IDE renders tool DOM once at construction
+// (then subscribes per-tool for updates), so values must be present first.
+core.setMany({ ...CONSUMER_DEFAULTS })
+bindResetViaCore(() => {
+	core.setMany(resetColonyValues())
+	demo.lastAction = 'Colony reset to defaults'
+})
+
+const ide = createIDE(ideHost, {
+	core,
+	consoleStore,
+	isEditable: () => editable,
+	itemEditors: ['commandBox', 'drawer', 'status'],
+	paletteId: 'demo',
+})
+
+// Per-tool DOM updates are owned by the IDE's own bindings; chrome
+// (pills/grid/theme/last-action) renders only via the proxy `onChange`.
+consoleStore.subscribe(() => renderLastAction())
+
 function renderPills(): void {
 	strip.textContent = ''
 	const pills: Array<[string, string]> = [
-		['💨', demoState.autoOxygen ? 'O₂ on' : 'O₂ off'],
-		['🛡️', demoState.shieldGenerator ? 'Shields up' : 'Shields down'],
-		['⚡', demoState.fastMode ? 'Hyper-tick' : 'Normal tick'],
-		['⚠️', demoState.alertLevel],
-		['🪐', demoState.colonyTheme],
-		['🔌', demoState.powerPriority],
-		['⏱️', `×${demoState.gameSpeed}`],
-		['🪙', `${demoState.taxRate}%`],
-		['☀️', `×${demoState.solarEfficiency}`],
-		['⭐', `${demoState.satisfaction}/5`],
+		['💨', demo.autoOxygen ? 'O₂ on' : 'O₂ off'],
+		['🛡️', demo.shieldGenerator ? 'Shields up' : 'Shields down'],
+		['⚡', demo.fastMode ? 'Hyper-tick' : 'Normal tick'],
+		['⚠️', demo.alertLevel],
+		['🪐', demo.colonyTheme],
+		['🔌', demo.powerPriority],
+		['⏱️', `×${demo.gameSpeed}`],
+		['🪙', `${demo.taxRate}%`],
+		['☀️', `×${demo.solarEfficiency}`],
+		['⭐', `${demo.satisfaction}/5`],
 	]
 	for (const [icon, text] of pills) {
 		const pill = document.createElement('span')
@@ -130,10 +145,10 @@ function renderPills(): void {
 	}
 	grid.textContent = ''
 	const rows: Array<[string, string]> = [
-		['Last action', demoState.lastAction],
-		['Threat', demoState.alertLevel],
-		['Power', demoState.powerPriority],
-		['Atmosphere', demoState.colonyTheme],
+		['Last action', demo.lastAction],
+		['Threat', demo.alertLevel],
+		['Power', demo.powerPriority],
+		['Atmosphere', demo.colonyTheme],
 	]
 	for (const [key, value] of rows) {
 		const row = document.createElement('div')
@@ -150,7 +165,7 @@ function renderPills(): void {
 }
 
 function applyTheme(): void {
-	const setting = demoState.theme
+	const setting = demo.theme
 	const prefersLight =
 		typeof window.matchMedia === 'function' &&
 		window.matchMedia('(prefers-color-scheme: light)').matches
@@ -160,18 +175,8 @@ function applyTheme(): void {
 	document.documentElement.style.colorScheme = resolved
 }
 
-const ide = createIDE(ideHost, {
-	core,
-	consoleStore,
-	isEditable: () => editable,
-	itemEditors: ['commandBox', 'drawer', 'status'],
-	paletteId: 'demo',
-	// Drag-end save hook: a mid-drag session mutated layout — persist one
-	// snapshot (the single "it changed, save it" call vanilla owns).
-	onLayoutChange: () => persistLayout(),
-})
-
-core.values.subscribe(() => syncDemoState())
+// Per-tool DOM updates are owned by the IDE's own bindings; chrome
+// (pills/grid/theme/last-action) renders only via the proxy `onChange`.
 consoleStore.subscribe(() => renderLastAction())
 
 function readStoredLayout(): import('@palettable/core').SerializedLayout | undefined {
@@ -189,11 +194,10 @@ function readStoredLayout(): import('@palettable/core').SerializedLayout | undef
 function persistLayout(): void {
 	try {
 		localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(core.layout.getSnapshot()))
-		demoState.lastAction = 'Layout saved'
+		demo.lastAction = 'Layout saved'
 	} catch {
-		demoState.lastAction = 'Layout save failed'
+		demo.lastAction = 'Layout save failed'
 	}
-	syncDemoState()
 }
 
 function loadPreset(id: DemoMode): void {
@@ -215,23 +219,20 @@ function loadPreset(id: DemoMode): void {
 		'rw-command-first': 'R/W command-first',
 		'ro-combobox': 'R-O + command box',
 	}
-	demoState.lastAction = `Loaded "${labels[id]}"`
+	demo.lastAction = `Loaded "${labels[id]}"`
 	ide.refresh()
-	syncDemoState()
 }
 
 function loadStoredLayout(): void {
 	const stored = readStoredLayout()
 	if (!stored) {
-		demoState.lastAction = 'No saved layout'
-		syncDemoState()
+		demo.lastAction = 'No saved layout'
 		return
 	}
 	core.layout.setLayout(stored)
 	restoredBadge.hidden = false
-	demoState.lastAction = 'Layout loaded'
+	demo.lastAction = 'Layout loaded'
 	ide.refresh()
-	syncDemoState()
 }
 
 saveButton.addEventListener('click', persistLayout)
@@ -248,8 +249,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(
 const started = Date.now()
 window.setInterval(() => {
 	const elapsed = Math.floor((Date.now() - started) / 1000)
-	demoState.missionElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
-	chip.textContent = `⏱ ${demoState.missionElapsed}`
+	demo.missionElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
+	chip.textContent = `⏱ ${demo.missionElapsed}`
 }, 1000)
 
 const stored = readStoredLayout()
@@ -259,5 +260,4 @@ if (stored) {
 	ide.refresh()
 }
 
-syncDemoState()
-renderLastAction()
+renderChrome()

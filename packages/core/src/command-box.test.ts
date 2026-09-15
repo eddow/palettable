@@ -22,7 +22,6 @@ function points(): AnyPoint[] {
 			id: 'notifications',
 			label: 'Notifications',
 			type: 'boolean',
-			defaultValue: true,
 			categories: ['settings'],
 			keywords: ['alerts'],
 		},
@@ -30,7 +29,6 @@ function points(): AnyPoint[] {
 			id: 'theme',
 			label: 'Theme',
 			type: 'enum',
-			defaultValue: 'dark',
 			constraints: {
 				options: [
 					{ value: 'light', label: 'Light', keywords: ['day'] },
@@ -42,7 +40,6 @@ function points(): AnyPoint[] {
 			id: 'fontSize',
 			label: 'Font Size',
 			type: 'number',
-			defaultValue: 12,
 			constraints: { min: 10, max: 20, step: 1 },
 		},
 		{ id: 'reset', label: 'Reset Defaults', type: 'action', run: () => {} },
@@ -87,7 +84,7 @@ describe('paletteCommandEntries', () => {
 
 	it('carries uses for render-time filtering', () => {
 		const withUses: AnyPoint[] = [
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },
+			{ id: 'bold', label: 'Bold', type: 'boolean', uses: ['activeFile'] },
 		]
 		const entries = paletteCommandEntries(withUses)
 		expect(entries[0]?.uses).toEqual(['activeFile'])

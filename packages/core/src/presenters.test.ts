@@ -59,7 +59,7 @@ describe('axisForRegion / drawer rules', () => {
 
 describe('resolveEditorVariant', () => {
 	it('follows explicit → default → first-eligible', () => {
-		const point = { id: 'n', label: 'N', type: 'number', defaultValue: 0 } as const
+		const point = { id: 'n', label: 'N', type: 'number' } as const
 		expect(resolveEditorVariant(point, surface, registry, { number: 'stepper' }, undefined)).toBe(
 			'stepper'
 		)
@@ -68,7 +68,7 @@ describe('resolveEditorVariant', () => {
 	})
 
 	it('falls back when the explicit editor is ineligible for the surface', () => {
-		const point = { id: 'n', label: 'N', type: 'number', defaultValue: 0 } as const
+		const point = { id: 'n', label: 'N', type: 'number' } as const
 		const vertical: SurfaceContext = { axis: 'vertical', region: 'left' }
 		// `slider` is horizontal-only → compact `stepper` wins.
 		expect(resolveEditorVariant(point, vertical, registry, undefined, 'slider')).toBe('stepper')
@@ -111,14 +111,19 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 	it('builds toggle view-models with toggle specs', () => {
 		const on = togglePresenter(
 			{ tool: 'flag' },
-			{ point: { id: 'flag', label: 'Flag', type: 'boolean', defaultValue: false }, value: true }
+			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: true }
 		)
 		expect(on).toMatchObject({ pressed: true, toggle: 'flag=false' })
 		const off = togglePresenter(
 			{ tool: 'flag' },
-			{ point: { id: 'flag', label: 'Flag', type: 'boolean', defaultValue: false }, value: false }
+			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: false }
 		)
 		expect(off.toggle).toBe('flag=true')
+		const skeleton = togglePresenter(
+			{ tool: 'flag' },
+			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: undefined }
+		)
+		expect(skeleton.pressed).toBeUndefined()
 	})
 
 	it('builds status view-models from config', () => {
@@ -136,7 +141,6 @@ describe('selectPresenter / sliderPresenter', () => {
 					id: 'theme',
 					label: 'Theme',
 					type: 'enum',
-					defaultValue: 'dark',
 					constraints: {
 						options: [
 							{ value: 'light', label: 'Light' },
@@ -152,6 +156,34 @@ describe('selectPresenter / sliderPresenter', () => {
 		expect(view.options).toHaveLength(2)
 		expect(view.options[1]?.can).toBe(false)
 		expect(view.select('light')).toBe('theme=light')
+		const skeleton = selectPresenter(
+			{ tool: 'theme' },
+			{
+				point: {
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: { options: [{ value: 'light' }, { value: 'dark' }] },
+				},
+				value: undefined,
+			},
+			surface
+		)
+		expect(skeleton.value).toBeUndefined()
+		const nonString = selectPresenter(
+			{ tool: 'theme' },
+			{
+				point: {
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: { options: [{ value: 'light' }, { value: 'dark' }] },
+				},
+				value: 42,
+			},
+			surface
+		)
+		expect(nonString.value).toBeUndefined()
 	})
 
 	it('resolves bounds with defaults', () => {
@@ -162,7 +194,6 @@ describe('selectPresenter / sliderPresenter', () => {
 					id: 'n',
 					label: 'N',
 					type: 'number',
-					defaultValue: 5,
 					constraints: { min: 1, max: 10, step: 2 },
 				},
 				value: 5,
@@ -171,7 +202,13 @@ describe('selectPresenter / sliderPresenter', () => {
 		)
 		expect(view).toMatchObject({ min: 1, max: 10, step: 2, value: 5 })
 		const bare = sliderPresenter({ tool: 'n' }, { point: undefined, value: undefined }, surface)
-		expect(bare).toMatchObject({ min: 0, max: 100, step: 1, value: 0 })
+		expect(bare).toMatchObject({ min: 0, max: 100, step: 1, value: undefined })
+		const nonNumber = sliderPresenter(
+			{ tool: 'n' },
+			{ point: { id: 'n', label: 'N', type: 'number' }, value: 'x' },
+			surface
+		)
+		expect(nonNumber.value).toBeUndefined()
 	})
 })
 

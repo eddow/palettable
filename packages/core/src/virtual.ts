@@ -12,7 +12,7 @@
  *   for "pause"): if the source is *not* at the stashed value, the current
  *   value is pushed aside (single slot — there is no stack) and the source is
  *   set to it; if the source *is* at the stashed value, the aside value pops
- *   back, or the source default when nothing was saved.
+ *   back, or `fallbackValue` (`undefined` = stay skeleton) when nothing was saved.
  *
  * Matching uses `Object.is` (same contract as `PaletteStateStore.set`).
  * All helpers here are pure (values in → values out); `PaletteCore` wires
@@ -62,10 +62,14 @@ export type EnumFromDefinition<V = unknown> = VirtualPointBase & {
  * Virtual stash action over one valued point.
  *
  * @example pause — `{ id: 'pause', kind: 'stash', source: 'gameSpeed', stashedValue: 0 }`
+ * `fallbackValue` is the third-branch restore target (written when the
+ * source is already at `stashedValue` with nothing aside); `undefined`
+ * (omitted) = stay skeleton.
  */
 export type StashDefinition<V = unknown> = VirtualPointBase & {
 	readonly kind: 'stash'
 	readonly stashedValue: V
+	readonly fallbackValue?: V
 }
 
 export type VirtualPoint<V = unknown> = EnumFromDefinition<V> | StashDefinition<V>
@@ -148,19 +152,19 @@ export type StashTransition = {
  * Pure stash toggle:
  * - `current !== stashedValue` → push `current` aside, write `stashedValue`.
  * - `current === stashedValue` + aside → pop the aside value, clear the slot.
- * - `current === stashedValue` + no aside → write `defaultValue` (restore default).
+ * - `current === stashedValue` + no aside → write `fallbackValue` (`undefined` = stay skeleton).
  */
 export function computeStashTransition(
 	current: unknown,
 	stashedValue: unknown,
 	aside: StashAside,
-	defaultValue: unknown
+	fallbackValue: unknown
 ): StashTransition {
 	if (!Object.is(current, stashedValue)) {
 		return { next: stashedValue, asideAfter: { has: true, value: current } }
 	}
 	if (aside.has) return { next: aside.value, asideAfter: { has: false } }
-	return { next: defaultValue, asideAfter: { has: false } }
+	return { next: fallbackValue, asideAfter: { has: false } }
 }
 
 /** Resolve + narrow the source definition of a virtual point (throws on misuse). */

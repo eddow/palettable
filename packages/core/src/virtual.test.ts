@@ -13,12 +13,11 @@ import {
 	type StashDefinition,
 } from './virtual.js'
 
-const gameSpeed: AnyPoint = { id: 'gameSpeed', label: 'Speed', type: 'number', defaultValue: 1 }
+const gameSpeed: AnyPoint = { id: 'gameSpeed', label: 'Speed', type: 'number' }
 const theme: AnyPoint = {
 	id: 'theme',
 	label: 'Theme',
 	type: 'enum',
-	defaultValue: 'light',
 	constraints: { options: [{ value: 'light' }, { value: 'dark' }] },
 }
 const save: AnyPoint = { id: 'save', label: 'Save', type: 'action', run: () => {} }
@@ -155,15 +154,22 @@ describe('computeStashTransition', () => {
 		})
 	})
 
-	it('restores the default when at the stashed value with no aside', () => {
+	it('writes fallbackValue when at the stashed value with no aside', () => {
 		expect(computeStashTransition(0, 0, { has: false }, 1)).toEqual({
 			next: 1,
 			asideAfter: { has: false },
 		})
 	})
 
+	it('stays skeleton (undefined) when fallbackValue is omitted', () => {
+		expect(computeStashTransition(0, 0, { has: false }, undefined)).toEqual({
+			next: undefined,
+			asideAfter: { has: false },
+		})
+	})
+
 	it('uses Object.is so NaN stashes correctly', () => {
-		// NaN Object.is-matches NaN: at the stashed value with no aside → default.
+		// NaN Object.is-matches NaN: at the stashed value with no aside → fallbackValue.
 		expect(computeStashTransition(Number.NaN, Number.NaN, { has: false }, 0)).toEqual({
 			next: 0,
 			asideAfter: { has: false },

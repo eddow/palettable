@@ -8,15 +8,15 @@
  * `setTree` notifies once with the changed-key array, and the global
  * subscription signature is `(changed: readonly string[]) => void`.
  *
- * The root bag `''` is core-owned (`PaletteCore.values` — the store itself,
- * generalized to this interface); non-root bags are host-owned and start
- * empty. Zero DOM, zero runes.
+ * The root bag `ROOT_CONTEXT` is core-owned (`PaletteCore.values` — the store
+ * itself, generalized to this interface); non-root bags are host-owned and
+ * start empty. Zero DOM, zero runes.
  */
 import { PaletteWriteError } from './errors.js'
 import { scheduleMicrotask } from './globals.js'
 import type { Unsubscribe } from './identifiers.js'
 
-/** Name of a context bag (`''` = root, i.e. `PaletteCore.values`). */
+/** Name of a context bag (`ROOT_CONTEXT` = root, i.e. `PaletteCore.values`). */
 export type ContextName = string
 
 /** Listener for bag changes: the array of `Object.is`-changed keys. */

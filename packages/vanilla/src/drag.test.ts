@@ -26,12 +26,11 @@ describe('clampSlideDelta', () => {
 
 describe('itemFromAddSelection', () => {
 	const points = [
-		{ id: 'lamp', label: 'Lamp', type: 'boolean', defaultValue: false },
+		{ id: 'lamp', label: 'Lamp', type: 'boolean' },
 		{
 			id: 'speed',
 			label: 'Speed',
 			type: 'number',
-			defaultValue: 1,
 			constraints: { min: 0, max: 10, step: 1 },
 		},
 	] as never[]

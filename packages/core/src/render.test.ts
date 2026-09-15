@@ -20,14 +20,13 @@ import {
 
 function points(): AnyPoint[] {
 	return [
-		{ id: 'theme', label: 'Theme', type: 'string', defaultValue: 'light' },
-		{ id: 'fontSize', label: 'Font size', type: 'number', defaultValue: 14 },
-		{ id: 'flag', label: 'Flag', type: 'boolean', defaultValue: false },
+		{ id: 'theme', label: 'Theme', type: 'string' },
+		{ id: 'fontSize', label: 'Font size', type: 'number' },
+		{ id: 'flag', label: 'Flag', type: 'boolean' },
 		{
 			id: 'mode',
 			label: 'Mode',
 			type: 'enum',
-			defaultValue: 'a',
 			constraints: { options: [{ value: 'a' }, { value: 'b' }] },
 		},
 		{ id: 'save', label: 'Save', type: 'action', run: () => {} },
@@ -109,7 +108,7 @@ describe('node-only import (no DOM, no timers)', () => {
 describe('golden render model', () => {
 	it('is byte-identical across runs and JSON round-trips', () => {
 		const core = new PaletteCore(points(), {
-			initialValues: { theme: 'dark', fontSize: 10 },
+			initialValues: { theme: 'dark', fontSize: 10, flag: false, mode: 'a' },
 			virtuals: [...virtuals],
 		})
 		const input = {
@@ -130,7 +129,7 @@ describe('golden render model', () => {
 
 	it('resolves values, descriptors, editors, keystrokes', () => {
 		const core = new PaletteCore(points(), {
-			initialValues: { theme: 'dark' },
+			initialValues: { theme: 'dark', flag: false },
 			virtuals: [...virtuals],
 		})
 		const tree = resolveRenderTree({
@@ -223,6 +222,25 @@ describe('golden render model', () => {
 		expect(() =>
 			resolveRenderTree({ points: core.points, layout, values: core.values.asObject() })
 		).toThrow(PaletteError)
+	})
+
+	it('renders skeletons with values:{} (every tool, value undefined)', () => {
+		const core = new PaletteCore(points(), { virtuals: [...virtuals] })
+		const tree = resolveRenderTree({
+			points: core.points,
+			virtuals: core.virtualPoints,
+			layout: defaultLayoutFromPoints(['theme', 'fontSize', 'flag', 'mode', 'save']),
+			values: {},
+			editors: registry,
+		})
+		const items = tree.borders.top.slots[0]?.toolbar.items ?? []
+		expect(items.map((item) => item.pointId)).toEqual(['theme', 'fontSize', 'flag', 'mode', 'save'])
+		// Chrome from descriptors, value undefined — no default fill.
+		for (const item of items) expect(item.value).toBeUndefined()
+		expect(items[0]?.descriptor?.id).toBe('theme')
+		expect(items[0]?.editor).toBe('text')
+		expect(items[4]?.descriptor?.id).toBe('save')
+		expect(items[4]?.editor).toBe('button')
 	})
 
 	it('rejects unknown versions and unknown points loudly', () => {

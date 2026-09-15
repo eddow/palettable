@@ -197,15 +197,19 @@ export type TogglePresenter = {
 	readonly icon: string
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
-	readonly pressed: boolean
+	/** Pressed flag; `undefined` = skeleton (no value yet). */
+	readonly pressed: boolean | undefined
 	/** Spec string toggling the value (`id=true` / `id=false`). */
 	readonly toggle: string
 }
 
-/** View-model for a boolean point: resolved icon + pressed flag + toggle spec. */
+/** View-model for a boolean point: resolved icon + pressed flag + toggle spec.
+ * Skeleton: `bound.value === undefined` → `pressed: undefined` (no `false`
+ * coercion hiding the skeleton — adapters render the unset state).
+ */
 export function togglePresenter(item: ToolbarItem, bound: BoundDisplay): TogglePresenter {
 	const meta = headMeta(item)
-	const pressed = bound.value === true
+	const pressed = bound.value === undefined ? undefined : bound.value === true
 	const icon =
 		meta.icon ?? (typeof bound.point?.icon === 'string' ? bound.point.icon : pressed ? '●' : '○')
 	return {
@@ -257,7 +261,8 @@ export type SelectPresenter = {
 	readonly label: string
 	readonly icon: string
 	readonly direction: 'horizontal' | 'vertical'
-	readonly value: string
+	/** Current value; `undefined` = skeleton (no option selected). */
+	readonly value: string | undefined
 	readonly options: readonly SelectOption[]
 	/** Spec string selecting a value (`id=value`). */
 	readonly select: (value: string) => string
@@ -279,7 +284,9 @@ function choiceText(option: EnumOption, display: ChoiceDisplay): string {
 	return icon !== undefined ? `${icon} ${label}` : label
 }
 
-/** View-model for an enum point: current icon/value + display-filtered options. */
+/** View-model for an enum point: current icon/value + display-filtered options.
+ * Skeleton: non-string `bound.value` (incl. `undefined`) → `value: undefined`.
+ */
 export function selectPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
@@ -287,7 +294,7 @@ export function selectPresenter(
 ): SelectPresenter {
 	const meta = headMeta(item)
 	const pointId = bound.point?.id ?? ''
-	const value = typeof bound.value === 'string' ? bound.value : ''
+	const value = typeof bound.value === 'string' ? bound.value : undefined
 	const optionsList =
 		bound.point !== undefined && isValuedPoint(bound.point) && bound.point.type === 'enum'
 			? ((bound.point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
@@ -300,7 +307,7 @@ export function selectPresenter(
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
 		label: meta.label,
-		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? value),
+		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? value ?? ''),
 		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
 		value,
 		options: optionsList.map((option) => ({
@@ -323,10 +330,14 @@ export type SliderPresenter = {
 	readonly min: number
 	readonly max: number
 	readonly step: number
-	readonly value: number
+	/** Current value; `undefined` = skeleton (adapters render the unset state). */
+	readonly value: number | undefined
 }
 
-/** View-model for a number point: bounds + value (adapter writes via `values.set`). */
+/** View-model for a number point: bounds + value (adapter writes via `values.set`).
+ * Skeleton: non-number `bound.value` (incl. `undefined`) → `value: undefined`
+ * (no `0` fallback); `min`/`max`/`step` defaults from constraints stay.
+ */
 export function sliderPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
@@ -339,7 +350,7 @@ export function sliderPresenter(
 					| { readonly min?: number; readonly max?: number; readonly step?: number }
 					| undefined) ?? {})
 			: {}
-	const value = typeof bound.value === 'number' ? bound.value : 0
+	const value = typeof bound.value === 'number' ? bound.value : undefined
 	return {
 		title: headTooltip(item, `${meta.label} ${value}`),
 		tone: meta.tone,

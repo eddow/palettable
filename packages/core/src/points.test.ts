@@ -19,7 +19,6 @@ const valued = (overrides: Partial<StringPoint> = {}): StringPoint => ({
 	id: 'theme',
 	label: 'Theme',
 	type: 'string',
-	defaultValue: 'light',
 	...overrides,
 })
 
@@ -50,9 +49,15 @@ describe('isValuedPoint', () => {
 		expect(isValuedPoint(undefined)).toBe(false)
 	})
 
-	it('accepts every non-action type carrying a default', () => {
-		for (const type of ['boolean', 'number', 'string', 'enum'] as const) {
-			expect(isValuedPoint({ id: 'p', label: 'P', type, defaultValue: 0 } as AnyPoint)).toBe(true)
+	it('accepts every non-action, non-nothing type even without a defaultValue', () => {
+		for (const type of ['boolean', 'number', 'string', 'enum', 'nothing'] as const) {
+			const point = { id: 'p', label: 'P', type } as AnyPoint
+			expect(isValuedPoint(point)).toBe(type !== 'nothing')
 		}
+		// Type-only points are valued: no 'defaultValue' key needed.
+		expect(isValuedPoint({ id: 'p', label: 'P', type: 'number' } as AnyPoint)).toBe(true)
+		expect(isValuedPoint({ id: 's', label: 'S', type: 'nothing' } as unknown as AnyPoint)).toBe(
+			false
+		)
 	})
 })

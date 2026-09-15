@@ -282,9 +282,10 @@ function resolveInlineItem(
 	// Virtuals have no point definition — resolve the editor variant against
 	// the family they present as (`enum` for enum-from, `action` for stash)
 	// so server/client agree on variant eligibility (SSR §4.3).
+	// Family probe carries no `defaultValue` (core holds no defaults).
 	const familyPoint = (
 		isEnumFromPoint(virtual)
-			? { id: virtual.id, label: virtual.label, type: 'enum', defaultValue: '' }
+			? { id: virtual.id, label: virtual.label, type: 'enum' }
 			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
 	) as AnyPoint
 	const editor = resolveEditorVariant(
@@ -331,7 +332,7 @@ function resolveVirtualItem(
 	// Same family-point trick as `resolveInlineItem` (SSR §4.3).
 	const familyPoint = (
 		isEnumFromPoint(virtual)
-			? { id: virtual.id, label: virtual.label, type: 'enum', defaultValue: '' }
+			? { id: virtual.id, label: virtual.label, type: 'enum' }
 			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
 	) as AnyPoint
 	const editor = resolveEditorVariant(

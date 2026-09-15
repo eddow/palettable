@@ -13,16 +13,16 @@ import { PaletteStateStore } from './store.js'
 
 function points(): AnyPoint[] {
 	return [
-		{ id: 'theme', label: 'Theme', type: 'string', defaultValue: 'light' },
-		{ id: 'fontSize', label: 'Font size', type: 'number', defaultValue: 14 },
-		{ id: 'flag', label: 'Flag', type: 'boolean', defaultValue: false },
+		{ id: 'theme', label: 'Theme', type: 'string' },
+		{ id: 'fontSize', label: 'Font size', type: 'number' },
+		{ id: 'flag', label: 'Flag', type: 'boolean' },
 		{ id: 'save', label: 'Save', type: 'action', run: () => {} },
 	]
 }
 
 describe('PaletteStateStore.setTree', () => {
 	it('applies all pairs before notifying (no interleaved write+notify)', () => {
-		const state = new PaletteStateStore(points())
+		const state = new PaletteStateStore()
 		const seen: Array<readonly [string, string | undefined]> = []
 		state.subscribe((id) => {
 			// Both writes must have landed before the first listener runs.
@@ -37,7 +37,8 @@ describe('PaletteStateStore.setTree', () => {
 	})
 
 	it('skips Object.is-equal pairs and returns only changed keys', () => {
-		const state = new PaletteStateStore(points())
+		const state = new PaletteStateStore()
+		state.setTree({ theme: 'light' })
 		const global = vi.fn()
 		state.subscribe(global)
 		const changed = state.setTree({ theme: 'light', fontSize: 20 })
@@ -47,7 +48,8 @@ describe('PaletteStateStore.setTree', () => {
 	})
 
 	it('returns [] and notifies nothing when nothing changed', () => {
-		const state = new PaletteStateStore(points())
+		const state = new PaletteStateStore()
+		state.setTree({ theme: 'light' })
 		const global = vi.fn()
 		const keyed = vi.fn()
 		state.subscribe(global)
@@ -58,7 +60,7 @@ describe('PaletteStateStore.setTree', () => {
 	})
 
 	it('notifies per-key listeners only for their changed key', () => {
-		const state = new PaletteStateStore(points())
+		const state = new PaletteStateStore()
 		const themeListener = vi.fn()
 		const sizeListener = vi.fn()
 		state.subscribe('theme', themeListener)
@@ -70,7 +72,7 @@ describe('PaletteStateStore.setTree', () => {
 })
 
 describe('PaletteCore initialValues / setMany', () => {
-	it('applies initialValues after defaults with zero construction notifications', () => {
+	it('applies initialValues with zero construction notifications', () => {
 		const global = vi.fn()
 		const core = new PaletteCore(points(), {
 			initialValues: { theme: 'dark', fontSize: 20 },
@@ -139,6 +141,20 @@ describe('ServerPointDescriptor round-trip', () => {
 		).toThrow('fromServerDescriptor: duplicate point id "theme"')
 	})
 
+	it('fromServerDescriptor accepts valued descriptors without defaultValue (skeleton)', () => {
+		const descriptors = toServerDescriptor(points())
+		const run = vi.fn()
+		const rebuilt = fromServerDescriptor(
+			JSON.parse(JSON.stringify(descriptors)) as typeof descriptors,
+			{ save: run }
+		)
+		// Absent defaultValue = skeleton tool: core starts empty, no rejection.
+		const core = new PaletteCore(rebuilt)
+		expect(core.values.get('theme')).toBeUndefined()
+		core.setMany({ theme: 'dark' })
+		expect(core.values.get('theme')).toBe('dark')
+	})
+
 	it('validateInitialValues is order-preserving and strict', () => {
 		const core = new PaletteCore(points())
 		const definitions = new Map(core.points.map((point) => [point.id, point]))
@@ -195,10 +211,10 @@ describe('PaletteCore.resolveEditablePoint / readActionCan', () => {
 describe('uses contract + write errors', () => {
 	it('PointBase accepts uses without behaviour change', () => {
 		const core = new PaletteCore([
-			{ id: 'bold', label: 'Bold', type: 'boolean', defaultValue: false, uses: ['activeFile'] },
+			{ id: 'bold', label: 'Bold', type: 'boolean', uses: ['activeFile'] },
 		])
 		expect(core.getDefinition('bold')?.uses).toEqual(['activeFile'])
-		expect(core.values.get('bold')).toBe(false)
+		expect(core.values.get('bold')).toBeUndefined()
 	})
 
 	it('PaletteWriteError extends PaletteError (catchable as such)', () => {

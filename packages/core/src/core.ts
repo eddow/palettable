@@ -21,7 +21,7 @@ import {
 } from './layout.js'
 import { readSetterValue, validateInitialValues } from './palette.js'
 import type { AnyPoint, AnyValuedPoint } from './points.js'
-import { isActionPoint, isValuedPoint } from './points.js'
+import { isActionPoint, isRootContext, isValuedPoint } from './points.js'
 import { canonicalPointId, isInlineSpec, type PointTarget, parsePointSpec } from './specs.js'
 import { PaletteStateStore } from './store.js'
 import {
@@ -43,10 +43,12 @@ export type PaletteCoreOptions = {
 	/** End-user-defined virtual points (`enum-from` / `stash`). */
 	readonly virtuals?: readonly VirtualPoint[]
 	/**
-	 * Value hydration (SSR §4.2): applied after defaults, validated per
-	 * point (`unknown id` → throw, `action` id → throw, `Object.is`-equal
-	 * → skip). Zero listener notifications during construction (listeners
-	 * attach after — the store is fresh here, so none exist yet).
+	 * Value hydration (SSR §4.2): one-shot construction fill, validated per
+	 * point (`unknown id` → throw, `action`/`nothing` id → throw,
+	 * `Object.is`-equal → skip). Core holds no defaults — absent key stays
+	 * skeleton (`undefined`). Zero listener notifications during
+	 * construction (listeners attach after — the store is fresh here, so
+	 * none exist yet).
 	 */
 	readonly initialValues?: Readonly<Record<string, unknown>>
 }
@@ -97,7 +99,7 @@ export class PaletteCore {
 			assertValidVirtual(virtual, this.definitions, this.allIds())
 			this.virtuals.set(virtual.id, virtual)
 		}
-		this.values = new PaletteStateStore(points)
+		this.values = new PaletteStateStore()
 		if (options.initialValues !== undefined) {
 			const entries = validateInitialValues(options.initialValues, this.definitions)
 			// Direct `setTree` on the fresh store: no listeners exist yet, so
@@ -162,8 +164,10 @@ export class PaletteCore {
 	}
 
 	// ── Context bags (Phase 8) ──────────────────────────────────────────
-	// Root bag `''` is core-owned (the `values` store itself); context bags
-	// are host-owned via `setContext` / `removeContext` (replace-never-append).
+	// Root bag `ROOT_CONTEXT` is core-owned (the `values` store itself);
+	// context bags are host-owned via `setContext` / `removeContext`
+	// (replace-never-append). `setContext`/`removeContext` with the root
+	// name throw — the root bag is not host-replaceable.
 
 	private bags = new Map<ContextName, ValuesBag>()
 	private bagForwards = new Map<ContextName, Unsubscribe>()
@@ -179,8 +183,11 @@ export class PaletteCore {
 	 * re-evaluate `can`, re-run display resolvers). Emits with an empty
 	 * changed array = identity change: adapters re-resolve everything for
 	 * `name`, never replay old subscriptions onto the new bag.
+	 * Throws on the root name (`ROOT_CONTEXT` / `'root'` alias).
 	 */
 	setContext(name: ContextName, bag: ValuesBag): void {
+		if (isRootContext(name))
+			throw new PaletteError(`setContext: "${name}" is the core-owned root bag`)
 		this.bagForwards.get(name)?.()
 		this.bags.set(name, bag)
 		this.bagForwards.set(
@@ -196,8 +203,11 @@ export class PaletteCore {
 	 * re-derive with `undefined` in that slot (disabled + placeholder
 	 * unless their `can` / resolvers define otherwise). Only core's own
 	 * forward is dropped; host direct subscribers survive.
+	 * Throws on the root name (`ROOT_CONTEXT` / `'root'` alias).
 	 */
 	removeContext(name: ContextName): void {
+		if (isRootContext(name))
+			throw new PaletteError(`removeContext: "${name}" is the core-owned root bag`)
 		this.bagForwards.get(name)?.()
 		this.bagForwards.delete(name)
 		this.bags.delete(name)
@@ -205,15 +215,19 @@ export class PaletteCore {
 		this.emitContext(name, [])
 	}
 
-	/** Get a bag by name (root `''` = `values` store). Unknown names → `undefined`. */
+	/**
+	 * Get a bag by name (`ROOT_CONTEXT` / `'root'` alias = `values` store).
+	 * Unknown names → `undefined`.
+	 */
 	getBag(name: ContextName): ValuesBag | undefined {
-		if (name === '') return this.values as unknown as ValuesBag
+		if (isRootContext(name)) return this.values as unknown as ValuesBag
 		return this.bags.get(name)
 	}
 
 	/**
 	 * Resolve used bags for a point's `uses` in order. Never throws:
-	 * missing bags resolve to `undefined`; root `''` always resolves.
+	 * missing bags resolve to `undefined`; root (`ROOT_CONTEXT` / `'root'`
+	 * alias) always resolves.
 	 */
 	resolveBags(uses: readonly ContextName[] | undefined): (ValuesBag | undefined)[] {
 		return (uses ?? []).map((name) => this.getBag(name))
@@ -327,25 +341,18 @@ export class PaletteCore {
 	}
 
 	/**
-	 * Restore every valued point to its default **and** clear every stash
-	 * aside slot. Not a store pass-through: stash asides are core-owned
-	 * virtual state, so a full reset has to bridge both.
-	 */
-	resetAll(): void {
-		this.values.resetAll(this.points)
-		this.stashAsides.clear()
-	}
-
-	/**
 	 * Can a named action (`id:action`) run? Bounds-checked for `number`
 	 * actions (`inc` stops at `max`, `dec` stops at `min`), mirroring the
 	 * Svelte reference's `valueActions.number.inc.get can()`.
-	 * Throws `PaletteError` on unknown points/actions.
+	 * Throws `PaletteError` on unknown points/actions and on absent
+	 * (skeleton) values — strict path, use `require(id)` semantics.
 	 */
 	canRunAction(id: string, action: string): boolean {
 		const def = this.definitions.get(canonicalPointId(id))
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is an action`)
+		if (!this.values.has(def.id))
+			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
 		const can = namedActionCan(def, this.values.get(def.id), action)
 		if (can === undefined) throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
 		return can
@@ -366,6 +373,11 @@ export class PaletteCore {
 	/**
 	 * Run an action point, setter spec (`id=value`), action spec (`id:action`),
 	 * virtual `enum-from` setter (`virtualId=key`), or a `stash` virtual id.
+	 *
+	 * Strictness: `id=value` setters and `id:action` on absent (skeleton)
+	 * values throw `PaletteError` (no silent default fill — the consumer
+	 * hydrates via `setMany` first). `get(id)` stays lenient for
+	 * render/skeleton probing.
 	 *
 	 * Synchronous: `PaletteError`s are thrown, not rejected. Action-point
 	 * `run()` may return a promise; core does not await it — the caller
@@ -403,24 +415,32 @@ export class PaletteCore {
 		}
 		if (!isValuedPoint(def)) throw new PaletteError(`run: point "${parsed.pointId}" is an action`)
 		if (parsed.kind === 'setter') {
+			if (!this.values.has(parsed.pointId))
+				throw new PaletteError(`run: no value for "${parsed.pointId}" (skeleton)`)
 			this.values.set(parsed.pointId, readSetterValue(def, parsed.value) as never)
 			return
 		}
 		this.applyNamedAction(def, parsed.action)
 	}
 
-	/** Run a `stash` virtual by id (pure toggle, see `computeStashTransition`). */
+	/**
+	 * Run a `stash` virtual by id (pure toggle, see `computeStashTransition`).
+	 * Strict source read: absent (skeleton) source throws `PaletteError`.
+	 * Third branch writes `virtual.fallbackValue` (`undefined` = stay skeleton).
+	 */
 	runStash(id: string): void {
 		const virtual = this.virtuals.get(canonicalPointId(id))
 		if (virtual === undefined) throw new PaletteError(`runStash: unknown virtual "${id}"`)
 		if (!isStashPoint(virtual)) throw new PaletteError(`runStash: virtual "${id}" is not a stash`)
 		const source = resolveVirtualSource(virtual, this.definitions)
+		if (!this.values.has(source.id))
+			throw new PaletteError(`runStash: no value for source "${source.id}" (skeleton)`)
 		const aside = this.stashAsides.get(virtual.id) ?? { has: false }
 		const transition = computeStashTransition(
 			this.values.get(source.id),
 			virtual.stashedValue,
 			aside,
-			source.defaultValue
+			virtual.fallbackValue
 		)
 		this.values.set(source.id, transition.next as never)
 		if (transition.asideAfter.has) this.stashAsides.set(virtual.id, transition.asideAfter)
@@ -458,13 +478,14 @@ export class PaletteCore {
 		return new Set(this.definitions.keys())
 	}
 
-	/** Apply a named action (`id:action`) to a valued point. */
+	/** Apply a named action (`id:action`) to a valued point. Strict: absent value throws. */
 	private applyNamedAction(def: AnyValuedPoint, action: string): void {
 		const constraints = def.constraints as
 			| { readonly min?: number; readonly max?: number; readonly step?: number }
 			| undefined
 		const step = constraints?.step ?? 1
-		const current = (this.values.get(def.id) as number | undefined) ?? (def.defaultValue as number)
+		if (!this.values.has(def.id)) throw new PaletteError(`run: no value for "${def.id}" (skeleton)`)
+		const current = this.values.require(def.id) as number
 		if (def.type === 'number') {
 			if (action === 'inc') {
 				this.values.set(def.id, (current + step) as never)
@@ -483,6 +504,7 @@ export class PaletteCore {
  * Pure `can` for a named action over a valued point: returns `true` / `false`
  * for a known action, `undefined` for an unknown action. `inc` / `dec` are
  * bounds-checked against `max` / `min` (`undefined` bound = unlimited).
+ * Absent (skeleton) `current` throws `PaletteError` — strict path.
  */
 function namedActionCan(
 	def: AnyValuedPoint,
@@ -493,7 +515,9 @@ function namedActionCan(
 		const constraints = def.constraints as
 			| { readonly min?: number; readonly max?: number; readonly step?: number }
 			| undefined
-		const value = (current as number | undefined) ?? (def.defaultValue as number)
+		if (current === undefined)
+			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
+		const value = current as number
 		if (action === 'inc') return constraints?.max === undefined || value < constraints.max
 		if (action === 'dec') return constraints?.min === undefined || value > constraints.min
 	}

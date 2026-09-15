@@ -3,26 +3,34 @@ import { PaletteCore } from './core.js'
 import { PaletteError } from './errors.js'
 import type { AnyPoint } from './points.js'
 
+const DEFAULTS = { theme: 'light', fontSize: 14, flag: false, mode: 'a' } as const
+
 function points(): AnyPoint[] {
 	return [
-		{ id: 'theme', label: 'Theme', type: 'string', defaultValue: 'light' },
+		{ id: 'theme', label: 'Theme', type: 'string' },
 		{
 			id: 'fontSize',
 			label: 'Font size',
 			type: 'number',
-			defaultValue: 14,
 			constraints: { step: 2 },
 		},
-		{ id: 'flag', label: 'Flag', type: 'boolean', defaultValue: false },
+		{ id: 'flag', label: 'Flag', type: 'boolean' },
 		{
 			id: 'mode',
 			label: 'Mode',
 			type: 'enum',
-			defaultValue: 'a',
 			constraints: { options: [{ value: 'a' }, { value: 'b' }] },
 		},
 		{ id: 'save', label: 'Save', type: 'action', run: vi.fn() },
 	]
+}
+
+/** Hydrate a core with consumer-owned defaults (the data-owning pattern). */
+function hydrated(options: ConstructorParameters<typeof PaletteCore>[1] = {}): PaletteCore {
+	return new PaletteCore(points(), {
+		...options,
+		initialValues: { ...DEFAULTS, ...(options.initialValues ?? {}) },
+	})
 }
 
 describe('PaletteCore construction', () => {
@@ -30,10 +38,16 @@ describe('PaletteCore construction', () => {
 		expect(
 			() =>
 				new PaletteCore([
-					{ id: 'a', label: 'A', type: 'string', defaultValue: 'x' },
-					{ id: 'a', label: 'A2', type: 'string', defaultValue: 'y' },
+					{ id: 'a', label: 'A', type: 'string' },
+					{ id: 'a', label: 'A2', type: 'string' },
 				])
 		).toThrow('duplicate point id "a"')
+	})
+
+	it('starts empty without initialValues (absent = skeleton)', () => {
+		const core = new PaletteCore(points())
+		expect(core.values.get('theme')).toBeUndefined()
+		expect(core.values.has('theme')).toBe(false)
 	})
 
 	it('rejects invalid virtuals up front', () => {
@@ -133,7 +147,7 @@ describe('PaletteCore construction', () => {
 
 describe('defineVirtual / removeVirtual', () => {
 	it('defines and removes virtuals; redefining a stash clears its aside slot', () => {
-		const core = new PaletteCore(points(), {
+		const core = hydrated({
 			virtuals: [
 				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
 			],
@@ -148,8 +162,10 @@ describe('defineVirtual / removeVirtual', () => {
 			stashedValue: 'muted',
 		})
 		expect(core.getVirtual('pause')?.source).toBe('theme')
-		// Aside slot was cleared: popping now restores the theme default.
+		// Aside slot was cleared: stashing pushes the current theme aside,
+		// popping restores it.
 		core.runStash('pause')
+		expect(core.values.get('theme')).toBe('muted')
 		core.runStash('pause')
 		expect(core.values.get('theme')).toBe('light')
 
@@ -192,14 +208,14 @@ describe('defineVirtual / removeVirtual', () => {
 
 describe('values (raw store)', () => {
 	it('exposes the raw value store without re-implementing reads/writes', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		expect(core.values.get('theme')).toBe('light')
 		core.values.set('theme', 'dark')
 		expect(core.values.get('theme')).toBe('dark')
 	})
 
 	it('does not resolve virtuals (raw store is virtual-unaware)', () => {
-		const core = new PaletteCore(points(), {
+		const core = hydrated({
 			virtuals: [
 				{
 					id: 'sizePreset',
@@ -217,18 +233,21 @@ describe('values (raw store)', () => {
 		expect(core.values.get('fontSize')).toBe(14)
 	})
 
-	it('resetAll restores every point and clears stash asides', () => {
-		const core = new PaletteCore(points(), {
+	it('consumer setMany round-trips values then defaults (reset pattern)', () => {
+		const core = hydrated({
 			virtuals: [
 				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
 			],
 		})
 		core.values.set('theme', 'dark')
 		core.runStash('pause')
-		core.resetAll()
+		expect(core.values.get('fontSize')).toBe(0)
+		// Consumer reset = setMany(defaults) (core.resetAll is deleted).
+		core.setMany({ ...DEFAULTS })
 		expect(core.values.get('theme')).toBe('light')
 		expect(core.values.get('fontSize')).toBe(14)
-		// Aside cleared: stashing again pushes the default aside.
+		// Stash aside survives setMany (only removeVirtual/defineVirtual clear
+		// it): popping restores the pre-reset aside value.
 		core.runStash('pause')
 		core.runStash('pause')
 		expect(core.values.get('fontSize')).toBe(14)
@@ -253,13 +272,19 @@ describe('run', () => {
 	})
 
 	it('rejects running a valued point bare or an unknown point (sync throw)', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		expect(() => core.run('theme')).toThrow('run: point "theme" is not an action')
 		expect(() => core.run('missing')).toThrow('run: unknown point "missing"')
 	})
 
-	it('applies boolean / number / string setters with coercion', () => {
+	it('throws on setter specs against absent (skeleton) values', () => {
 		const core = new PaletteCore(points())
+		expect(() => core.run('theme=dark')).toThrow('no value for "theme"')
+		expect(() => core.run('fontSize:inc')).toThrow('no value for "fontSize"')
+	})
+
+	it('applies boolean / number / string setters with coercion', () => {
+		const core = hydrated()
 		core.run('flag=true')
 		expect(core.values.get('flag')).toBe(true)
 		core.run('flag=0')
@@ -273,19 +298,19 @@ describe('run', () => {
 	})
 
 	it('rejects blank and non-finite number setters (valueReader parity)', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		expect(() => core.run('fontSize=')).toThrow('Invalid palette value')
 		expect(() => core.run('fontSize=Infinity')).toThrow('Invalid palette value')
 		expect(() => core.run('fontSize=NaN')).toThrow('Invalid palette value')
 	})
 
 	it('rejects setters on actions', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		expect(() => core.run('save=x')).toThrow('run: point "save" is an action')
 	})
 
 	it('applies number inc/dec actions with the configured step', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		core.run('fontSize:inc')
 		expect(core.values.get('fontSize')).toBe(16)
 		core.run('fontSize:dec')
@@ -294,14 +319,22 @@ describe('run', () => {
 		expect(() => core.run('theme:inc')).toThrow('run: unknown action "theme:inc"')
 	})
 
+	it('throws inc/dec on absent (skeleton) values', () => {
+		const core = new PaletteCore([{ id: 'n', label: 'N', type: 'number' }])
+		expect(() => core.run('n:inc')).toThrow('no value for "n"')
+		expect(() => core.canRunAction('n', 'inc')).toThrow('no value for "n"')
+	})
+
 	it('defaults the step to 1 without constraints', () => {
-		const core = new PaletteCore([{ id: 'n', label: 'N', type: 'number', defaultValue: 0 }])
+		const core = new PaletteCore([{ id: 'n', label: 'N', type: 'number' }], {
+			initialValues: { n: 0 },
+		})
 		core.run('n:inc')
 		expect(core.values.get('n')).toBe(1)
 	})
 
 	it('runs enum-from virtuals: bare re-writes the current key, setters map keys', () => {
-		const core = new PaletteCore(points(), {
+		const core = hydrated({
 			virtuals: [
 				{
 					id: 'sizePreset',
@@ -324,7 +357,7 @@ describe('run', () => {
 	})
 
 	it('rejects bare enum-from runs with no matching option', () => {
-		const core = new PaletteCore(points(), {
+		const core = hydrated({
 			virtuals: [
 				{
 					id: 'sizePreset',
@@ -341,7 +374,7 @@ describe('run', () => {
 	})
 
 	it('runs stash virtuals and rejects suffixed stash specs', () => {
-		const core = new PaletteCore(points(), {
+		const core = hydrated({
 			virtuals: [
 				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
 			],
@@ -356,15 +389,12 @@ describe('run', () => {
 
 describe('canRunAction', () => {
 	it('bounds-checks inc/dec against min/max', () => {
-		const core = new PaletteCore([
+		const core = new PaletteCore(
+			[{ id: 'n', label: 'N', type: 'number', constraints: { min: 0, max: 10, step: 2 } }],
 			{
-				id: 'n',
-				label: 'N',
-				type: 'number',
-				defaultValue: 0,
-				constraints: { min: 0, max: 10, step: 2 },
-			},
-		])
+				initialValues: { n: 0 },
+			}
+		)
 		expect(core.canRunAction('n', 'inc')).toBe(true)
 		expect(core.canRunAction('n', 'dec')).toBe(false) // at min
 		core.run('n:inc')
@@ -378,40 +408,71 @@ describe('canRunAction', () => {
 	})
 
 	it('treats missing bounds as unlimited', () => {
-		const core = new PaletteCore([{ id: 'n', label: 'N', type: 'number', defaultValue: 0 }])
+		const core = new PaletteCore([{ id: 'n', label: 'N', type: 'number' }], {
+			initialValues: { n: 0 },
+		})
 		expect(core.canRunAction('n', 'inc')).toBe(true)
 		expect(core.canRunAction('n', 'dec')).toBe(true)
 	})
 
-	it('throws on unknown points/actions', () => {
-		const core = new PaletteCore(points())
+	it('throws on unknown points/actions and absent values', () => {
+		const core = hydrated()
 		expect(() => core.canRunAction('missing', 'inc')).toThrow('Unknown palette point "missing"')
 		expect(() => core.canRunAction('fontSize', 'bogus')).toThrow(
 			'run: unknown action "fontSize:bogus"'
 		)
 		expect(() => core.canRunAction('save', 'inc')).toThrow('Palette point "save" is an action')
+		const skeleton = new PaletteCore(points())
+		expect(() => skeleton.canRunAction('fontSize', 'inc')).toThrow('no value for "fontSize"')
 	})
 })
 
 describe('runStash', () => {
-	it('toggles push-aside / pop-back / restore-default', () => {
-		const core = new PaletteCore(points(), {
+	it('toggles push-aside / pop-back, then writes fallbackValue with no aside', () => {
+		const core = hydrated({
 			virtuals: [
-				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
+				{
+					id: 'pause',
+					label: 'Pause',
+					source: 'fontSize',
+					kind: 'stash',
+					stashedValue: 0,
+					fallbackValue: 14,
+				},
 			],
 		})
 		core.runStash('pause')
 		expect(core.values.get('fontSize')).toBe(0)
 		core.runStash('pause')
 		expect(core.values.get('fontSize')).toBe(14)
-		// At the stashed value with no aside → default.
+		// At the stashed value with no aside → fallbackValue.
 		core.values.set('fontSize', 0)
 		core.runStash('pause')
 		expect(core.values.get('fontSize')).toBe(14)
 	})
 
-	it('rejects unknown and non-stash virtuals', () => {
+	it('stays skeleton (undefined) with no fallbackValue and no aside', () => {
+		const core = hydrated({
+			virtuals: [
+				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
+			],
+		})
+		core.values.set('fontSize', 0)
+		core.runStash('pause')
+		expect(core.values.get('fontSize')).toBeUndefined()
+	})
+
+	it('throws on absent (skeleton) sources', () => {
 		const core = new PaletteCore(points(), {
+			virtuals: [
+				{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
+			],
+		})
+		expect(() => core.runStash('pause')).toThrow('no value for source "fontSize"')
+	})
+
+	it('rejects unknown and non-stash virtuals', () => {
+		const core = hydrated({
 			virtuals: [
 				{
 					id: 'sizePreset',
@@ -431,7 +492,7 @@ describe('runStash', () => {
 
 describe('subscriptions / dispose', () => {
 	it('exposes value subscriptions through the raw store', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		const global = vi.fn()
 		const keyed = vi.fn()
 		core.values.subscribe(global)
@@ -454,7 +515,7 @@ describe('subscriptions / dispose', () => {
 	})
 
 	it('dispose drops value and layout listeners', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		const valueListener = vi.fn()
 		const layoutListener = vi.fn()
 		core.values.subscribe(valueListener)
@@ -470,7 +531,7 @@ describe('subscriptions / dispose', () => {
 	})
 
 	it('throws PaletteError instances (catchable as such)', () => {
-		const core = new PaletteCore(points())
+		const core = hydrated()
 		try {
 			core.run('missing')
 			expect.unreachable()

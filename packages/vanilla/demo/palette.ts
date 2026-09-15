@@ -4,8 +4,12 @@
  * Plain-data port of `packages/svelte/src/demo/palette.svelte.ts`: the same
  * colony points (boolean/enum/number/action + `console`), the same three
  * configurations (`rw-combobox` / `rw-command-first` / `ro-combobox`), and
- * the same toolbar layouts. Core `AnyPoint` descriptors (no closures except
- * action `run`, which the demo binds to its own mutable state).
+ * the same toolbar layouts. Core `AnyPoint` descriptors carry no defaults
+ * (core holds no defaults — absent key = skeleton); the single consumer
+ * defaults object below (`CONSUMER_DEFAULTS`) is the only reset/dirty
+ * source, applied via live `core.setMany` (never `initialValues`).
+ * Action `run`/`can` never touch `demoState` directly — they read through
+ * the value-proxy lens (bound in `main.ts`) or receive bags via `uses`.
  */
 
 import type { AnyPoint, Border, Borders, Parking } from '@palettable/core'
@@ -37,50 +41,78 @@ export type DemoState = {
 	lastAction: string
 }
 
-const colonyDefaults = {
+/**
+ * Single consumer defaults object: the only reset/dirty source.
+ * Reset = `core.setMany(CONSUMER_DEFAULTS)`; dirty = diff of live bag
+ * values vs these defaults. Point definitions carry no `defaultValue`.
+ */
+export const CONSUMER_DEFAULTS = {
 	autoOxygen: true,
 	shieldGenerator: false,
 	fastMode: false,
 	colonyTheme: 'mars',
 	alertLevel: 'green',
 	powerPriority: 'balanced',
+	theme: 'system',
 	gameSpeed: 1,
 	taxRate: 15,
 	solarEfficiency: 1.2,
 	satisfaction: 3,
 } as const
 
+/** Keys holding colony values (excludes UI-only `missionElapsed`/`lastAction`). */
+export const COLONY_VALUE_KEYS = Object.keys(
+	CONSUMER_DEFAULTS
+) as (keyof typeof CONSUMER_DEFAULTS)[]
+
+export type DemoLens = {
+	alertLevel: DemoState['alertLevel']
+	lastAction: string
+	[key: string]: unknown
+}
+
+/** Bound by `main.ts` to the value-proxy lens (bag = single source). */
+export let demoLens: DemoLens = { alertLevel: 'green', lastAction: 'Ready' }
+
+export function bindDemoLens(lens: DemoLens): void {
+	demoLens = lens
+}
+
 export const demoState: DemoState = {
-	...colonyDefaults,
-	theme: 'system',
+	...CONSUMER_DEFAULTS,
 	missionElapsed: '00:00',
 	lastAction: 'Ready',
 }
 
-export function resetColony(): void {
-	Object.assign(demoState, colonyDefaults)
-	demoState.lastAction = 'Colony reset to defaults'
+export function resetColonyValues(): Record<string, unknown> {
+	return { ...CONSUMER_DEFAULTS }
 }
 
-function isColonyDirty(): boolean {
-	return (
-		demoState.autoOxygen !== colonyDefaults.autoOxygen ||
-		demoState.shieldGenerator !== colonyDefaults.shieldGenerator ||
-		demoState.fastMode !== colonyDefaults.fastMode ||
-		demoState.colonyTheme !== colonyDefaults.colonyTheme ||
-		demoState.alertLevel !== colonyDefaults.alertLevel ||
-		demoState.powerPriority !== colonyDefaults.powerPriority ||
-		demoState.gameSpeed !== colonyDefaults.gameSpeed ||
-		demoState.taxRate !== colonyDefaults.taxRate ||
-		demoState.solarEfficiency !== colonyDefaults.solarEfficiency ||
-		demoState.satisfaction !== colonyDefaults.satisfaction
-	)
+export function isColonyDirtyValues(values: Readonly<Record<string, unknown>>): boolean {
+	return COLONY_VALUE_KEYS.some((key) => !Object.is(values[key], CONSUMER_DEFAULTS[key]))
+}
+
+/**
+ * Legacy direct reset (kept for the `resetSimulation` fallback path only).
+ * Preferred path is `core.setMany(resetColonyValues())` via `bindResetViaCore`.
+ * Writes via the lens so the single `onChange` render path fires.
+ */
+export function resetColony(): void {
+	Object.assign(demoLens, CONSUMER_DEFAULTS)
+	demoLens.lastAction = 'Colony reset to defaults'
 }
 
 let consoleToggle: (() => void) | undefined
 
+/** Bound by `main.ts`: reset = live `core.setMany(CONSUMER_DEFAULTS)`. */
+let resetViaCore: (() => void) | undefined
+
 export function bindConsoleToggle(toggle: () => void): void {
 	consoleToggle = toggle
+}
+
+export function bindResetViaCore(reset: () => void): void {
+	resetViaCore = reset
 }
 
 export function demoPoints(): AnyPoint[] {
@@ -92,7 +124,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '💨',
 			categories: ['systems', 'automation'],
 			keywords: ['oxygen', 'air', 'breathing', 'recycling', 'auto'],
-			defaultValue: true,
 		},
 		{
 			id: 'colonyTheme',
@@ -101,7 +132,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🪐',
 			categories: ['appearance'],
 			keywords: ['theme', 'style', 'mars', 'void', 'skin', 'color'],
-			defaultValue: 'mars',
 			constraints: {
 				options: [
 					{ value: 'mars', icon: '🔴', label: 'Mars', keywords: ['red', 'dust'] },
@@ -118,7 +148,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🔌',
 			categories: ['economy', 'power'],
 			keywords: ['power', 'energy', 'grid', 'priority', 'research', 'defense', 'economy'],
-			defaultValue: 'balanced',
 			constraints: {
 				options: [
 					{ value: 'research', icon: '🔬', label: 'Research', keywords: ['science', 'lab'] },
@@ -135,7 +164,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⚠️',
 			categories: ['security'],
 			keywords: ['alert', 'threat', 'status', 'defcon', 'green', 'yellow', 'red', 'black'],
-			defaultValue: 'green',
 			constraints: {
 				options: [
 					{ value: 'green', icon: '🟢', label: 'Green', keywords: ['safe', 'calm'] },
@@ -152,7 +180,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🎨',
 			categories: ['appearance'],
 			keywords: ['color'],
-			defaultValue: 'system',
 			constraints: {
 				options: [
 					{ value: 'light', icon: '☀️', label: 'Light' },
@@ -168,7 +195,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🪙',
 			categories: ['economy'],
 			keywords: ['tax', 'credits', 'economy', 'money', 'revenue'],
-			defaultValue: 15,
 			constraints: { min: 0, max: 50, step: 5 },
 		},
 		{
@@ -178,7 +204,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⏱️',
 			categories: ['simulation'],
 			keywords: ['speed', 'time', 'rate', 'clock', 'multiplier'],
-			defaultValue: 1,
 			constraints: { min: 0.5, max: 5, step: 0.5 },
 		},
 		{
@@ -188,7 +213,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '☀️',
 			categories: ['power'],
 			keywords: ['solar', 'energy', 'efficiency', 'multiplier', 'panels'],
-			defaultValue: 1.2,
 			constraints: { min: 0.8, max: 3, step: 0.1 },
 		},
 		{
@@ -198,7 +222,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⭐',
 			categories: ['colony'],
 			keywords: ['satisfaction', 'morale', 'happiness', 'rating'],
-			defaultValue: 3,
 			constraints: { min: 1, max: 5, step: 1 },
 		},
 		{
@@ -208,7 +231,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🛡️',
 			categories: ['defense'],
 			keywords: ['shields', 'defense', 'protection', 'barrier'],
-			defaultValue: false,
 		},
 		{
 			id: 'fastMode',
@@ -217,7 +239,6 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⚡',
 			categories: ['simulation'],
 			keywords: ['fast', 'speed', 'turbo', 'tick'],
-			defaultValue: false,
 		},
 		{
 			id: 'emergencyProtocol',
@@ -226,9 +247,9 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🚨',
 			categories: ['system', 'action'],
 			keywords: ['lockdown', 'evacuate', 'alert', 'crisis'],
-			can: () => demoState.alertLevel !== 'green',
+			can: () => demoLens.alertLevel !== 'green',
 			run() {
-				demoState.lastAction = 'Colony lockdown initiated! All personnel to shelters.'
+				demoLens.lastAction = 'Colony lockdown initiated! All personnel to shelters.'
 			},
 		},
 		{
@@ -241,10 +262,10 @@ export function demoPoints(): AnyPoint[] {
 			can: () => true,
 			run() {
 				try {
-					localStorage.setItem('stellar-outpost-save', JSON.stringify({ ...demoState }))
-					demoState.lastAction = 'Colony saved'
+					localStorage.setItem('stellar-outpost-save', JSON.stringify({ ...demoLens }))
+					demoLens.lastAction = 'Colony saved'
 				} catch {
-					demoState.lastAction = 'Colony save failed'
+					demoLens.lastAction = 'Colony save failed'
 				}
 			},
 		},
@@ -255,9 +276,10 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🔄',
 			categories: ['system'],
 			keywords: ['reset', 'wipe', 'restart', 'default'],
-			can: () => isColonyDirty(),
+			can: () => isColonyDirtyValues(demoLens as unknown as Record<string, unknown>),
 			run() {
-				resetColony()
+				if (resetViaCore !== undefined) resetViaCore()
+				else resetColony()
 			},
 		},
 		{

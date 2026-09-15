@@ -1,25 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
+import { PaletteError } from './errors.js'
 import * as schedule from './globals.js'
-import type { AnyPoint } from './points.js'
 import { PaletteStateStore } from './store.js'
 
-const points: AnyPoint[] = [
-	{ id: 'theme', label: 'Theme', type: 'string', defaultValue: 'light' },
-	{ id: 'fontSize', label: 'Font size', type: 'number', defaultValue: 14 },
-	{ id: 'save', label: 'Save', type: 'action', run: () => {} },
-]
-
 describe('PaletteStateStore', () => {
-	it('hydrates valued points from defaults and ignores actions', () => {
-		const state = new PaletteStateStore(points)
-		expect(state.get('theme')).toBe('light')
-		expect(state.get('fontSize')).toBe(14)
+	it('starts empty (no hydration from definitions); absent = skeleton', () => {
+		const state = new PaletteStateStore()
+		expect(state.get('theme')).toBeUndefined()
+		expect(state.get('fontSize')).toBeUndefined()
 		expect(state.get('save')).toBeUndefined()
 		expect(state.get('unknown')).toBeUndefined()
+		expect(state.has('theme')).toBe(false)
+		expect(state.asObject()).toEqual({})
+	})
+
+	it('has is false until set, true after; require throws on absent', () => {
+		const state = new PaletteStateStore()
+		expect(state.has('theme')).toBe(false)
+		expect(() => state.require('theme')).toThrow(PaletteError)
+		expect(() => state.require('theme')).toThrow('no value for "theme"')
+		state.set('theme', 'dark')
+		expect(state.has('theme')).toBe(true)
+		expect(state.require('theme')).toBe('dark')
 	})
 
 	it('set writes and notifies global + key listeners', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
 		const global = vi.fn()
 		const keyed = vi.fn()
 		const other = vi.fn()
@@ -38,7 +44,8 @@ describe('PaletteStateStore', () => {
 	})
 
 	it('set is a no-op when Object.is-equal (echo-loop guard)', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
+		state.set('theme', 'light')
 		const global = vi.fn()
 		state.subscribe(global)
 		state.set('theme', 'light')
@@ -49,25 +56,23 @@ describe('PaletteStateStore', () => {
 		expect(global).toHaveBeenCalledTimes(1)
 	})
 
-	it('reset restores one default; resetAll restores every valued point', () => {
-		const state = new PaletteStateStore(points)
-		state.set('theme', 'dark')
-		state.set('fontSize', 20)
-		state.reset(points[0])
-		expect(state.get('theme')).toBe('light')
+	it('setTree batches writes then notifies (single flush pass)', () => {
+		const state = new PaletteStateStore()
+		const seen: Array<readonly [string, unknown]> = []
+		state.subscribe((id) => {
+			seen.push([id, state.get('fontSize')] as const)
+		})
+		const changed = state.setTree({ theme: 'dark', fontSize: 20 })
+		expect(changed).toEqual(['theme', 'fontSize'])
+		expect(state.get('theme')).toBe('dark')
 		expect(state.get('fontSize')).toBe(20)
-		state.resetAll(points)
-		expect(state.get('fontSize')).toBe(14)
-	})
-
-	it('reset is a no-op for actions and unknown ids', () => {
-		const state = new PaletteStateStore(points)
-		expect(() => state.reset(undefined)).not.toThrow()
-		expect(() => state.reset(points[2])).not.toThrow()
+		expect(seen[0]?.[1]).toBe(20)
 	})
 
 	it('asObject returns a fresh plain-object snapshot', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
+		state.set('theme', 'light')
+		state.set('fontSize', 14)
 		const snapshot = state.asObject()
 		expect(snapshot).toEqual({ theme: 'light', fontSize: 14 })
 		snapshot.theme = 'mutated'
@@ -75,7 +80,7 @@ describe('PaletteStateStore', () => {
 	})
 
 	it('unsubscribe stops notifications; clearListeners drops everything', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
 		const global = vi.fn()
 		const keyed = vi.fn()
 		const stopGlobal = state.subscribe(global)
@@ -95,7 +100,7 @@ describe('PaletteStateStore', () => {
 	})
 
 	it('unsubscribe-during-notify is safe (snapshot iteration)', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
 		const second = vi.fn()
 		const first = vi.fn(() => stop())
 		const stop = state.subscribe(first)
@@ -106,7 +111,7 @@ describe('PaletteStateStore', () => {
 	})
 
 	it('a throwing listener never blocks the others', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
 		const after = vi.fn()
 		// The store re-throws via scheduleMicrotask — capture it instead of
 		// letting it escape as an uncaught exception in the test worker.
@@ -130,7 +135,7 @@ describe('PaletteStateStore', () => {
 	})
 
 	it('key listeners for other ids are not notified', () => {
-		const state = new PaletteStateStore(points)
+		const state = new PaletteStateStore()
 		const keyed = vi.fn()
 		state.subscribe('theme', keyed)
 		state.set('fontSize', 99)

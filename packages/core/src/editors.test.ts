@@ -6,7 +6,6 @@ const booleanPoint: AnyPoint = {
 	id: 'flag',
 	label: 'Flag',
 	type: 'boolean',
-	defaultValue: false,
 }
 const actionPoint: AnyPoint = { id: 'save', label: 'Save', type: 'action', run: () => {} }
 

@@ -29,11 +29,11 @@ A tool refers to **one and only one point**; the point declares **what it
 operates on** via `uses?: readonly ContextName[]` (optional bags — `undefined`
 = root bag only, as before). Each name resolves to `ValuesBag | undefined`
 (`undefined` = bag not registered — render falls back to disabled +
-placeholder, never throws). `''` may appear explicitly to receive the root
-bag as an argument (e.g. `uses: ['', 'activeFile']` → `run(rootBag,
-activeFileBag)`); valued-point value access always stays on the root bag via
-`core.values.get/set` regardless of `uses` — `uses` only controls which bags
-are passed to `run` / `can` / display resolvers, in `uses` order.
+placeholder, never throws). `ROOT_CONTEXT` may appear explicitly to receive
+the root bag as an argument (e.g. `uses: [ROOT_CONTEXT, 'activeFile']` →
+`run(rootBag, activeFileBag)`); valued-point value access always stays on the
+root bag via `core.values.get/set` regardless of `uses` — `uses` only controls
+which bags are passed to `run` / `can` / display resolvers, in `uses` order.
 
 - `run(...bags)` receives the used bags writable; the host bridge (adapter
   code, never core) propagates writes to the IDE. The existing
@@ -42,12 +42,31 @@ are passed to `run` / `can` / display resolvers, in `uses` order.
   adapters read it via `core.evaluateCan(id)` and subscribe to flips via
   `core.subscribeCan` (flips only — no render storms). Context-bag changes
   reach adapters via `core.subscribeContext((bagName, changedKeys))`.
-- Bags: the root bag `''` is core-owned (`core.values` itself — hydrated,
-  reset, persisted); context bags are host-owned via
-  `core.setContext`/`removeContext` (replace-never-append) and start empty.
+- Bags: the root bag `ROOT_CONTEXT` (`''` value, `'root'` alias accepted) is
+  core-owned (`core.values` itself — the single source of truth, starts empty,
+  no defaults inside; absent key = skeleton `undefined`). `initialValues`
+  stays the one-shot SSR/hydration constructor fill; the demo hydrates via
+  live `setMany` + the adapter-owned `createValueProxy` lens instead.
+  Context bags are host-owned via `core.setContext`/`removeContext`
+  (replace-never-append; root name throws) and start empty.
   `ValuesBag` mirrors the store discipline (`Map` + `Object.is` +
   snapshot-iteration + async re-throw) with frozen `get`, one-notify
   `setTree`, and `lock`/`unlock` (→ `PaletteWriteError`).
+
+### Data owning (single source in core)
+
+| Concern | Owner | Notes |
+|---|---|---|
+| Root value storage (`PaletteStateStore`, a.k.a. bag `ROOT_CONTEXT`) | `core` | Single source of truth. No defaults inside. Absent key = skeleton (`undefined`). |
+| Domain defaults + reset intent | consumer (`demo`) | One defaults object (`CONSUMER_DEFAULTS`). Reset = `setMany(CONSUMER_DEFAULTS)`. Dirty = diff vs defaults. |
+| Plain-object lens (`myValues.alertLevel` get/set) | adapter (`vanilla`) | `createValueProxy()` bridge: single render path — bag keys render via bag-notify `onChange` only (setter never renders), local keys (`isBagKey` → false) render via direct `onChange`. |
+
+Strictness: `get(id)` stays lenient (absent → `undefined`, the skeleton probe).
+Strict paths throw on absent: `run` setter, `applyNamedAction` (`id:action`),
+`namedActionCan`, `runStash` source read (`require(id)` helper).
+Skeleton: `resolveRenderTree({ points, values: {} })` renders every tool
+(descriptor + editor + keystrokes, `value: undefined`). Presenters propagate
+`undefined` instead of coercing (`false` / `0` / `''`).
 
 Code-name map (kept for compatibility): point → `PaletteTool*` types +
 `PaletteToolSpec` strings; tool → `PaletteToolbarItem` +
@@ -61,9 +80,13 @@ Four families (`src/lib/palette/types.ts`):
 | Family    | Shape                                              | Examples                          |
 | --------- | -------------------------------------------------- | --------------------------------- |
 | `run`     | `{ run(), can }`                                   | `console`, `saveGame`, `emergencyProtocol` |
-| `boolean` | `{ type: 'boolean', value, default }`              | `autoOxygen`, `shieldGenerator`   |
-| `enum`    | `{ type: 'enum', value, default, values[] }`       | `alertLevel`, `colonyTheme`, `powerPriority` |
-| `number`  | `{ type: 'number', value, default, min?, max?, step? }` | `gameSpeed`, `taxRate`, `satisfaction` |
+| `boolean` | `{ type: 'boolean', value }`                       | `autoOxygen`, `shieldGenerator`   |
+| `enum`    | `{ type: 'enum', value, values[] }`                | `alertLevel`, `colonyTheme`, `powerPriority` |
+| `number`  | `{ type: 'number', value, min?, max?, step? }`     | `gameSpeed`, `taxRate`, `satisfaction` |
+
+Points carry no defaults (core holds no defaults — absent key = skeleton).
+Consumer-owned defaults live outside core (demo `CONSUMER_DEFAULTS`, applied
+via `setMany`).
 
 Points carry `label`, `icon` (`PaletteIcon = string | Component`), `categories`,
 `keywords`. Editable points expose get/set `value` — in the demo these proxy a
@@ -99,9 +122,9 @@ in the console add-flow (`consoleState.enumValues` / `enumKeywords`).
 both use this syntax to bind a tool to a point):
 
 - `toolId` → the tool itself (`autoOxygen`)
-- `toolId=value` → setter runner (`alertLevel=red`, `colonyTheme=mars`); running the
-  same setter twice restores the previous value (or `default`). Legacy `toolId|value`
-  still resolves.
+- `toolId=value` → setter runner (`alertLevel=red`, `colonyTheme=mars`); strict:
+  absent (skeleton) values throw `PaletteError` (hydrate via `setMany` first).
+  Legacy `toolId|value` still resolves.
 - `toolId:action` → action runner (`gameSpeed:inc`, `gameSpeed:dec`); only `number`
   has built-in actions (`valueActions.number`)
 

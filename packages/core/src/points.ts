@@ -2,11 +2,25 @@
  * `@palettable/core` — point definitions (no layout, no DOM).
  *
  * Vocabulary: **point** = a data definition, either runnable (an action) or
- * valued (state with a restorable default). Points carry no layout; toolbar
- * binding lives in `layout.ts`, value state in `store.ts`.
+ * valued (state held in the root bag). Points carry no layout and no
+ * defaults; toolbar binding lives in `layout.ts`, value state in `store.ts`
+ * (single source, starts empty — absent key = skeleton `undefined`).
+ * Consumer-owned defaults live outside core (e.g. demo `setMany`).
  */
 import type { IconToken } from './identifiers.js'
-import type { EnumOption, PointType, TypeConstraints, TypeMap } from './type.js'
+import type { EnumOption, PointType, TypeConstraints } from './type.js'
+
+/**
+ * Root context name — the core-owned bag (`PaletteCore.values`).
+ * `isRootContext` also accepts the `'root'` alias for ergonomics;
+ * adapters/demos must use this constant, never bare `''` literals.
+ */
+export const ROOT_CONTEXT = '' as const
+
+/** True for the root bag name (`''`) or its `'root'` alias. */
+export function isRootContext(name: string): boolean {
+	return name === ROOT_CONTEXT || name === 'root'
+}
 
 /** Shared metadata for every point. Arrays are readonly — points are definitions. */
 export type PointBase<K extends PointType = PointType> = {
@@ -20,8 +34,9 @@ export type PointBase<K extends PointType = PointType> = {
 	/**
 	 * Optional context bags this point operates on.
 	 * Each name resolves to `ValuesBag | undefined` (`undefined` = bag not
-	 * registered). `undefined` uses = root bag only, as before. `''` may
-	 * appear explicitly to receive the root bag as an argument.
+	 * registered). `undefined` uses = root bag only, as before.
+	 * `ROOT_CONTEXT` may appear explicitly to receive the root bag as an
+	 * argument.
 	 */
 	readonly uses?: readonly string[]
 	/**
@@ -45,27 +60,23 @@ export type ActionPoint = PointBase<'action'> & {
 	run(...bags: readonly (import('./context.js').ValuesBag | undefined)[]): void | Promise<void>
 }
 
-/** Valued point: runtime state with a restorable default. */
-export type ValuedPoint<K extends PointType = Exclude<PointType, 'action'>> = PointBase<K> & {
-	readonly defaultValue: TypeMap[K]
-	/** Constraint payload; custom types without a `TypeConstraints` entry use `unknown`. */
-	readonly constraints?: K extends keyof TypeConstraints ? TypeConstraints[K] : unknown
-}
+/** Valued point: runtime state held in the root bag (absent = skeleton). */
+export type ValuedPoint<K extends PointType = Exclude<PointType, 'action' | 'nothing'>> =
+	PointBase<K> & {
+		/** Constraint payload; custom types without a `TypeConstraints` entry use `unknown`. */
+		readonly constraints?: K extends keyof TypeConstraints ? TypeConstraints[K] : unknown
+	}
 
 /** Narrow helpers for the built-ins (docs + narrowing; custom types use `ValuedPoint<K>`). */
 export type BooleanPoint = ValuedPoint<'boolean'>
 export type NumberPoint = ValuedPoint<'number'>
 export type StringPoint = ValuedPoint<'string'>
-export type EnumPoint<T extends string = string> = Omit<
-	ValuedPoint<'enum'>,
-	'defaultValue' | 'constraints'
-> & {
-	readonly defaultValue: T
+export type EnumPoint<T extends string = string> = Omit<ValuedPoint<'enum'>, 'constraints'> & {
 	readonly constraints: { readonly options: readonly EnumOption<T>[] }
 }
 
-/** Any valued point (excludes `'action'` so `defaultValue` is always present). */
-export type AnyValuedPoint = ValuedPoint<Exclude<PointType, 'action'>>
+/** Any valued point (excludes `'action'` / `'nothing'`). */
+export type AnyValuedPoint = ValuedPoint<Exclude<PointType, 'action' | 'nothing'>>
 
 /**
  * Nothing-point: context plus optional enablement, no value of its own.
@@ -86,15 +97,13 @@ export type AnyPoint = ActionPoint | AnyValuedPoint | NothingPoint
 /** Points map — heterogeneous by design (`Record<string, AnyPoint>`). */
 export type PointsMap = Record<string, AnyPoint>
 
-/** Type guards (null-safe; an action point never carries `defaultValue`). */
+/** Type guards (null-safe; valued = any non-action, non-nothing type). */
 export function isActionPoint(point: AnyPoint | null | undefined): point is ActionPoint {
 	return point != null && point.type === 'action' && 'run' in point
 }
 
 export function isValuedPoint(point: AnyPoint | null | undefined): point is AnyValuedPoint {
-	return (
-		point != null && point.type !== 'action' && point.type !== 'nothing' && 'defaultValue' in point
-	)
+	return point != null && point.type !== 'action' && point.type !== 'nothing'
 }
 
 /** Narrow guard for nothing-points (`status` / `command-box` / `drawer` bindings). */

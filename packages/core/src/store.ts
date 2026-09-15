@@ -1,18 +1,23 @@
 /**
- * `@palettable/core` — runtime value store, hydrated from point defaults.
+ * `@palettable/core` — runtime value store, the single source of truth.
  *
  * - Storage is a `Map<pointId, value>` — no shallow-copy object, no nested
  *   reactivity. Objects stored as values are opaque; mutate via `set()`.
+ * - Starts EMPTY: no hydration from definitions, no defaults inside core.
+ *   Absent key = skeleton (`undefined`). Only `initialValues` / `setMany`
+ *   (validated in `PaletteCore`) and direct `set` / `setTree` fill it.
  * - `set()` is a no-op when `Object.is`-equal (echo-loop guard for adapters).
  * - Listeners are split into global (`(id, value)`) and per-id (`(value)`).
  *   Notification iterates over a snapshot so unsubscribe-during-notify is safe;
  *   a throwing listener never blocks the others (errors are re-thrown
  *   asynchronously via `queueMicrotask` — the store stays consistent).
+ * - Strictness: `get(id)` stays lenient (absent → `undefined`, the skeleton
+ *   probe). `require(id)` throws `PaletteError` on absent (strict paths:
+ *   `run` setter, `applyNamedAction`, `namedActionCan`, `runStash` source).
  */
+import { PaletteError } from './errors.js'
 import { scheduleMicrotask } from './globals.js'
 import type { GlobalValueListener, KeyValueListener, Unsubscribe } from './identifiers.js'
-import type { AnyPoint } from './points.js'
-import { isValuedPoint } from './points.js'
 import type { PointType, TypeMap } from './type.js'
 
 export class PaletteStateStore {
@@ -20,15 +25,24 @@ export class PaletteStateStore {
 	private globalListeners = new Set<GlobalValueListener>()
 	private keyListeners = new Map<string, Set<KeyValueListener>>()
 
-	constructor(definitions: readonly AnyPoint[]) {
-		for (const def of definitions) {
-			if (isValuedPoint(def)) this.values.set(def.id, def.defaultValue)
-		}
-	}
-
-	/** Read the current value of a valued point. Unknown ids return `undefined`. */
+	/** Read the current value of a valued point. Absent → `undefined` (skeleton probe). */
 	get<K extends PointType>(id: string): TypeMap[K] | undefined {
 		return this.values.get(id) as TypeMap[K] | undefined
+	}
+
+	/** True when the store holds a value for `id` (skeleton = `false`). */
+	has(id: string): boolean {
+		return this.values.has(id)
+	}
+
+	/**
+	 * Read the current value, throwing `PaletteError` when absent.
+	 * Strict paths (`run` setter, named actions, stash source) use this;
+	 * render/skeleton probing uses lenient `get`.
+	 */
+	require<K extends PointType>(id: string): TypeMap[K] {
+		if (!this.values.has(id)) throw new PaletteError(`PaletteStateStore: no value for "${id}"`)
+		return this.values.get(id) as TypeMap[K]
 	}
 
 	/** Write a value; no-op when `Object.is`-equal. Notifies global + key listeners. */
@@ -62,16 +76,6 @@ export class PaletteStateStore {
 		}
 		for (const id of changed) this.notify(id, this.values.get(id))
 		return changed
-	}
-
-	/** Restore one point to its definition default (no-op for actions / unknown ids). */
-	reset(def: AnyPoint | undefined): void {
-		if (isValuedPoint(def)) this.set(def.id, def.defaultValue)
-	}
-
-	/** Restore every known valued point to its default. */
-	resetAll(definitions: readonly AnyPoint[]): void {
-		for (const def of definitions) this.reset(def)
 	}
 
 	/** Plain-object snapshot (fresh object each call; values are by reference). */
