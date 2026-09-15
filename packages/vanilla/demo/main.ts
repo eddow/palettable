@@ -17,53 +17,20 @@ const LAYOUT_STORAGE_KEY = 'palettable-demo-layout-v1'
 
 void resetColony
 
-const app = document.querySelector('#app')
-if (!(app instanceof HTMLElement)) throw new Error('missing #app')
+function qs<T extends HTMLElement>(selector: string): T {
+	const el = document.querySelector(selector)
+	if (!(el instanceof HTMLElement)) throw new Error(`missing ${selector}`)
+	return el as T
+}
 
-const main = document.createElement('main')
-app.append(main)
-
-const demoBar = document.createElement('div')
-demoBar.className = 'demo-bar'
-main.append(demoBar)
-
-const heading = document.createElement('h1')
-heading.textContent = 'Stellar Outpost — palette demo'
-demoBar.append(heading)
-
-const modes = document.createElement('div')
-modes.className = 'demo-modes'
-demoBar.append(modes)
-
-const io = document.createElement('div')
-io.className = 'demo-io'
-io.setAttribute('role', 'group')
-io.setAttribute('aria-label', 'Layout persistence')
-demoBar.append(io)
-
-const saveButton = document.createElement('button')
-saveButton.type = 'button'
-saveButton.dataset.testid = 'save-layout'
-saveButton.textContent = 'Save layout'
-io.append(saveButton)
-
-const loadButton = document.createElement('button')
-loadButton.type = 'button'
-loadButton.dataset.testid = 'load-layout'
-loadButton.textContent = 'Load layout'
-io.append(loadButton)
-
-const restoredBadge = document.createElement('span')
-restoredBadge.className = 'demo-state'
-restoredBadge.dataset.testid = 'layout-restored'
-restoredBadge.textContent = 'Layout restored from localStorage'
-restoredBadge.hidden = true
-demoBar.append(restoredBadge)
-
-const lastAction = document.createElement('span')
-lastAction.className = 'demo-state'
-lastAction.dataset.testid = 'last-action'
-demoBar.append(lastAction)
+const saveButton = qs<HTMLButtonElement>('[data-testid="save-layout"]')
+const loadButton = qs<HTMLButtonElement>('[data-testid="load-layout"]')
+const restoredBadge = qs<HTMLElement>('[data-testid="layout-restored"]')
+const lastAction = qs<HTMLElement>('[data-testid="last-action"]')
+const ideHost = qs<HTMLElement>('#ide-host')
+const strip = qs<HTMLElement>('.demo-strip')
+const grid = qs<HTMLElement>('.demo-state-grid')
+const chip = qs<HTMLElement>('[data-testid="elapsed"]')
 
 function renderLastAction(): void {
 	lastAction.textContent = `Last action: ${demoState.lastAction}`
@@ -141,50 +108,6 @@ function syncDemoState(): void {
 	applyTheme()
 }
 
-const ideHost = document.createElement('div')
-main.append(ideHost)
-
-const workZone = document.createElement('div')
-workZone.className = 'demo-center'
-workZone.dataset.testid = 'work-zone'
-ideHost.append(workZone)
-
-const hero = document.createElement('div')
-hero.className = 'demo-hero'
-workZone.append(hero)
-const heroText = document.createElement('div')
-const heroStrong = document.createElement('strong')
-heroStrong.textContent = 'Stellar Outpost'
-const heroSpan = document.createElement('span')
-heroSpan.textContent =
-	'Space colony management sim — every colony variable below is bound to a toolbar editor.'
-heroText.append(heroStrong, heroSpan)
-hero.append(heroText)
-const chip = document.createElement('div')
-chip.className = 'demo-chip'
-chip.dataset.testid = 'elapsed'
-chip.textContent = '⏱ 00:00'
-hero.append(chip)
-
-const strip = document.createElement('div')
-strip.className = 'demo-strip'
-workZone.append(strip)
-
-const panel = document.createElement('div')
-panel.className = 'demo-panel'
-workZone.append(panel)
-const panelTitle = document.createElement('div')
-panelTitle.className = 'demo-panel-title'
-panelTitle.textContent = 'Colony status'
-panel.append(panelTitle)
-const grid = document.createElement('div')
-grid.className = 'demo-state-grid'
-panel.append(grid)
-
-const hint = document.createElement('p')
-hint.textContent = 'Open the console, then click a toolbar item to configure its presentation.'
-workZone.append(hint)
-
 function renderPills(): void {
 	strip.textContent = ''
 	const pills: Array<[string, string]> = [
@@ -243,6 +166,9 @@ const ide = createIDE(ideHost, {
 	isEditable: () => editable,
 	itemEditors: ['commandBox', 'drawer', 'status'],
 	paletteId: 'demo',
+	// Drag-end save hook: a mid-drag session mutated layout — persist one
+	// snapshot (the single "it changed, save it" call vanilla owns).
+	onLayoutChange: () => persistLayout(),
 })
 
 core.values.subscribe(() => syncDemoState())
@@ -311,32 +237,12 @@ function loadStoredLayout(): void {
 saveButton.addEventListener('click', persistLayout)
 loadButton.addEventListener('click', loadStoredLayout)
 
-for (const config of [
-	{
-		id: 'rw-combobox',
-		label: 'R/W + command box',
-		description:
-			'Read-write; the toolbar hosts a command-box combobox (console opens in edit mode).',
-	},
-	{
-		id: 'rw-command-first',
-		label: 'R/W command-first',
-		description:
-			'Read-write; no combobox — the console opens command-first with a square edit-icon button.',
-	},
-	{
-		id: 'ro-combobox',
-		label: 'R-O + command box',
-		description: 'Read-only; the combobox runs commands inline, but the layout is not editable.',
-	},
-] as const) {
-	const button = document.createElement('button')
-	button.type = 'button'
-	button.dataset.testid = `mode-${config.id}`
-	button.title = config.description
-	button.textContent = config.label
-	button.addEventListener('click', () => loadPreset(config.id))
-	modes.append(button)
+for (const button of document.querySelectorAll<HTMLButtonElement>(
+	'.demo-modes button[data-testid]'
+)) {
+	const testid = button.dataset.testid ?? ''
+	const id = testid.replace(/^mode-/, '') as DemoMode
+	button.addEventListener('click', () => loadPreset(id))
 }
 
 const started = Date.now()
@@ -355,31 +261,3 @@ if (stored) {
 
 syncDemoState()
 renderLastAction()
-
-const style = document.createElement('style')
-style.textContent = `
-main { display: flex; flex-direction: column; gap: 0.75rem; min-height: 100vh; block-size: 100dvh; font-family: system-ui, sans-serif; background: #020617; color: #e2e8f0; }
-html[data-theme='light'] main { background: #f1f5f9; color: #0f172a; }
-html, body { block-size: 100%; }
-body { margin: 0; }
-main > .palette-ide { flex: 1 1 auto; min-block-size: 0; }
-.demo-bar { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; flex-wrap: wrap; }
-.demo-bar h1 { font-size: 1.1rem; margin: 0; }
-.demo-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.demo-modes button, .demo-io button { padding: 0.34rem 0.72rem; border: 1px solid rgba(71, 85, 105, 0.9); border-radius: 999px; background: rgba(15, 23, 42, 0.88); color: #e2e8f0; cursor: pointer; font-size: 0.82rem; }
-.demo-io { display: inline-flex; align-items: center; }
-.demo-center { position: relative; padding: 1rem; display: grid; gap: 1rem; align-content: start; }
-.palette-ide-center { position: relative; }
-.demo-center.is-dimmed { opacity: 0.45; filter: grayscale(0.4); pointer-events: none; user-select: none; }
-.demo-hero, .demo-panel { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(51, 65, 85, 0.9); border-radius: 16px; background: rgba(15, 23, 42, 0.82); box-shadow: 0 16px 36px rgba(2, 6, 23, 0.28); color: #e2e8f0; }
-.demo-hero { grid-template-columns: 1fr auto; align-items: center; }
-.demo-chip { display: inline-flex; align-items: center; gap: 8px; padding: 0.42rem 0.8rem; border-radius: 999px; background: rgba(30, 41, 59, 0.96); border: 1px solid rgba(96, 165, 250, 0.24); color: #bfdbfe; }
-.demo-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px dashed rgba(71, 85, 105, 0.9); border-radius: 14px; background: rgba(15, 23, 42, 0.56); }
-.demo-pill { display: inline-flex; align-items: center; gap: 6px; padding: 0.34rem 0.7rem; border-radius: 999px; background: linear-gradient(180deg, #2563eb, #1d4ed8); color: #eff6ff; font-size: 0.78rem; font-weight: 600; }
-.demo-panel-title { font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
-.demo-state-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 8px; }
-.demo-state-row { display: flex; align-items: center; gap: 8px; padding: 0.52rem 0.82rem; border: 1px solid rgba(71, 85, 105, 0.65); border-radius: 11px; background: rgba(15, 23, 42, 0.64); }
-.demo-state-key { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; }
-.demo-state-value { font-weight: 600; }
-`
-document.head.append(style)

@@ -1,11 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as schedule from './globals.js'
 import {
+	borderStackHighlight,
+	commitDraggedToItemSpace,
+	commitDraggedToParking,
+	commitDraggedToParkingRow,
+	commitDraggedToStackSpace,
+	commitDraggedToTrackSpace,
+	type DraggingState,
 	defaultLayoutFromPoints,
+	draggingEmptiesParkingRow,
+	draggingEmptiesTrackIndex,
 	type ItemLocation,
+	isDraggingWholeToolbar,
 	isDrawerItem,
+	isItemSpaceFree,
+	itemSpaceHighlight,
+	moveToolbarToStack,
+	moveToolbarToTrack,
+	nearestFreeItemSpaceAfter,
+	nearestFreeItemSpaceBefore,
 	type PaletteLayout,
 	PaletteLayoutTree,
+	parkingGapHighlight,
+	refreshDragMode,
+	resolveDragMode,
 	type SerializedLayout,
 	validateSerializedLayout,
 } from './layout.js'
@@ -33,6 +52,20 @@ const topFirst = (itemIndex: number): ItemLocation => ({
 	toolbarIndex: 0,
 	itemIndex,
 })
+
+function borderDrag(toolbarIndex = 0, toolCount = 1): DraggingState {
+	const tree = new PaletteLayoutTree(twoItemLayout())
+	const live = tree.getLayout()
+	const toolbar = live.borders.top[0]?.[toolbarIndex]?.toolbar ?? []
+	const track = live.borders.top[0] ?? []
+	const border = live.borders.top
+	const tools = toolbar.slice(0, toolCount)
+	return {
+		tools: tools.length > 0 ? tools : toolbar.slice(0, 1),
+		origin: { kind: 'border', toolbar, track, border },
+		mode: 'restructure',
+	}
+}
 
 describe('defaultLayoutFromPoints', () => {
 	it('puts every point in one top toolbar', () => {
@@ -138,17 +171,16 @@ describe('PaletteLayoutTree construction', () => {
 		expect(() => reopened.getLayout()).not.toThrow()
 	})
 
-	it('getLayout returns a deep clone (mutating it never touches the tree)', () => {
+	it('getLayout returns the live layout (read-only — commit via structural methods)', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
-		live.borders.top[0]?.[0]?.toolbar.push({ tool: 'injected' })
-		live.parking.push([{ tool: 'injected' }])
-		expect(tree.getSnapshot().borders.top[0]?.toolbar).toHaveLength(2)
-		expect(tree.getSnapshot().parking).toHaveLength(1)
+		expect(live).toBe(tree.getLayout())
+		expect(live.borders.top[0]?.[0]?.toolbar).toHaveLength(2)
+		expect(live.parking).toHaveLength(1)
 	})
 
-	it('clones item configs (shallow per item)', () => {
-		const tree = new PaletteLayoutTree({
+	it('clones inputs on load (mutating the constructor arg never touches the tree)', () => {
+		const input = {
 			version: 1,
 			borders: {
 				top: [{ space: 1, toolbar: [{ tool: 'a', config: { label: 'A' } }] }],
@@ -156,9 +188,10 @@ describe('PaletteLayoutTree construction', () => {
 				bottom: [],
 				left: [],
 			},
-		})
-		const live = tree.getLayout()
-		;(live.borders.top[0]?.[0]?.toolbar[0]?.config as Record<string, unknown>).label = 'mutated'
+		} as const
+		const tree = new PaletteLayoutTree(input as never)
+		const written = input.borders.top[0]!.toolbar[0] as { config: Record<string, unknown> }
+		written.config.label = 'mutated'
 		expect(tree.getSnapshot().borders.top[0]?.toolbar[0]?.config).toEqual({ label: 'A' })
 	})
 
@@ -169,7 +202,13 @@ describe('PaletteLayoutTree construction', () => {
 				top: [
 					{
 						space: 1,
-						toolbar: [{ editor: 'drawer', config: { label: 'D' }, toolbar: [{ tool: 'a' }] }],
+						toolbar: [
+							{
+								editor: 'drawer',
+								config: { label: 'D' },
+								toolbar: [{ space: 1, toolbar: [{ tool: 'a' }] }],
+							},
+						],
 					},
 				],
 				right: [],
@@ -181,7 +220,7 @@ describe('PaletteLayoutTree construction', () => {
 		expect(snapshot.borders.top[0]?.toolbar[0]).toEqual({
 			editor: 'drawer',
 			config: { label: 'D' },
-			toolbar: [{ tool: 'a', editor: undefined, config: undefined }],
+			toolbar: [{ space: 1, toolbar: [{ tool: 'a', editor: undefined, config: undefined }] }],
 		})
 		const live = tree.getLayout()
 		expect(isDrawerItem(live.borders.top[0]?.[0]?.toolbar[0])).toBe(true)
@@ -409,6 +448,477 @@ describe('setLayout / subscribe', () => {
 		}
 		tree.setLayout(live)
 		expect(tree.getSnapshot().borders.top[0]).toMatchObject({ space: 2 })
+	})
+})
+
+describe('moveItem / moveToolbar from?/to? + subscribeOps', () => {
+	it('moveItem with no from creates (insert path)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: unknown[] = []
+		tree.subscribeOps((op) => ops.push(op))
+		tree.moveItem(undefined, topFirst(1), { tool: 'z' })
+		expect(tree.getSnapshot().borders.top[0]?.toolbar.map((item) => item.tool)).toEqual([
+			'a',
+			'z',
+			'b',
+		])
+		expect(ops).toHaveLength(1)
+		expect(ops[0]).toMatchObject({ kind: 'insert-item' })
+	})
+
+	it('moveItem with no to deletes (remove path, prunes emptied toolbar)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: unknown[] = []
+		tree.subscribeOps((op) => ops.push(op))
+		tree.moveItem(
+			{ container: 'border', region: 'top', trackIndex: 1, toolbarIndex: 0, itemIndex: 0 },
+			undefined
+		)
+		expect(tree.getSnapshot().borders.top).toHaveLength(1)
+		expect(ops).toHaveLength(1)
+		expect(ops[0]).toMatchObject({ kind: 'remove-item' })
+	})
+
+	it('moveItem throws when both from and to are undefined', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		expect(() => tree.moveItem(undefined, undefined)).toThrow('both undefined')
+	})
+
+	it('moveItem emits a move-item op with the live item ref', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: { kind: string; item?: unknown; pruned?: unknown[] }[] = []
+		tree.subscribeOps((op) => ops.push(op as never))
+		tree.moveItem(topFirst(0), topFirst(2))
+		expect(ops).toHaveLength(1)
+		expect(ops[0]?.kind).toBe('move-item')
+		const live = tree.getLayout()
+		expect(ops[0]?.item).toBe(live.borders.top[0]?.[0]?.toolbar[1])
+		expect(ops[0]?.pruned).toEqual([])
+	})
+
+	it('moveItem op carries prune victims when the origin toolbar empties', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: { kind: string; pruned?: { kind: string }[] }[] = []
+		tree.subscribeOps((op) => ops.push(op as never))
+		tree.moveItem(
+			{ container: 'border', region: 'top', trackIndex: 1, toolbarIndex: 0, itemIndex: 0 },
+			topFirst(0)
+		)
+		expect(ops).toHaveLength(1)
+		expect(ops[0]?.pruned?.map((victim) => victim.kind)).toEqual(['toolbar', 'track'])
+	})
+
+	it('moveToolbar with no from creates, with no to deletes', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		tree.moveToolbar(undefined, { container: 'parking', toolbarIndex: 1 }, [{ tool: 'z' }])
+		expect(tree.getSnapshot().parking?.[1]?.map((item) => item.tool)).toEqual(['z'])
+		tree.moveToolbar({ container: 'parking', toolbarIndex: 1 }, undefined)
+		expect(tree.getSnapshot().parking).toHaveLength(1)
+	})
+
+	it('moveToolbar op: no from = creation, no to = deletion, both = move', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: { kind: string; from?: unknown; to?: unknown }[] = []
+		tree.subscribeOps((op) => ops.push(op as never))
+		const parkingAt = { container: 'parking', toolbarIndex: 0 } as const
+		tree.moveToolbar(undefined, parkingAt, [{ tool: 'z' }])
+		tree.moveToolbar(parkingAt, { container: 'parking', toolbarIndex: 0 })
+		tree.moveToolbar({ container: 'parking', toolbarIndex: 0 }, undefined)
+		expect(ops[0]?.from).toBeUndefined()
+		expect(ops[0]?.to).toEqual(parkingAt)
+		expect(ops[1]?.from).toEqual(parkingAt)
+		expect(ops[1]?.to).toEqual(parkingAt)
+		expect(ops[2]?.from).toEqual(parkingAt)
+		expect(ops[2]?.to).toBeUndefined()
+	})
+
+	it('moveToolbar deletion reports the prune cascade (slot + emptied track)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const ops: { pruned?: { kind: string }[] }[] = []
+		tree.subscribeOps((op) => ops.push(op as never))
+		// `twoItemLayout` puts one toolbar per track in the top region.
+		tree.moveToolbar(topFirst(0), undefined)
+		expect(ops[0]?.pruned?.map((victim) => victim.kind)).toEqual(['toolbar', 'track'])
+		expect(tree.getLayout().borders.top).toHaveLength(1)
+	})
+
+	it('moveToolbar into a track splits the gap instead of forcing space 1', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		// Removing one top slot leaves a single-track border, then re-insert.
+		tree.moveToolbar(topFirst(0), undefined)
+		tree.moveToolbar(undefined, topFirst(0), [{ tool: 'z' }])
+		const track = tree.getLayout().borders.top[0] ?? []
+		expect(track).toHaveLength(2)
+		const spaces = track.map((slot) => slot.space)
+		expect(spaces.every((space) => space >= 0 && space <= 1)).toBe(true)
+		expect(spaces.reduce((sum, space) => sum + space, 0)).toBeLessThanOrEqual(1)
+	})
+
+	it('moveToolbar throws when both from and to are undefined', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		expect(() => tree.moveToolbar(undefined, undefined)).toThrow('both undefined')
+	})
+
+	it('insertItem/removeItem emit ops; setLayout emits a replace op', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const kinds: string[] = []
+		tree.subscribeOps((op) => kinds.push(op.kind))
+		tree.insertItem(topFirst(0), { tool: 'z' })
+		tree.removeItem(topFirst(0))
+		tree.setLayout(twoItemLayout())
+		expect(kinds).toEqual(['insert-item', 'remove-item', 'replace'])
+	})
+
+	it('subscribeOps unsubscribe + clearListeners drop op listeners', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const listener = vi.fn()
+		const stop = tree.subscribeOps(listener)
+		stop()
+		tree.moveItem(topFirst(0), topFirst(1))
+		expect(listener).not.toHaveBeenCalled()
+		tree.subscribeOps(listener)
+		tree.clearListeners()
+		tree.moveItem(topFirst(0), topFirst(1))
+		expect(listener).not.toHaveBeenCalled()
+	})
+})
+
+describe('drag veto + mode helpers (explicit dragging state)', () => {
+	it('resolveDragMode: whole toolbar → slide, subset → restructure', () => {
+		const whole = borderDrag(0, 2)
+		expect(resolveDragMode(whole)).toBe('slide')
+		const subset = borderDrag(0, 1)
+		expect(resolveDragMode(subset)).toBe('restructure')
+		expect(refreshDragMode(subset)).toBe('restructure')
+		expect(subset.mode).toBe('restructure')
+	})
+
+	it('isDraggingWholeToolbar is container-scoped (identity + origin toolbar)', () => {
+		const dragging = borderDrag(0, 2)
+		const live = dragging.origin.kind === 'border' ? dragging.origin.track : []
+		expect(isDraggingWholeToolbar(dragging, dragging.origin.toolbar)).toBe(true)
+		expect(isDraggingWholeToolbar(dragging, live[1]?.toolbar ?? [])).toBe(false)
+		expect(isDraggingWholeToolbar(undefined, dragging.origin.toolbar)).toBe(false)
+	})
+
+	it('isItemSpaceFree rejects gaps touching dragged tools', () => {
+		const dragging = borderDrag(0, 1)
+		const toolbar = dragging.origin.toolbar
+		expect(isItemSpaceFree(dragging, toolbar, 0)).toBe(false)
+		expect(isItemSpaceFree(dragging, toolbar, 1)).toBe(false)
+		expect(isItemSpaceFree(dragging, toolbar, 2)).toBe(true)
+		expect(isItemSpaceFree(undefined, toolbar, 0)).toBe(true)
+	})
+
+	it('nearestFree scans both directions, undefined when all touch dragged tools', () => {
+		const dragging = borderDrag(0, 1)
+		const toolbar = dragging.origin.toolbar
+		expect(nearestFreeItemSpaceBefore(dragging, toolbar, 0)).toBe(undefined)
+		expect(nearestFreeItemSpaceAfter(dragging, toolbar, 1)).toBe(2)
+		expect(nearestFreeItemSpaceBefore(dragging, toolbar, 2)).toBe(2)
+	})
+
+	it('draggingEmptiesTrackIndex finds the single-toolbar whole-dragged track', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const sole = live.borders.top[1]?.[0]?.toolbar ?? []
+		const track = live.borders.top[1] ?? []
+		const dragging: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'border', toolbar: sole, track, border: live.borders.top },
+			mode: 'slide',
+		}
+		expect(draggingEmptiesTrackIndex(dragging, live.borders.top)).toBe(1)
+		const partial = borderDrag(0, 1)
+		expect(draggingEmptiesTrackIndex(partial, live.borders.top)).toBe(undefined)
+		expect(draggingEmptiesTrackIndex(undefined, live.borders.top)).toBe(undefined)
+	})
+
+	it('draggingEmptiesParkingRow finds the sole-row whole-dragged stack', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const sole = live.parking[0] ?? []
+		const dragging: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'parking', toolbar: sole, parking: live.parking, index: 0 },
+			mode: 'slide',
+		}
+		expect(draggingEmptiesParkingRow(dragging, live.parking)).toBe(0)
+		const border = borderDrag(0, 1)
+		expect(draggingEmptiesParkingRow(border, live.parking)).toBe(undefined)
+	})
+})
+
+describe('gap highlight (pure, no DOM)', () => {
+	it('border stacks: row hover flanks, gap hover singles, veto suppresses', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const dragging = borderDrag(0, 1)
+		const row = borderStackHighlight({
+			border: live.borders.top,
+			active: 0,
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		expect([...row.highlighted]).toEqual([0, 1])
+		expect(row.hovered).toBe(undefined)
+		const gap = borderStackHighlight({
+			border: live.borders.top,
+			active: undefined,
+			hovered: 2,
+			editing: true,
+			dragging,
+		})
+		expect([...gap.highlighted]).toEqual([2])
+		expect(gap.hovered).toBe(2)
+	})
+
+	it('border stacks: emptied-track neighbours never highlight, mask shows end gap', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const sole = live.borders.top[1]?.[0]?.toolbar ?? []
+		const track = live.borders.top[1] ?? []
+		const dragging: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'border', toolbar: sole, track, border: live.borders.top },
+			mode: 'slide',
+		}
+		const vetoed = borderStackHighlight({
+			border: live.borders.top,
+			active: undefined,
+			hovered: 1,
+			editing: true,
+			dragging,
+		})
+		expect([...vetoed.highlighted]).toEqual([])
+		const masked = borderStackHighlight({
+			border: live.borders.top,
+			active: undefined,
+			hovered: undefined,
+			editing: true,
+			dragging,
+			maskActive: true,
+		})
+		// Mask shows the inner end gap even under the emptied veto (the veto
+		// applies to direct/row hover; the mask is the console/panel fallback).
+		expect([...masked.highlighted]).toEqual([2])
+	})
+
+	it('border stacks: no highlight when not editing or not dragging', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const dragging = borderDrag(0, 1)
+		expect(
+			borderStackHighlight({
+				border: live.borders.top,
+				active: 0,
+				hovered: undefined,
+				editing: false,
+				dragging,
+			}).highlighted.size
+		).toBe(0)
+		expect(
+			borderStackHighlight({
+				border: live.borders.top,
+				active: 0,
+				hovered: undefined,
+				editing: true,
+				dragging: undefined,
+			}).highlighted.size
+		).toBe(0)
+	})
+
+	it('parking gaps mirror the stack protocol with the row veto', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const dragging = borderDrag(0, 1)
+		const row = parkingGapHighlight({
+			parking: live.parking,
+			active: 0,
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		expect([...row.highlighted]).toEqual([0, 1])
+		const sole = live.parking[0] ?? []
+		const parkingDrag: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'parking', toolbar: sole, parking: live.parking, index: 0 },
+			mode: 'slide',
+		}
+		const vetoed = parkingGapHighlight({
+			parking: live.parking,
+			active: undefined,
+			hovered: 0,
+			editing: true,
+			dragging: parkingDrag,
+		})
+		expect([...vetoed.highlighted]).toEqual([])
+	})
+
+	it('item spaces: dragged-touching gaps never highlight, flank falls back to free', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragging: DraggingState = {
+			tools: toolbar.slice(0, 1),
+			origin: {
+				kind: 'border',
+				toolbar,
+				track: live.borders.top[0] ?? [],
+				border: live.borders.top,
+			},
+			mode: 'restructure',
+		}
+		const direct = itemSpaceHighlight({
+			toolbar,
+			activeItem: undefined,
+			hovered: 0,
+			editing: true,
+			dragging,
+		})
+		expect([...direct.highlighted]).toEqual([])
+		const flank = itemSpaceHighlight({
+			toolbar,
+			activeItem: 0,
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		expect([...flank.highlighted]).toEqual([2])
+	})
+})
+
+describe('movement commits (explicit dragging state)', () => {
+	it('commitDraggedToItemSpace merges and follows the origin', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const source = live.borders.top[0]?.[0]?.toolbar ?? []
+		const target = live.borders.top[1]?.[0]?.toolbar ?? []
+		const dragging: DraggingState = {
+			tools: source.slice(0, 1),
+			origin: {
+				kind: 'border',
+				toolbar: source,
+				track: live.borders.top[0] ?? [],
+				border: live.borders.top,
+			},
+			mode: 'restructure',
+		}
+		expect(
+			commitDraggedToItemSpace(dragging, target, live.borders.top[1] ?? [], live.borders.top, 1)
+		).toBe(true)
+		expect(target.map((item) => (item as { tool?: unknown }).tool)).toEqual(['c', 'a'])
+		expect(dragging.origin.kind).toBe('border')
+		expect(dragging.mode).toBe('restructure')
+	})
+
+	it('commitDraggedToTrackSpace slide relocates identity, flanking gaps veto', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[1]?.[0]?.toolbar ?? []
+		const track = live.borders.top[1] ?? []
+		const dragging: DraggingState = {
+			tools: [...toolbar],
+			origin: { kind: 'border', toolbar, track, border: live.borders.top },
+			mode: 'slide',
+		}
+		expect(commitDraggedToTrackSpace(dragging, track, live.borders.top, 0)).toBe(false)
+		expect(
+			commitDraggedToTrackSpace(dragging, live.borders.top[0] ?? [], live.borders.top, 2)
+		).toBe(true)
+		expect(live.borders.top[0]).toHaveLength(2)
+		expect(dragging.origin.kind).toBe('border')
+		expect(dragging.mode).toBe('slide')
+	})
+
+	it('commitDraggedToTrackSpace restructure extracts a singleton and promotes to slide', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const source = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragging: DraggingState = {
+			tools: source.slice(0, 1),
+			origin: {
+				kind: 'border',
+				toolbar: source,
+				track: live.borders.top[0] ?? [],
+				border: live.borders.top,
+			},
+			mode: 'restructure',
+		}
+		expect(
+			commitDraggedToTrackSpace(dragging, live.borders.top[1] ?? [], live.borders.top, 1)
+		).toBe(true)
+		expect(dragging.mode).toBe('slide')
+		if (dragging.origin.kind !== 'border') throw new Error('expected border origin')
+		expect(dragging.origin.toolbar).toHaveLength(1)
+	})
+
+	it('commitDraggedToStackSpace vetoes the emptied neighbours, else creates a track', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const sole = live.borders.top[1]?.[0]?.toolbar ?? []
+		const track = live.borders.top[1] ?? []
+		const dragging: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'border', toolbar: sole, track, border: live.borders.top },
+			mode: 'slide',
+		}
+		expect(commitDraggedToStackSpace(dragging, live.borders.top, 1)).toBe(false)
+		expect(commitDraggedToStackSpace(dragging, live.borders.top, 0)).toBe(true)
+		expect(live.borders.top).toHaveLength(2)
+	})
+
+	it('commitDraggedToParkingRow vetoes the emptied neighbours, else creates a row', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const sole = live.parking[0] ?? []
+		const dragging: DraggingState = {
+			tools: [...sole],
+			origin: { kind: 'parking', toolbar: sole, parking: live.parking, index: 0 },
+			mode: 'slide',
+		}
+		expect(commitDraggedToParkingRow(dragging, live.parking, 0)).toBe(false)
+		const border = borderDrag(0, 1)
+		const borderLive = border.origin.kind === 'border' ? border.origin.border : live.borders.top
+		expect(commitDraggedToParkingRow(border, live.parking, 1)).toBe(true)
+		expect(borderLive).toBeDefined()
+		expect(live.parking).toHaveLength(2)
+	})
+
+	it('commitDraggedToParking merges into an existing row and follows the origin', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const source = live.borders.top[0]?.[0]?.toolbar ?? []
+		const target = live.parking[0] ?? []
+		const dragging: DraggingState = {
+			tools: source.slice(0, 1),
+			origin: {
+				kind: 'border',
+				toolbar: source,
+				track: live.borders.top[0] ?? [],
+				border: live.borders.top,
+			},
+			mode: 'restructure',
+		}
+		expect(commitDraggedToParking(dragging, target, live.parking, 0, 1)).toBe(true)
+		expect(target.map((item) => (item as { tool?: unknown }).tool)).toEqual(['p', 'a'])
+		expect(dragging.origin.kind).toBe('parking')
+	})
+
+	it('moveToolbarToTrack / moveToolbarToStack wrap the track primitives', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[1]?.[0]?.toolbar ?? []
+		const track = live.borders.top[1] ?? []
+		const dragging: DraggingState = {
+			tools: [...toolbar],
+			origin: { kind: 'border', toolbar, track, border: live.borders.top },
+			mode: 'slide',
+		}
+		expect(moveToolbarToTrack(dragging, live.borders.top[0] ?? [], live.borders.top, 2)).toBe(true)
+		expect(moveToolbarToStack(dragging, live.borders.top, 0)).toBe(true)
 	})
 })
 

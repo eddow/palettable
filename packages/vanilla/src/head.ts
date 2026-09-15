@@ -15,16 +15,17 @@ import {
 	buttonPresenter,
 	filterCommandEntries,
 	isActionPoint,
+	isDrawerItem,
 	isValuedPoint,
 	type PaletteCore,
 	type PaletteRegion,
 	paletteCommandEntries,
-	type SerializedToolbarItem,
 	type SurfaceContext,
 	selectPresenter,
 	sliderPresenter,
 	statusPresenter,
 	type ToolbarItem,
+	type Track,
 	togglePresenter,
 } from '@palettable/core'
 
@@ -35,8 +36,15 @@ export type HeadContext = {
 	readonly region?: PaletteRegion
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
+	/** Track an open drawer popup so the adapter can reposition it on layout change. */
+	readonly onOpenDrawer?: (
+		trigger: HTMLElement,
+		popup: HTMLElement,
+		surfaceAxis: 'horizontal' | 'vertical'
+	) => void
+	readonly onCloseDrawer?: (trigger: HTMLElement) => void
 	readonly renderToolbar?: (
-		toolbar: readonly SerializedToolbarItem[],
+		toolbar: Track,
 		axis: 'horizontal' | 'vertical',
 		region: PaletteRegion
 	) => HTMLElement
@@ -65,10 +73,27 @@ function boundOf(
 ): {
 	point: AnyPoint | undefined
 	value: unknown
+	bags: readonly (import('@palettable/core').ValuesBag | undefined)[]
 } {
 	const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
-	const value = point !== undefined && isValuedPoint(point) ? core.values.get(point.id) : undefined
-	return { point, value }
+	const bags = core.resolveBags(point?.uses)
+	const rootValue =
+		point !== undefined && isValuedPoint(point) ? core.values.get(point.id) : undefined
+	// Dual-source precedence (context-display): first non-root used bag holding
+	// this point id wins, else the root value. Absent bag / absent key → root.
+	let value: unknown = rootValue
+	if (point !== undefined && isValuedPoint(point)) {
+		for (const bag of bags) {
+			if (bag === undefined) continue
+			if (bag === (core.values as unknown as typeof bag)) continue
+			const selected: unknown = bag.get(point.id as never)
+			if (selected !== undefined) {
+				value = selected
+				break
+			}
+		}
+	}
+	return { point, value, bags }
 }
 
 function toolOf(item: ToolbarItem): string | undefined {
@@ -87,9 +112,9 @@ function pointIdOf(item: ToolbarItem): string | undefined {
 export function renderButton(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const spec = toolOf(item) ?? ''
-	const { point } = boundOf(core, pointIdOf(item))
+	const { point, bags } = boundOf(core, pointIdOf(item))
 	const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
-	const view = buttonPresenter(item, { point, value: undefined }, spec, can)
+	const view = buttonPresenter(item, { point, value: undefined, bags }, spec, can)
 	const button = document.createElement('button')
 	button.type = 'button'
 	button.className = `palette-default-tool ${toneClass(view.tone)}`
@@ -107,8 +132,8 @@ export function renderButton(context: HeadContext): HTMLElement {
 /** Render a `toggle` (boolean) item. */
 export function renderToggle(context: HeadContext): HTMLElement {
 	const { core, item } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = togglePresenter(item, { point, value })
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = togglePresenter(item, { point, value, bags })
 	const button = document.createElement('button')
 	button.type = 'button'
 	button.className = `palette-default-tool palette-default-tool-compact ${toneClass(view.tone)}${view.pressed ? ' is-selected' : ''}`
@@ -123,8 +148,8 @@ export function renderToggle(context: HeadContext): HTMLElement {
 /** Render a `select` (enum dropdown) item. */
 export function renderSelect(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = selectPresenter(item, { point, value }, surface)
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = selectPresenter(item, { point, value, bags }, surface)
 	const label = document.createElement('label')
 	label.className = `palette-default-select ${toneClass(view.tone)}`
 	label.title = view.title
@@ -147,8 +172,8 @@ export function renderSelect(context: HeadContext): HTMLElement {
 /** Render a `segmented` (enum joined-buttons) item. */
 export function renderSegmented(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = selectPresenter(item, { point, value }, surface)
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = selectPresenter(item, { point, value, bags }, surface)
 	const group = el(
 		'div',
 		`palette-default-segmented ${toneClass(view.tone)} palette-default-layout-${view.direction}`
@@ -172,8 +197,8 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 /** Render a `slider` (number range) item. `showValue` forces the demo value badge. */
 export function renderSlider(context: HeadContext, showValue = false): HTMLElement {
 	const { core, item, surface } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value }, surface)
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const label = document.createElement('label')
 	label.className = [
 		'palette-default-slider',
@@ -208,8 +233,8 @@ export function renderSlider(context: HeadContext, showValue = false): HTMLEleme
 /** Render a `stepper` (number ±) item. */
 export function renderStepper(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value }, surface)
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const group = el(
 		'div',
 		`palette-default-stepper ${toneClass(view.tone)} palette-default-layout-${view.direction}`
@@ -242,8 +267,8 @@ export function renderStepper(context: HeadContext): HTMLElement {
 /** Render a `stars` (number rating) item — demo extension the head lacks. */
 export function renderStars(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
-	const { point, value } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value }, surface)
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const group = el(
 		'div',
 		`palette-default-stars ${toneClass(view.tone)} palette-default-layout-${view.direction}`
@@ -429,25 +454,32 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		popup = null
 		trigger.setAttribute('aria-expanded', 'false')
 		chevron.textContent = '▸'
+		context.onCloseDrawer?.(trigger)
+	}
+	const reposition = () => {
+		if (!popup) return
+		const rect = trigger.getBoundingClientRect()
+		const offset = 6
+		popup.style.left = `${(surface.axis === 'vertical' ? rect.right : rect.left) + offset}px`
+		popup.style.top = `${(surface.axis === 'vertical' ? rect.top : rect.bottom) + offset}px`
 	}
 	trigger.addEventListener('click', () => {
 		if (overlay) {
 			close()
 			return
 		}
-		const rect = trigger.getBoundingClientRect()
 		overlay = el('div', 'palettable-drawer__overlay')
 		overlay.setAttribute('role', 'presentation')
 		popup = el('div', `palettable-drawer__popup is-${childAxis}`)
 		popup.dataset.placement = 'center'
 		popup.setAttribute('role', 'dialog')
 		popup.tabIndex = -1
-		const offset = 6
-		popup.style.left = `${(surface.axis === 'vertical' ? rect.right : rect.left) + offset}px`
-		popup.style.top = `${(surface.axis === 'vertical' ? rect.top : rect.bottom) + offset}px`
-		const toolbar = (item as { toolbar?: SerializedToolbarItem[] }).toolbar ?? []
+		reposition()
+		// Drawer content is one track (several toolbars in line along the
+		// child axis); render it like a border track with gaps.
+		const track: Track = isDrawerItem(item) ? item.toolbar : []
 		const inner =
-			context.renderToolbar?.(toolbar, childAxis, childRegion) ?? document.createElement('div')
+			context.renderToolbar?.(track, childAxis, childRegion) ?? document.createElement('div')
 		popup.append(inner)
 		overlay.append(popup)
 		overlay.addEventListener('click', close)
@@ -459,6 +491,9 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		}
 		window.addEventListener('keydown', onKey, { once: true })
 		document.body.append(overlay)
+		if (surface.axis === 'horizontal' || surface.axis === 'vertical') {
+			context.onOpenDrawer?.(trigger, popup, surface.axis)
+		}
 		trigger.setAttribute('aria-expanded', 'true')
 		chevron.textContent = '▾'
 	})

@@ -5,10 +5,66 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Palettable Vanilla Adapter Demo</title>
+		<style>
+			main { display: flex; flex-direction: column; gap: 0.75rem; min-height: 100vh; block-size: 100dvh; font-family: system-ui, sans-serif; background: #020617; color: #e2e8f0; }
+			html[data-theme='light'] main { background: #f1f5f9; color: #0f172a; }
+			html, body { block-size: 100%; }
+			body { margin: 0; }
+			main > .palette-ide { flex: 1 1 auto; min-block-size: 0; }
+			.demo-bar { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; flex-wrap: wrap; }
+			.demo-bar h1 { font-size: 1.1rem; margin: 0; }
+			.demo-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+			.demo-modes button, .demo-io button { padding: 0.34rem 0.72rem; border: 1px solid rgba(71, 85, 105, 0.9); border-radius: 999px; background: rgba(15, 23, 42, 0.88); color: #e2e8f0; cursor: pointer; font-size: 0.82rem; }
+			.demo-io { display: inline-flex; align-items: center; }
+			.demo-center { position: relative; padding: 1rem; display: grid; gap: 1rem; align-content: start; }
+			.palette-ide-center { position: relative; }
+			.demo-center.is-dimmed { opacity: 0.45; filter: grayscale(0.4); pointer-events: none; user-select: none; }
+			.demo-hero, .demo-panel { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(51, 65, 85, 0.9); border-radius: 16px; background: rgba(15, 23, 42, 0.82); box-shadow: 0 16px 36px rgba(2, 6, 23, 0.28); color: #e2e8f0; }
+			.demo-hero { grid-template-columns: 1fr auto; align-items: center; }
+			.demo-chip { display: inline-flex; align-items: center; gap: 8px; padding: 0.42rem 0.8rem; border-radius: 999px; background: rgba(30, 41, 59, 0.96); border: 1px solid rgba(96, 165, 250, 0.24); color: #bfdbfe; }
+			.demo-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px dashed rgba(71, 85, 105, 0.9); border-radius: 14px; background: rgba(15, 23, 42, 0.56); }
+			.demo-pill { display: inline-flex; align-items: center; gap: 6px; padding: 0.34rem 0.7rem; border-radius: 999px; background: linear-gradient(180deg, #2563eb, #1d4ed8); color: #eff6ff; font-size: 0.78rem; font-weight: 600; }
+			.demo-panel-title { font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+			.demo-state-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 8px; }
+			.demo-state-row { display: flex; align-items: center; gap: 8px; padding: 0.52rem 0.82rem; border: 1px solid rgba(71, 85, 105, 0.65); border-radius: 11px; background: rgba(15, 23, 42, 0.64); }
+			.demo-state-key { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; }
+			.demo-state-value { font-weight: 600; }
+		</style>
 	</head>
 
 	<body>
-		<div id="app"></div>
+		<div id="app">
+			<main>
+				<div class="demo-bar">
+					<h1>Stellar Outpost — palette demo</h1>
+					<div class="demo-modes">
+						<button type="button" data-testid="mode-rw-combobox" title="Read-write; the toolbar hosts a command-box combobox (console opens in edit mode).">R/W + command box</button>
+						<button type="button" data-testid="mode-rw-command-first" title="Read-write; no combobox — the console opens command-first with a square edit-icon button.">R/W command-first</button>
+						<button type="button" data-testid="mode-ro-combobox" title="Read-only; the combobox runs commands inline, but the layout is not editable.">R-O + command box</button>
+					</div>
+					<div class="demo-io" role="group" aria-label="Layout persistence">
+						<button type="button" data-testid="save-layout">Save layout</button>
+						<button type="button" data-testid="load-layout">Load layout</button>
+					</div>
+					<span class="demo-state" data-testid="layout-restored" hidden>Layout restored from localStorage</span>
+					<span class="demo-state" data-testid="last-action"></span>
+				</div>
+				<div id="ide-host">
+					<div class="demo-center" data-testid="work-zone">
+						<div class="demo-hero">
+							<div><strong>Stellar Outpost</strong><span>Space colony management sim — every colony variable below is bound to a toolbar editor.</span></div>
+							<div class="demo-chip" data-testid="elapsed">⏱ 00:00</div>
+						</div>
+						<div class="demo-strip"></div>
+						<div class="demo-panel">
+							<div class="demo-panel-title">Colony status</div>
+							<div class="demo-state-grid"></div>
+						</div>
+						<p>Open the console, then click a toolbar item to configure its presentation.</p>
+					</div>
+				</div>
+			</main>
+		</div>
 		<script type="module" src="/demo/main.ts"></script>
 	</body>
 

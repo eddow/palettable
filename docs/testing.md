@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 214 tests, 15 files
+## Core unit (Vitest, node) — 242 tests, 15 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -14,7 +14,7 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation, `setTree` batching |
 | `src/palette.test.ts` | `initialValues` / `setMany` validation + batching, `ServerPointDescriptor` round-trip + action rebuild by name (+ nothing-point round-trip), `readSetterValue` (strict coercion: blank/∞ boolean-token → throw), `resolveEditablePoint` / `readActionCan` (functional), `uses` contract, `PaletteWriteError` |
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
-| `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar`, `insertItem`/`removeItem`, subscribe/`clearListeners`, inline-virtual snapshot round-trip |
+| `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
 | `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked), `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
 | `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
@@ -33,7 +33,21 @@ Gotchas:
 - `defineVirtual` re-defining the same virtual id is allowed; a new virtual
   colliding with a point id throws `duplicate point id`.
 
-## Svelte unit (Vitest, jsdom) — 151 tests, 16 files
+## Vanilla unit (Vitest, jsdom) — 22 tests, 6 files
+
+Run: `pnpm --filter @palettable/vanilla test`. Config:
+`packages/vanilla/vitest.config.ts` (jsdom, `include: ['src/**/*.test.ts']`).
+
+| File | Covers |
+| ---- | ------ |
+| `src/adapter.test.ts` | the minimal `<ul>` renderer (barrel smoke) |
+| `src/keys.test.ts` | `normalizeKeystroke` / `keystrokeFromEvent` / `createVanillaKeys` resolution / `isEditableTarget` |
+| `src/nodes.test.ts` | `NodeRegistry` identity map (toolbar / item / track / row kinds, delete, clear) |
+| `src/highlight.test.ts` | `syncGapClasses` decision diffing (only changed indices touched) + `clearGapClasses` |
+| `src/value-sync.test.ts` | the fine-DOM reconciliation contract: per-tool value sync in place (same node: toggle / slider / focused-slider guard), editing chrome without rebuild (`syncEditing`/`applyEditing` — root classes, `inert`, guards, same `.toolbar` identity), `setInspecting` two-node flip, selection patch re-rendering the details panel only, `can` flips toggling `disabled` in place |
+| `src/drag.test.ts` | slide math + add-item probes: `clampSlideDelta` (shift-from-resting, both-end clamps, grab offset) + `itemFromAddSelection` (set/tool/action/item variants, family mismatch → `undefined`) |
+
+## Svelte unit (Vitest, jsdom) — 179 tests, 17 files
 
 Run: `pnpm test`. Config: `vitest.config.ts` (`environment: `jsdom`,
 `resolve.conditions: ['browser']`, alias `$lib`, setup `tests/setup.ts`).
@@ -66,28 +80,40 @@ Gotchas:
 - `paletteCommandBoxModel` / `hydratePaletteLayout` must be created during
   probe init, never in handlers (same init-time constraint as app code).
 
-## E2E (Playwright) — 12 tests, 3 files
+## E2E (Playwright) — 35 tests, 6 files, 3 projects
 
-Run: `pnpm test:e2e` (builds + previews on port 4173, `reuseExistingServer`
-outside CI). `test.beforeEach` clears `localStorage` and reloads.
+Run: `pnpm test:e2e`. `playwright.config.ts` runs the shared suite against
+**both** demos — `svelte` (build + preview on `:4173`) and `vanilla` (vite dev
+on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
+`test.beforeEach` clears `localStorage` and reloads.
 
-- `e2e/smoke.spec.ts` (1): home page renders.
-- `e2e/palette.spec.ts` (5): command launcher + `.palette-ide.editing` chrome;
-  drawer
-  open with axis inversion (left drawer → `is-horizontal`) + Escape close;
-  inspector via `pointerdown` on `.toolbar-item-guard` (presentation-only
-  configurator in the console, selected item highlighted); layout save → reload
-  → restored badge → preset load → load; pointer drag reorder (`[commandBox,
-  emergencyProtocol, autoOxygen, shieldGenerator, alertLevel]` →
-  `[commandBox, emergencyProtocol, shieldGenerator, alertLevel, autoOxygen]`).
-- `e2e/console.spec.ts` (8): backtick opens the edit-only console (Ide root
-  focused first — `paletteRoot` listens on root `keydown`); Console button +
-  Escape (+ work-zone `is-dimmed` while open); command-first mode (no combobox →
-  square edit button toggles to edit); read-only mode (no edit button, stays
-  command-first); edit-inert (toolbar item content `inert` while editing); no mode
-  button when a `commandBox` tool is displayed; add flow (Life Support entry →
-  variant card → value in the single details panel); tools-panel rows `draggable`;
-  tools-panel drop inserts into first toolbar gap.
+- `e2e/smoke.spec.ts` (1, both demos): home page renders.
+- `e2e/palette.spec.ts` (5, both demos): command-box combobox runs commands
+  inline + `.palette-ide.editing` chrome; drawer open with axis inversion
+  (left drawer → `is-horizontal`) + Escape close; inspector via `pointerdown`
+  on the edit-mode `.toolbar-item-guard` (presentation-only configurator,
+  selected item highlighted); layout save → reload → restored badge → preset
+  load.
+- `e2e/console.spec.ts` (9, both demos): backtick opens the edit-only console
+  (Ide root focused first — the IDE listens on the root `keydown`); Terminal
+  button + Escape (+ work-zone `is-dimmed` while open); command-first mode (no
+  combobox → console command-first + square edit button); read-only mode;
+  edit-inert (toolbar item content `inert` while editing); no mode button when
+  a `commandBox` tool is displayed; add flow (entry → variant card → value);
+  add-box rows are click-to-select (not draggable); add-box click selects an
+  entry.
+- `e2e/drag-invariants.spec.ts` (1, both demos): movement is stripped — locks
+  the static edit-mode layout (no empty toolbars/tracks).
+- `e2e/drag-highlight.spec.ts` (1, both demos): dragging a tool highlights a
+  free item-space DZ — guard `pointerdown` → hover a neighbouring tool →
+  `.toolbar-drop-zone.highlighted` appears. Uses the *left* border (the
+  centered console panel covers the top toolbar's right-hand tools); hovers
+  a tool, never a gap (gaps are zero-size until highlighted — the
+  active-item fallback paints the flanking free gaps); steps the pointer in
+  small increments (per-position handlers); opens the console via JS click
+  (edit-mode guards cover the Terminal button for real clicks).
+- `e2e/vanilla.spec.ts` (1, `vanilla-smoke`): vanilla demo first paint
+  (heading + IDE chrome + combobox + work-zone).
 
 E2E lessons (see `docs/architecture.md` §19–§20):
 
@@ -102,5 +128,8 @@ E2E lessons (see `docs/architecture.md` §19–§20):
 
 ## Gates
 
-`pnpm check` (0 errors) · `pnpm lint` (clean) · `pnpm test` (113 pass) ·
-`pnpm test:e2e` (12 pass) · `pnpm build` ok.
+- Core: `pnpm --filter @palettable/core check` / `build` / `test` (242).
+- Vanilla: `pnpm --filter @palettable/vanilla check` / `test` (16).
+- Svelte: `pnpm --filter @palettable/svelte check` / `test` (179).
+- `npx biome check packages/core packages/vanilla tests/e2e playwright.config.ts` (clean).
+- `pnpm test:e2e` (35 passed).

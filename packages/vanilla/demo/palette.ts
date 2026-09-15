@@ -351,14 +351,19 @@ const rwComboboxLayout: Borders = {
 						editor: 'drawer',
 						toolbar: [
 							{
-								tool: 'colonyTheme',
-								editor: 'select',
-								config: { icon: '🪐', label: 'Atmosphere', hint: 'Nested drawer select' },
-							},
-							{
-								tool: 'gameSpeed',
-								editor: 'stepper',
-								config: { icon: '⏱️', label: 'Sim speed', hint: 'Nested drawer stepper' },
+								space: 1,
+								toolbar: [
+									{
+										tool: 'colonyTheme',
+										editor: 'select',
+										config: { icon: '🪐', label: 'Atmosphere', hint: 'Nested drawer select' },
+									},
+									{
+										tool: 'gameSpeed',
+										editor: 'stepper',
+										config: { icon: '⏱️', label: 'Sim speed', hint: 'Nested drawer stepper' },
+									},
+								],
 							},
 						],
 						config: { icon: '🗂', label: 'More', hint: 'Nested drawer (axis inversion)' },

@@ -182,7 +182,7 @@ describe('golden render model', () => {
 				top: [
 					{
 						space: 1,
-						toolbar: [{ editor: 'drawer', toolbar: [{ tool: 'theme' }] }],
+						toolbar: [{ editor: 'drawer', toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }] }],
 					},
 				],
 				right: [],
@@ -199,14 +199,16 @@ describe('golden render model', () => {
 		})
 		const drawer = tree.borders.top.slots[0]?.toolbar.items[0]
 		expect(drawer?.editor).toBe('drawer')
-		expect(drawer?.children.map((child) => child.pointId)).toEqual(['theme'])
+		expect(
+			drawer?.children.flatMap((slot) => slot.toolbar.items.map((child) => child.pointId))
+		).toEqual(['theme'])
 	})
 
 	it(`rejects drawer nesting beyond ${RENDER_MAX_DEPTH}`, () => {
 		const core = new PaletteCore(points())
 		let toolbar: SerializedToolbarItem[] = [{ tool: 'theme' }]
 		for (let depth = 0; depth < RENDER_MAX_DEPTH + 1; depth++) {
-			toolbar = [{ editor: 'drawer', toolbar }]
+			toolbar = [{ editor: 'drawer', toolbar: [{ space: 1, toolbar }] }]
 		}
 		const layout: SerializedLayout = {
 			version: 1,

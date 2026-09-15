@@ -431,11 +431,15 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   an entry (add panel + details show the entry).
 - `e2e/drag-invariants.spec.ts` (1): movement stripped — locks the static
   edit-mode layout (5 top tools, no empty toolbars/tracks).
+- `e2e/drag-highlight.spec.ts` (1): dragging a tool highlights a free
+  item-space DZ (left border — the centered console panel covers the top
+  toolbar's right-hand tools; hovers a tool, never a zero-size gap; steps
+  the pointer; JS-clicks the Terminal button since edit guards cover it).
 - `e2e/smoke.spec.ts` (1) + `e2e/vanilla.spec.ts` (1, vanilla-only smoke):
   heading + IDE chrome + combobox + work-zone on first paint.
 - Both demos run the **same** shared suite (`svelte` on `:4173`,
   `vanilla` on `:4174`, plus a `vanilla-smoke` project for the vanilla-only
-  spec): 33 passed (16 svelte + 16 vanilla + 1 smoke).
+  spec): 35 passed (17 svelte + 17 vanilla + 1 smoke).
 - E2E lessons: `paletteItemDrag` inspects on `pointerdown`, so tests dispatch
   `pointerdown`/`pointerup` on the guard instead of `click({ force: true })`; keyboard
   shortcut tests must focus `.palette-ide` (tabindex=0) before pressing. Trusted
@@ -552,6 +556,45 @@ but a build guarantee:
 - **Build**: `tsconfig.build.json` excludes `src/**/*.test.ts`, so tests never
   land in `dist`.
 
+### Layout mutation, identity and the op stream
+
+`PaletteLayoutTree` is the single writer for structural change; adapters never
+clone-mutate a layout. Four contracts hold it together:
+
+- **Identity contract.** `getLayout()` returns the **live** layout object by
+  reference (adapters key DOM nodes and drag sessions by `===`, which must
+  survive across calls). The result is read-only in spirit: commit through the
+  structural methods, never by mutating it. `getSnapshot()` is the save path
+  (already flat + JSON-safe — the `JSON.stringify` moment). `setLayout()` is
+  reserved for *whole-layout* loads (storage hydration, demo presets) and is
+  the only path that invalidates every node identity.
+- **Structural methods.** `moveItem(location?, location?, item?)` and
+  `moveToolbar(location?, location?, toolbar?)` implement the **`from?`/`to?`
+  convention**: no `from` = creation, no `to` = deletion, both = a move where
+  `to` is interpreted *post-deletion* (so same-container forward indices adjust
+  for the removal). `insertItem` / `removeItem` are the discrete-edit
+  equivalents. All of them `splice` the **same** objects — a toolbar or item
+  relocated keeps its identity, so an adapter's node map stays valid.
+- **Op stream.** `subscribeOps` (via `PaletteCore.subscribeLayoutOps`) emits one
+  `LayoutOp` per mutation — `move-item` / `move-toolbar` / `insert-item` /
+  `remove-item` / `replace` — carrying the live object references, the
+  `from`/`to` locations, and the **prune cascade** (`pruned: LayoutPruneVictim[]`:
+  `toolbar` / `track` / `row` entries with the container they were removed
+  from). This is what lets an adapter re-render only the affected region: a
+  `move-toolbar` deletion reports both the vacated slot *and* the emptied track;
+  `replace` is the whole-load escape hatch. The per-mutation snapshot
+  (`subscribe`) is still emitted — it is the persistence signal, while the op
+  stream is the reconciliation signal.
+- **No batching API.** There is deliberately no `begin/end`, `silent` or
+  `flushLayout`. Mid-drag commits emit like any other mutation; the *adapter*
+  owns the dirty flag and makes the single "it changed, save it" call on
+  drag-end. Discrete edits emit immediately.
+
+Drag-state helpers (`DraggingState`, the veto predicates, the commit
+functions, the gap-highlight decisions) also live in `layout.ts` and take the
+session as an **explicit parameter** — no module-global reads, so core stays
+adapter-agnostic. See `docs/movements.md` for the engine spec.
+
 ### Module inventory (`packages/core/src/`)
 
 One module per concern — the 980-line `palette/types.ts` was split, not copied:
@@ -564,7 +607,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` + per-type aliases, `NothingPoint` (`type: 'nothing'` — context + enablement only; `isNothingPoint` guard), `isActionPoint` / `isValuedPoint` (both `false` for nothing-points); `PointBase.uses` (optional bags, load-bearing in Phase 8) + functional `can(...bags)` on all kinds (omitted = enabled) |
 | `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
 | `store.ts` | `PaletteStateStore` + `setTree` batching (all writes land before any listener runs, returns changed keys). Phase 9 removed the dead `getOr` / `update` helpers (tests-only, zero production callers). |
-| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `isDraggedToolbarAt`, `draggingEmptiesTrackIndex/ParkingRow`, `resolveDragMode`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `moveToolbarToTrack/Stack`), and the pure gap-highlight decisions (`borderStackHighlight`, `parkingGapHighlight`, `itemSpaceHighlight` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
 | `gap-dwell.ts` | `GapDwell` hover-dwell state machine + `GapDwellState` (Phase 2; timers via `globals.ts` so `lib` stays `ES2022`-only) |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
@@ -577,7 +620,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `command-box.ts` | `paletteCommandEntries` / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
 | `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
 | `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
-| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`) |
+| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`). Drawer children resolve to `ResolvedDrawerSlot[]` (one track, recursive, depth-bounded as `children`) |
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`''` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
 | `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
 | `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
@@ -585,8 +628,8 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 
 ### Phase 7 status (SSR render model — landed 2026-09-14)
 
-`core/render.ts` (+ `render.test.ts`, 14 tests) implements `plans/ssr.md`
-§4.3–§4.8 on the Phases 3–5 surface:
+`core/render.ts` (+ `render.test.ts`) implements the SSR render model
+(§4.3–§4.8 of the retired SSR plan) on the Phases 3–5 surface:
 
 - `resolveRenderTree()` — pure, synchronous, allocation-explicit resolver:
   definitions + virtuals + layout + values → `ResolvedPalette` (canonical
@@ -616,9 +659,9 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 
 ### Phase 8 status (context — landed 2026-09-14)
 
-`core/context.ts` + `core/context-display.ts` (+ `context.test.ts`, 16 tests)
-implement `plans/context.md` §§1–4 step 6 in core (steps 7–8 are adapter work
-for Phase 10; step 9 is this doc update):
+`core/context.ts` + `core/context-display.ts` (+ `context.test.ts`) implement
+the context core (§§1–4 step 6 of the retired context plan; steps 7–8 are
+adapter work, step 9 is this doc):
 
 - `ValuesBag` — same discipline as the store, plus frozen `get`,
   `(changedKeys[])` global notify, `lock`/`unlock` (→ `PaletteWriteError`).
@@ -642,8 +685,8 @@ for Phase 10; step 9 is this doc update):
   serialize, values never do.
 - Command-box context pass (step 8) is already shaped: entries carry `uses`,
   filter at render; nothing-point commands with `uses: []`/`undefined` are
-  always present. The vanilla spike (step 7: dirty-set + rAF + one
-  context-bound control) rides the Phase 10 demo work.
+  always present. The vanilla adapter context pass (step 7) landed with the
+  Phase 10 demo work — see the Phase 10 status section below.
 
 ### Phase 9 status (optimization — landed 2026-09-14)
 
@@ -722,12 +765,35 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   hint), `core.values` → `demoState` sync + theme + mm:ss clock, `localStorage`
   persistence (`palettable-demo-layout-v1` + `validateSerializedLayout`).
 - E2E: the 2 catalogue-drag specs were stale (movement stripped for restart —
-  `plans/movement.md`; svelte unit `console.test.ts` asserts rows are
-  click-to-select, zero `draggable=` in `src`). Replaced with click-to-select
-  assertions; both demos green on the same suite. This unlocks Phase 11,
-  not Phase 12.
-- Gates: core `check`/`build`/`test` (212/15) green, vanilla `check`/`test`
-  (4/2) green, `biome check` clean, `test:e2e` 33 passed.
+  it is specced in `docs/movements.md`; svelte unit `console.test.ts` asserts
+  rows are click-to-select, zero `draggable=` in `src`). Replaced with
+  click-to-select assertions; both demos green on the same suite. This unlocks
+  Phase 11, not Phase 12.
+- Drag sessions landed (2026-09-15): `vanilla/src/drag-session.ts`
+  (`startDragSession` — window move/up, blur/cancel/hidden cleanup, no pointer
+  capture so hover targets stay live) + `slide.ts` (`toolbarSlideBounds` /
+  `clampSlideDelta` / `toolbarGrabOffset` — adapter-owned, needs
+  `getBoundingClientRect`; single-copy rule with the release `resizeToolbar`
+  commit) + `add-item.ts` (`itemFromAddSelection` via `resolveEditorVariant`).
+  `ide.ts` wires `pointerdown` → `startSession` (tool vs whole-toolbar grab),
+  `pointermove` → `GapDwell` → `commitDraggedTo*` + `syncGapClasses`, rAF loop
+  (`latestPointer` + `Set<callback>` drained/cleared per frame →
+  `translate3d`), mid-drag `retargetSlide` re-arm, `hoveredTrackSpace` memo,
+  drag-end `dragDirty` → one `onLayoutChange`. `applyOp` routes ops through
+  `diffBorder`/`diffTrack` (per-node create/move/remove + flex in place) and
+  repositions open drawers; `patchLive` updates tools in place (full rebuild
+  only on editor-type swap); add-panel insert + delete-refresh wired.
+  `syncEditing` re-renders structurally on an editing flip (drag listeners
+  bind at render time — the chrome-only `applyEditing` pass adds inspect-only
+  guards, so the `diffBorder` path is skipped when the rendered `editing`
+  flag disagrees, via `data-editing` on the border element). Item-space hover
+  over a tool (not a gap) paints the nearest free flanking gaps
+  (active-item fallback, mirroring the svelte oracle). `startSession` /
+  `endDragSession` mirror the `.dragging` class + `data-dragging` (the
+  `paletteRoot` mirror in svelte).
+  Gates: core `check`/`build`/`test` (242/15) green, vanilla `check`/`test`
+  (22/6) green, `biome check` clean, `test:e2e` 35 passed (incl. the
+  `drag-highlight` tool-drag DZ spec on both demos).
 
 ### Phase 2 status (landed 2026-09-14)
 `configuration.ts`, `gap-dwell.ts`, and the pure track-space math in
@@ -771,5 +837,55 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   jsdom — core has no DOM to test against.
 - `packages/vanilla/src/` module inventory: `adapter.ts` (minimal
   `<ul>`-renderer — predates the IDE, kept for the barrel smoke test),
-  `keys.ts` / `head.ts` / `ide.ts` (Phase 10 — the real adapter surface),
-  `keys.test.ts` + `adapter.test.ts` (4 jsdom tests across 2 files).
+  `keys.ts` / `head.ts` / `ide.ts` (`keys` + `head` + `ide` are the real
+  adapter surface), `nodes.ts` (`NodeRegistry`), `highlight.ts`
+  (gap-class diffing), `keys.test.ts` + `adapter.test.ts` + `nodes.test.ts` +
+  `highlight.test.ts` + `value-sync.test.ts`.
+
+### Vanilla adapter — reconciliation and DOM identity
+
+The vanilla adapter converges on the live layout instead of rebuilding. The
+rules, in one place:
+
+- **One node per live object, keyed by `===`.** `nodes.ts` (`NodeRegistry`)
+  maps live toolbars / items / tracks / parking rows to their `HTMLElement`.
+  Structural commits preserve identity, so a map lookup survives mutations;
+  only `setLayout()` (a `replace` op) invalidates everything. Drawer child
+  toolbars share the same map (same keys, same ops) — no separate registry.
+- **The op stream drives a per-region sync.** `ide.ts:applyOp` routes each
+  `LayoutOp` to the affected border(s) only (`syncBorder`), so untouched
+  borders keep their DOM. Parking renders inside the console overlay, so any
+  parking-side involvement (including a prune victim) takes the console path.
+  `renderBorder` tries `diffBorder`/`diffTrack` first (per-node
+  create/move/remove + track-space flex in place, keyed by `===`); only a
+  framing disagreement falls back to a full region rebuild.
+- **Values never touch the layout.** Each tool editor subscribes per-id
+  (`core.values.subscribe(id, …)`) and patches its own node in place
+  (`updateToolNode` re-runs the presenter and writes only the changed
+  attributes). There is deliberately **no** global
+  `values.subscribe(() => refresh())`; the *consumer* may still subscribe
+  globally for its own purposes (the demo does, for work-zone pills).
+- **Editing and inspecting are chrome flips, not rebuilds.** `syncEditing()`
+  reconciles `computeEditing()` against `lastEditing` and runs `applyEditing()`
+  — toggling the root `editing`/`palette-editing` classes + `data-editing`,
+  flipping `inert` on existing `.toolbar-item-content`, and adding/removing
+  `.toolbar-item-guard` nodes and parking `×` buttons. Structural renders stamp
+  the same chrome at creation so first paint matches.
+  `setInspecting()` is a two-node flip (clear `data-inspected` on the old
+  wrapper, set it on the new one) followed by `renderConsoleDetails()`.
+- **Console traffic never re-renders borders.** The console listener
+  reconciles: an `editing` flip → `syncEditing()`; an `open` flip → full
+  `renderConsole()` (overlay mount/unmount); anything else (selection, add-flow)
+  → `renderConsoleDetails()` only.
+- **Context notifications are split by kind.** A **key** change
+  (`changed.length > 0`) needs no border reload — `bindTool` already re-runs
+  `updateToolNode` in place for the tools whose id moved. An **identity** change
+  (`setContext` / `removeContext` emit `[]`) replaces the bag object itself, so
+  the affected borders re-render via `regionsUsingBag`.
+- **Gap highlight is a class diff.** `highlight.ts:syncGapClasses` diffs the
+  core `GapHighlight` decision against the previous one per root and toggles
+  `highlighted`/`hovered` only on changed indices — no re-render, no reactive
+  reads of the dwell state. Drag sessions drive it: `pointermove` → `GapDwell`
+  → core highlight/commit fn → `syncGapClasses` (`paintStackGaps` /
+  `paintParkingGaps` / `paintItemSpaces`), with the one-shot dwell timer
+  promoting a directly-hovered stack gap to a new track/row mid-drag.

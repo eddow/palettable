@@ -14,6 +14,7 @@ import type { KeyBindings } from './keys.js'
 import {
 	defaultLayoutFromPoints,
 	type LayoutListener,
+	type LayoutOpListener,
 	type PaletteLayout,
 	PaletteLayoutTree,
 	type SerializedLayout,
@@ -165,22 +166,27 @@ export class PaletteCore {
 	// are host-owned via `setContext` / `removeContext` (replace-never-append).
 
 	private bags = new Map<ContextName, ValuesBag>()
+	private bagForwards = new Map<ContextName, Unsubscribe>()
 	private contextListeners = new Set<ContextListener>()
 	private canListeners = new Set<CanListener>()
 	private canCache = new Map<string, boolean>()
 
 	/**
-	 * Register a host-owned context bag. Replaces any bag already under
-	 * this name (old bag's internal subscription is cleared). Tools whose
-	 * point `uses` include `name` re-derive against the new bag
-	 * (re-resolve bags, re-evaluate `can`, re-run display resolvers).
+	 * Register a host-owned context bag. Replace-never-append (§1.3):
+	 * only core's own forward on the old bag is dropped (stored per name);
+	 * host direct subscribers on the old bag survive. Tools whose point
+	 * `uses` include `name` re-derive against the new bag (re-resolve bags,
+	 * re-evaluate `can`, re-run display resolvers). Emits with an empty
+	 * changed array = identity change: adapters re-resolve everything for
+	 * `name`, never replay old subscriptions onto the new bag.
 	 */
 	setContext(name: ContextName, bag: ValuesBag): void {
-		// Replace-never-append (§1.3): the old bag's listeners (including
-		// core's forward) are cleared; the new bag gets a fresh forward.
-		this.bags.get(name)?.clearListeners()
+		this.bagForwards.get(name)?.()
 		this.bags.set(name, bag)
-		bag.subscribe((changed) => this.onBagChanged(name, changed))
+		this.bagForwards.set(
+			name,
+			bag.subscribe((changed) => this.onBagChanged(name, changed))
+		)
 		this.refreshCanForBag(name)
 		this.emitContext(name, [])
 	}
@@ -188,10 +194,12 @@ export class PaletteCore {
 	/**
 	 * Remove a context bag. Tools whose point `uses` include `name`
 	 * re-derive with `undefined` in that slot (disabled + placeholder
-	 * unless their `can` / resolvers define otherwise).
+	 * unless their `can` / resolvers define otherwise). Only core's own
+	 * forward is dropped; host direct subscribers survive.
 	 */
 	removeContext(name: ContextName): void {
-		this.bags.get(name)?.clearListeners()
+		this.bagForwards.get(name)?.()
+		this.bagForwards.delete(name)
 		this.bags.delete(name)
 		this.refreshCanForBag(name)
 		this.emitContext(name, [])
@@ -424,11 +432,17 @@ export class PaletteCore {
 		return this.layout.subscribe(listener)
 	}
 
+	/** Layout op subscription — per-mutation descriptor (adapter node-map sync). */
+	subscribeLayoutOps(listener: LayoutOpListener): Unsubscribe {
+		return this.layout.subscribeOps(listener)
+	}
+
 	/** Adapter teardown: drop every listener. Values + layout are kept. */
 	dispose(): void {
 		this.values.clearListeners()
 		this.layout.clearListeners()
-		for (const bag of this.bags.values()) bag.clearListeners()
+		for (const unsub of this.bagForwards.values()) unsub()
+		this.bagForwards.clear()
 		this.bags.clear()
 		this.contextListeners.clear()
 		this.canListeners.clear()

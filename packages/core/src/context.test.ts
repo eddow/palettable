@@ -99,10 +99,22 @@ describe('PaletteCore context registry', () => {
 		expect(core.resolveBags(['activeFile'])).toEqual([undefined])
 		const first = new ValuesBag({ fileName: 'a.ts' })
 		const second = new ValuesBag({ fileName: 'b.ts' })
+		const firstListener = vi.fn()
+		first.subscribe(firstListener)
 		core.setContext('activeFile', first)
 		expect(core.getBag('activeFile')).toBe(first)
+		// Replace drops only core's forward: host direct subscribers survive,
+		// and the old bag keeps notifying them (no clearListeners wipe).
 		core.setContext('activeFile', second)
 		expect(core.getBag('activeFile')).toBe(second)
+		first.set('fileName', 'a2.ts')
+		expect(firstListener).toHaveBeenCalledWith(['fileName'])
+		// Identity change emits `[]`: adapters re-resolve everything for the
+		// name, never replay old subscriptions onto the new bag.
+		const identity = vi.fn()
+		core.subscribeContext(identity)
+		core.setContext('activeFile', new ValuesBag({ fileName: 'c.ts' }))
+		expect(identity).toHaveBeenCalledWith('activeFile', [])
 		core.removeContext('activeFile')
 		expect(core.getBag('activeFile')).toBeUndefined()
 		expect(core.resolveBags(['activeFile'])).toEqual([undefined])

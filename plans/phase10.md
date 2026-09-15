@@ -1,84 +1,125 @@
 # Phase 10 — vanilla demo parity (handoff, landed 2026-09-14)
 
-First parity gate. Status: **landed, green**. `packages/svelte/src` untouched.
+First parity gate. Status: **core + vanilla**, green. `packages/svelte/src` is
+**out of scope** (frozen oracle, per mitosis).
 
 ## Goal
 
 Vanilla demo = same Stellar Outpost demo as svelte. Both demos run the same
 `tests/e2e/` suite. Unlocks Phase 11, not Phase 12.
 
-Reference: `packages/svelte/src/routes/+page.svelte` (430) +
-`packages/svelte/src/demo/palette.svelte.ts` (563).
-
 ## Delivered
 
-| File | Lines | Contents |
-| ---- | ----- | -------- |
-| `packages/vanilla/src/keys.ts` | 126 | Adapter-side `KeyboardEvent` ownership (mitosis Phase 2 split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases), `keystrokeFromEvent`, `createVanillaKeys` (normalized map + `findByTool` + `resolve`), `isEditableTarget`. |
-| `packages/vanilla/src/keys.test.ts` | 46 | 3 tests: normalize / resolve / editable-target. |
-| `packages/vanilla/src/head.ts` | 503 | Plain-DOM head editors: `renderButton/Toggle/Select/Segmented/Slider(showValue badge)/Stepper/Stars(radiogroup)/Status/CommandBox/Drawer` + `renderHeadItem` dispatch + `surfaceForRegion`. |
-| `packages/vanilla/src/ide.ts` | 1024 | `createIDE(container, options)` — adds `palette-ide` + tabindex + `data-palette-id`, wraps existing children (work-zone) in `palette-ide-middle > palette-ide-center`, renders 4 borders + parking + console overlay. Subscribes values/layout/console. |
-| `packages/vanilla/demo/palette.ts` | 479 | Plain-data port of svelte demo: same 15 points (incl. `console` toggle point), same `demoKeys`, same 3 configs (`rw-combobox` / `rw-command-first` / `ro-combobox`) + layouts, `demoState` + `resetColony`/`isColonyDirty`. |
-| `packages/vanilla/demo/main.ts` | 385 | Parity page: demo-bar (heading, 3 mode buttons, save/load, last-action), `PaletteCore` + `ConsoleStore` + `bindConsoleToggle`, `createIDE` + work-zone (hero, pills, status panel, hint), values→`demoState` sync + theme + mm:ss clock, localStorage persistence (`palettable-demo-layout-v1` + `validateSerializedLayout`). |
-| `packages/vanilla/src/index.ts` | 12 | Barrel now exports `adapter` + `head` + `ide` + `keys`. |
-| `packages/vanilla/src/adapter.ts` | 51 | Unchanged minimal `<ul>` renderer. Predates the IDE; kept for the barrel smoke test only. Not the adapter surface. |
+| File | Contents |
+| ---- | -------- |
+| `packages/vanilla/src/keys.ts` | Adapter-side `KeyboardEvent` ownership: `normalizeKeystroke`, `keystrokeFromEvent`, `createVanillaKeys` + `isEditableTarget`. |
+| `packages/vanilla/src/head.ts` | Plain-DOM head editors: `renderButton/Toggle/Select/Segmented/Slider/Stepper/Stars/Status/CommandBox/Drawer` + `renderHeadItem` + `surfaceForRegion`. |
+| `packages/vanilla/src/ide.ts` | `createIDE(container, options)` — `palette-ide` + tabindex, work-zone wrap, 4 borders + parking + console overlay. |
+| `packages/vanilla/src/nodes.ts` | `NodeRegistry` — live object → `HTMLElement`, keyed by `===`. |
+| `packages/vanilla/src/highlight.ts` | `syncGapClasses` / `clearGapClasses` — gap-class diffing. |
+| `packages/vanilla/demo/palette.ts` | Plain-data port of the svelte demo (15 points, `demoKeys`, 3 configs + layouts). |
+| `packages/vanilla/demo/main.ts` | Parity page (demo-bar, `createIDE`, values→`demoState` sync, localStorage persistence). |
 
-Interface note landed: `createIDE(container, options)` takes a container element,
-adds IDE classes/children, wraps prior children in the workspace div.
+## Core surface landed (do not re-open)
 
-## DOM contract (`ide.ts` + `head.ts`)
+- **Identity contract** — `getLayout()` live + read-only; `setLayout()` for
+  whole loads; `getSnapshot()` for save. Deep-clone test updated.
+- **Op stream** — `LayoutOp` + `subscribeOps`, `from?`/`to?` convention
+  (no `from` = creation, no `to` = deletion), prune-cascade victims.
+- **Movement commits + veto helpers + gap-highlight decisions** — all in
+  `core/layout.ts`, all taking an explicit `DraggingState` param (no global
+  reads).
+- **Drawer content is one `Track`** — `DrawerToolbarItem.toolbar: Track`,
+  `ResolvedDrawerSlot[]` in `render.ts`, vanilla renders it.
+- **Editing chrome / value sync / console isolation** — landed in `ide.ts`
+  (`syncEditing` + `applyEditing`, `bindTool` + `updateToolNode`,
+  `setInspecting` + `renderConsoleDetails`).
+- **`can` flips** — `subscribeCan` → `disabled` in place.
 
-- Borders: direction/inverse, stack/track spaces (`actualTrackSpaceAt` + `trackGapMinGrow` floor), slots, `toolbar-item-guard` (`pointerdown`→inspect), `inert` content while editing.
-- Drawer: trigger `aria-label = label || hint` (label in `<span>`, chevron `aria-hidden`), child axis perpendicular, popup `is-${childAxis}` + `data-placement=center` + role dialog, body-portaled overlay, Escape closes + refocuses trigger. Overlay tracked separately so Escape removes popup + overlay.
-- CommandBox: `command-box-combobox/input/results` testids, ✎ open-editor → console edit mode, Enter runs first filtered entry.
-- Console: `console-overlay/input/results/mode-toggle/details-panel/add-panel` testids, `is-dimmed` work-zone, edit-only vs command-first vs read-only, click-to-select add flow, presentation-only configurator + delete.
-- Keydown: `isEditableTarget` guard, Escape closes, editing suppresses bindings, else boolean-toggle or `core.run(spec)`.
+## Remaining — core + vanilla
 
-## E2E
+### A. Vanilla drag session (landed)
 
-`playwright.config.ts`: `svelte` (`:4173`, build+preview) + `vanilla` (`:4174`,
-vite dev) run the shared suite; `vanilla-smoke` runs the vanilla-only spec.
-Shared suite = 16 (console 9 + palette 5 + drag-invariants 1 + smoke 1).
-Total: **33 passed (16 + 16 + 1)**.
+- [x] Pointer session: `startDragSession` (`drag-session.ts`) — `pointerdown` →
+      session, window `pointermove`/`pointerup`/`pointercancel`/`blur` +
+      `visibilitychange`, `GapDwell` hover → `commitDraggedTo*` (`ide.ts`:
+      `startSession`, `attachTrackDrag`, `paintStackGaps`/`paintParkingGaps`/
+      `paintItemSpaces`).
+- [x] Commit results feed `NodeRegistry` op-driven, not rebuild (`applyOp` →
+      `syncBorder` per region + `nodes.delete` for moved items/victims).
+- [x] Drag-end: `dragDirty` → single `getSnapshot()` → one `onLayoutChange`
+      call (`endDragSession`; demo persists). No core batching API — vanilla
+      owns it.
 
-Stale specs retired in `tests/e2e/console.spec.ts`: the 2 catalogue-drag specs
-(`draggable entries`, `drop lands in gap`) assumed HTML5 drag that no longer
-exists — movement stripped for restart (`plans/movement.md`), zero `draggable=`
-in `src`, svelte unit `console.test.ts` asserts click-to-select. Replaced with
-click-to-select assertions (`addable tools (not draggable)`, `click selects an
-entry`). `tests/e2e/vanilla.spec.ts` is the vanilla-only first-paint smoke
-(heading + IDE + combobox + work-zone).
+### B. Track sliding with rAF (landed)
 
-## Verification (all green 2026-09-14)
+- [x] `pointermove` writes `latestPointer` + enqueues `flushSlideTransform` in
+      `slideCallbacks` + `dirty = true` only (`startSession.onMove`).
+- [x] Persistent `requestAnimationFrame` loop drains the `Set` + clears per
+      frame, writes `toolbarElement.style.transform = translate3d(...)`. Gaps
+      untouched during the slide; single `resizeToolbar` commit on release,
+      then `transform = ''` (`slideLoopTick`/`flushSlideTransform`/
+      `endDragSession`).
+- [x] Dirty generalized to `Set<callback>` drained + cleared per frame
+      (`slideCallbacks`; `Set` dedupes repeated moves before a frame).
+- [x] Mid-drag re-target: `rearmSlideAfterCommit` → `retargetSlide` over the
+      new element (re-measure bounds, keep grab delta; `recenter` on
+      restructure promote).
+- [x] `hoveredTrackSpace` idempotency memo (same gap = no-op; kept after
+      commit so the fresh toolbar under the pointer does not double-commit).
 
-- `pnpm --filter @palettable/core check/build/test` — 212/15.
-- `pnpm --filter @palettable/vanilla check/test` — 4/2.
-- `pnpm --filter @palettable/vanilla build` — esm/cjs/umd ok.
+### C. Per-node delta (landed)
+
+- [x] `diffBorder`/`diffTrack`: create/drop delta nodes only, move existing
+      nodes with `insertBefore`, update track-space `flexBasis`/`flexGrow` in
+      place (`actualTrackSpaceAt` + `trackGapMinGrow` floor). `renderBorder`
+      tries the diff first, rebuilds only when framing disagrees.
+- [x] `applyOp` consumes `LayoutOp` prune victims (`nodes.delete` + victim
+      regions re-sync, parking-side → console pass).
+
+### D. Slide math home (landed — adapter-owned)
+
+- [x] `slide.ts`: `toolbarSlideBounds` + `clampSlideDelta` +
+      `toolbarGrabOffset` live in vanilla (need `getBoundingClientRect`;
+      never in core). Single-copy rule: rAF write + release commit share
+      `clampSlideDelta`.
+- [x] Commit on release is `resizeToolbar` (gaps untouched during slide); no
+      `commitSlide` — rejected as over-engineering.
+
+### E. Configurator rebuild (landed)
+
+- [x] `patchLive(path, patch, rebuildTool?)`: value/label/icon/hint/tone
+      mutate live + `updateToolNode` in place + `renderConsoleDetails` (no
+      border rebuild per keystroke). Editor-type swap passes `rebuildTool`
+      → full tool rebuild with initial values. "No `updateItem` in core"
+      holds.
+
+### F. Console add flow (landed)
+
+- [x] Add-panel insert wired: `renderAddPanel` → `itemFromAddSelection`
+      (`add-item.ts` via `resolveEditorVariant`) → `moveToolbar` (empty top)
+      / `moveItem` (append) + clear selection.
+- [x] Delete via `moveItem(from, undefined)` → op diff prunes empty
+      toolbars/tracks + `setInspecting(undefined)` refreshes details.
+
+### G. Drawer popups (landed)
+
+- [x] `repositionDrawers()` on every `applyOp` path (triggers may have
+      moved); drops detached popups.
+- [x] Drawer children render via `renderDrawerTrack` sharing the border
+      `NodeRegistry` (`===` keys, same `moveItem`/`moveToolbar` ops).
+
+## Verification (green 2026-09-15)
+
+- `pnpm --filter @palettable/core check/build/test` — 242/15.
+- `pnpm --filter @palettable/vanilla check/build/test` — 22/6.
 - `npx biome check packages/core packages/vanilla tests/e2e playwright.config.ts` — clean.
-- `pnpm test:e2e` — 33 passed.
-
-## Decisions / deviations
-
-- SSR: demos client-rendered; Phase 7 import-graph rule held (demo code in adapters only).
-- Context: parity demos context-free (root bag only); coverage from Phase 8 core tests. Command-box `uses` stays shaped-only.
-- Vanilla spike simplified: full re-render on values/layout/console; no dirty-set/rAF batching (fast enough at demo scale).
-- `adapter.ts` left in place; real surface is `keys`/`head`/`ide`.
-
-## Leftovers (not Phase 10 debt, for later phases)
-
-- `adapter.ts` `<ul>` renderer vs `ide.ts`: deprecate or delegate during Phase 11/12 cleanup.
-- Phase 8 steps 7–8 closed as shaped/simple; full context pass (bags in render, context-bound controls) is future work — note in mitosis.md: vanilla demo is expected to overtake svelte via contexts; vue targets vanilla parity; context e2e on svelte fails/skips until Phase 12.
-- Movement engine rebuild (`plans/movement.md`) re-adds drag sessions; e2e drag specs return then.
-
-## Next
-
-Phase 11 (vue adapter + demo parity, gated on this phase): scaffold
-`packages/vue/`, reproduce the same demo + DOM contract, own playwright project/port,
-same suite green. Then Phase 12 (thin svelte) only.
+- `pnpm test:e2e` — 35 passed (incl. `drag-highlight`: tool drag paints a
+  free item-space DZ on both demos).
 
 ## References
 
-- Permanent record: `docs/architecture.md` §19 + §21 "Phase 10 status".
-- Retired checklist: `plans/mitosis.md` "Phase 10" (status now Phases 2–10 landed).
-- Re-verify: `pnpm test:e2e` (both demos), `pnpm --filter @palettable/core test`,
-  `pnpm --filter @palettable/vanilla test`, `npx biome check packages/core packages/vanilla tests/e2e playwright.config.ts`.
+- Permanent record: `docs/architecture.md` §19 + §21 ("Phase 10 status",
+  "Layout mutation, identity and the op stream", "Vanilla adapter —
+  reconciliation and DOM identity"), `docs/movements.md`.
+- Retired checklist: `plans/mitosis.md` "Phase 10".

@@ -7,6 +7,11 @@
  * components live here — never in core.
  */
 export * from './adapter.js'
+export * from './add-item.js'
+export * from './drag-session.js'
 export * from './head.js'
+export * from './highlight.js'
 export * from './ide.js'
 export * from './keys.js'
+export * from './nodes.js'
+export * from './slide.js'

@@ -317,11 +317,15 @@ packages/svelte/src/lib/
       adapters; from `plans/ssr.md` §4.3 — server/client disagree on variant
       eligibility otherwise). Replaces the adapter-owned `regionDirection` and
       the "enforced by adapters, opaque to the core" drawer rule. — landed 2026-09-14: `axisForRegion` + `drawerChildAxis`/`drawerChildRegion` in `core/presenters.ts`.
-- [ ] Movement commits (`commitDraggedToTrackSpace/ItemSpace/StackSpace/Parking…`,
+- [x] Movement commits (`commitDraggedToTrackSpace/ItemSpace/StackSpace/Parking…`,
       `insertTrackWithToolbar`, `moveToolbarToTrack/Stack`) rebuilt in
       `core/layout.ts` on the Phase-2 primitives against an explicit drag-state
       param (no module `$state` reads). Svelte actions/components call them.
-      Commits stay client-only (never in the SSR render path). — deferred: movement was stripped for restart (`plans/movement.md` stays the behaviour spec); the engine rebuilds on the Phase-2 primitives, not by porting the old slide engine.
+      Commits stay client-only (never in the SSR render path). — landed: the
+      core commit/veto/highlight surface is in place and covered by
+      `layout.test.ts`; adapters call it. The drag *session* wiring in the
+      adapters (plus rAF sliding and per-node DOM deltas) is the remaining
+      movement work — see `docs/movements.md`.
 - [x] `drawer-editor`: keep portal in svelte; move only the perpendicular-direction
       + open-mode/placement derivation if reusable. — landed: perpendicular rule in core (`drawerChildAxis`/`drawerChildRegion`); portal + open-mode/placement stay svelte (adapter-owned).
 - [x] Context readiness: presenters take `(boundValues, boundBags)` param-array shape (Context §2.2, §4 step 6) so Phase 8 resolvers plug in without re-shaping; context flows down into drawer child tools (Context §1.2). — landed: `BoundDisplay` carries `point` + `value` + optional `bags` (accepted + ignored this phase).
@@ -466,7 +470,8 @@ Idea on interface (discussable): the createIDE should take a container html elem
       `packages/svelte/src/demo/palette.svelte.ts` (563). — landed 2026-09-14:
       `demo/palette.ts` (same 15 points/keys/3 configs/layouts) + `demo/main.ts`
       (parity page). Drag behaviour is the stripped static layout
-      (`plans/movement.md` restart — no drag sessions run; guards inspect only).
+      (no drag sessions run yet — `docs/movements.md` restart; guards inspect
+      only).
 - [x] Reproduce the same DOM contract the e2e specs assert (headings, console
       overlay, toolbar/parking structure, drag targets) — the specs query
       concrete selectors, so "similar" is not enough. — landed: `ide.ts` +
@@ -672,11 +677,12 @@ Idea on interface (discussable): the createIDE should take a container html elem
   implementation and the oracle for parity; editing it early destroys the
   comparison. (Phases 7–11 are additive-only like Phases 2–5.)
 - No new movement behaviour in this plan — the engine restart builds on core
-  primitives (`plans/movement.md` stays the behaviour spec). Movement commits
+  primitives (`docs/movements.md` is the behaviour spec). Movement commits
   stay client-only and out of the SSR render path.
 - No context behaviour before Phase 8 — Phases 3–5 land readiness stubs only
   (`uses`, `setTree`, `PaletteWriteError`); bags, nothing-points, and
-  functional `can` wait for Phase 8 (`plans/context.md` stays the behaviour spec).
+  functional `can` wait for Phase 8 (see the "Phase 8 status" section in
+  `docs/architecture.md` for the landed surface).
 - No `*Model` / variant-factory layer (out of scope per `docs/architecture.md §5`).
 - No `Snippet` in icon tokens (no runtime discriminator — wrap in a component).
 - Keep `AGENTS.md` recipes: scratch work in `sandbox/`, read-only `git`.

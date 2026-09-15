@@ -54,8 +54,11 @@ export type ResolvedItem = {
 	readonly capability: EditorCapability | undefined
 	/** Keystrokes bound to this item's spec. */
 	readonly keystrokes: readonly string[]
-	/** Drawer children (recursive, depth-bounded); empty for non-drawers. */
-	readonly children: readonly ResolvedItem[]
+	/**
+	 * Drawer children: one track (slots with spacing + toolbar), recursive
+	 * and depth-bounded; empty for non-drawers.
+	 */
+	readonly children: readonly ResolvedDrawerSlot[]
 	/** Item config payload (by reference — adapter clones before crossing the wire). */
 	readonly config: Record<string, unknown> | undefined
 }
@@ -67,6 +70,12 @@ export type ResolvedToolbar = {
 
 /** One resolved track slot (spacing + toolbar). */
 export type ResolvedTrackSlot = {
+	readonly space: number
+	readonly toolbar: ResolvedToolbar
+}
+
+/** One resolved drawer child slot (spacing + toolbar — drawer content is one track). */
+export type ResolvedDrawerSlot = {
 	readonly space: number
 	readonly toolbar: ResolvedToolbar
 }
@@ -224,9 +233,14 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 			editor: 'drawer',
 			capability: lookupCapability(context, 'item', 'drawer'),
 			keystrokes: [],
-			children: item.toolbar.map((child) =>
-				resolveItem(child, { ...context, surface: childSurface, depth: context.depth + 1 })
-			),
+			children: item.toolbar.map((slot) => ({
+				space: slot.space,
+				toolbar: {
+					items: slot.toolbar.map((child) =>
+						resolveItem(child, { ...context, surface: childSurface, depth: context.depth + 1 })
+					),
+				},
+			})),
 			config: item.config as Record<string, unknown> | undefined,
 		}
 	}
@@ -495,7 +509,10 @@ function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 		return {
 			editor: 'drawer',
 			config: item.config,
-			toolbar: item.toolbar.map((child) => serializedItemToLive(child)),
+			toolbar: item.toolbar.map((slot) => ({
+				space: slot.space,
+				toolbar: slot.toolbar.map((child) => serializedItemToLive(child)),
+			})),
 		} as ToolbarItem
 	}
 	if (item.tool === undefined) {

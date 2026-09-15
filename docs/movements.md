@@ -1,8 +1,11 @@
 # Toolbar movement & reorganisation
 
-Engine: `src/lib/palette/layout.svelte.ts` (layout primitives + drag actions).
-For the data model itself see `docs/layout-and-drag.md` and
-`docs/architecture.md`.
+Engine: the drag-session code lives in the adapters
+(`packages/vanilla/src/`, and `src/lib/palette/layout.svelte.ts` for svelte);
+the **structural commits, veto predicates and gap-highlight decisions** live in
+`packages/core/src/layout.ts` and take the drag session as an explicit
+parameter. For the data model itself see `docs/layout-and-drag.md` and
+`docs/architecture.md` (§21 "Layout mutation, identity and the op stream").
 
 ## Principles
 
@@ -29,6 +32,17 @@ For the data model itself see `docs/layout-and-drag.md` and
 | `origin` | `{ kind: 'border', toolbar, track, border }` or `{ kind: 'parking', toolbar, parking, index }` — where those tools currently live. Refreshed after every commit. |
 | `mode` | `'restructure'` or `'slide'` — what the selection *means right now*. |
 | `grabOffset` | Pixel delta of the cursor within the dragged toolbar. Absent for a restructure drag (its toolbar does not exist yet). |
+
+### Core owns the session shape, not the session
+
+`core/layout.ts` defines the headless half of this table — `DraggingState`
+(`tools` / `origin` / `mode`) and `DragOrigin` — but deliberately **not** the
+palette instance or `grabOffset`: core never holds an adapter, and the pointer
+geometry is adapter-owned. Every veto predicate and commit in core takes the
+session as an **explicit first parameter** (no module-global `$state` reads, no
+`palettes.dragging` lookup), which is what makes the same engine reusable
+across adapters. The adapter keeps the live `$state` session, passes it down,
+and refreshes `origin` from the commit results.
 
 ### Mode is derived, cached, and recomputed on structural change
 
@@ -216,13 +230,18 @@ single `resizeToolbar` commit lands on release. `clampSlideDelta` is the one
 copy of the slide math, shared by the per-frame write and the release commit,
 so the visual position and the committed `space` can never disagree.
 
-Slide-follow is armed **declaratively**: an `$effect` in `ToolbarTrack` keyed
-on `mode === 'slide' && origin.track === track` reads the sliding toolbar's
-live element and arms `retargetToolbarSlide`; when the mode is no longer
-`'slide'` the same effect **disarms** (`clearToolbarSlide`). It is the only
-disarm path for a mode change. `$effect` runs after Svelte flushes the DOM, so
-a freshly committed toolbar is already measurable — no manual `tick()`, no
-attribute-selector lookup from the pointer handler.
+Slide-follow is armed **declaratively** in svelte: an `$effect` in
+`ToolbarTrack` keyed on `mode === 'slide' && origin.track === track` reads the
+sliding toolbar's live element and arms `retargetToolbarSlide`; when the mode
+is no longer `'slide'` the same effect **disarms** (`clearToolbarSlide`). It
+is the only disarm path for a mode change. `$effect` runs after Svelte flushes
+the DOM, so a freshly committed toolbar is already measurable — no manual
+`tick()`, no attribute-selector lookup from the pointer handler. The vanilla
+adapter arms **imperatively** instead: `retargetSlide` at grab time plus
+`rearmSlideAfterCommit` after every gap commit that relocates the dragged
+toolbar (the op-driven `syncBorder`/`diffBorder` has already placed the fresh
+node, so it is measurable; `toolbarElementOf` resolves it via the
+`NodeRegistry`).
 
 ### The slide anchor
 
@@ -245,15 +264,44 @@ spot, so the toolbar lands centered on the cursor.
 
 ## Session lifecycle
 
-`startPaletteDragSession` (`drag-session.ts`) installs window-level
-`pointermove`/`pointerup`/`pointercancel`/`blur` listeners plus a document
-`visibilitychange` listener. There is deliberately **no pointer capture**:
-capturing on the drag-origin element retargets every subsequent move to that
-element, so `target` never leaves the origin and the drop zones freeze.
+`svelte/src/lib/palette/drag-session.ts: startPaletteDragSession` and
+`packages/vanilla/src/drag-session.ts: startDragSession` both install
+window-level `pointermove`/`pointerup`/`pointercancel`/`blur` listeners plus a
+document `visibilitychange` listener. There is deliberately **no pointer
+capture**: capturing on the drag-origin element retargets every subsequent
+move to that element, so `target` never leaves the origin and the drop zones
+freeze.
 
 There is also deliberately **no activation threshold**: a drag is live from
 `pointerdown`, and a commit happens on hover, not on release. A zero-pixel
 click is therefore a legitimate no-op drag rather than a cancelled one.
+
+## Gap highlight decisions (core, pure)
+
+Which gaps paint is a **pure decision in core** (`layout.ts`), not an adapter
+re-implementation: `borderStackHighlight` / `parkingGapHighlight` /
+`itemSpaceHighlight` take the container, the dwell state (`active` row/track,
+`hovered` gap) and the session, and return a `GapHighlight`
+(`{ highlighted: Set<number>, hovered: number | undefined }`).
+
+- Direct hover wins over flanking: a directly hovered gap is the only one that
+  paints `hovered` (doubled size) and arms the dwell timer; hovering a row/track
+  highlights its two flanking gaps without arming.
+- The **would-be-emptied** veto is shared with the commits:
+  `draggingEmptiesTrackIndex` / `draggingEmptiesParkingRow` keep the gaps
+  touching a track/row the drag would empty dark — and the matching commit
+  refuses to land there, so highlight and behaviour can never disagree.
+- Item-space gaps additionally never paint when they touch a dragged tool
+  (`isItemSpaceFree`), and fall back to the nearest free gap on each side of the
+  hovered item (`nearestFreeItemSpaceBefore/After`).
+- `maskActive` (the console panel background during a drag) paints only the end
+  gap.
+
+`GapDwell` (core `gap-dwell.ts`) owns the timer + one-shot latch
+(`active`/`hovered`/`committed`); the *adapter* owns the reactive fields and the
+class writes. `docs/architecture.md` §21 documents the vanilla side
+(`highlight.ts:syncGapClasses` diffs the decision and toggles classes only on
+changed indices).
 
 ## Invariants
 

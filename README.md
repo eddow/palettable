@@ -148,7 +148,9 @@ Start with `docs/getting-started.md` (setup, demo tour, first palette), then:
 - `docs/theming.md` — stylesheets, light override, demo wiring
 - `docs/testing.md` — unit + e2e inventory, gotchas
 
-Active work lives in `plans/` (`mitosis.md`, `ssr.md`, `context.md`, `movement.md`, …). Per `AGENTS.md`: implement from `/plans/`, then migrate permanent decisions into `/docs/`.
+Active work lives in `plans/` (`mitosis.md`, `data-owning.md`, …). Per
+`AGENTS.md`: implement from `/plans/`, then migrate permanent decisions into
+`/docs/` (and delete the plan file).
 
 ## Testing
 
