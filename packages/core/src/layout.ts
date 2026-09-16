@@ -434,6 +434,19 @@ export class PaletteLayoutTree {
 		}
 	}
 
+	/**
+	 * Create a drag session for one gesture (`ToolbarDrag`: `over` /
+	 * `measure` / `end`, all `void`). Resolves the grab target against the
+	 * live tree and throws when it is not there (a drawer child). The
+	 * session holds this tree, so no session method ever takes a layout
+	 * parameter. Implemented in `drag.ts` (prototype assignment there —
+	 * importing `@palettable/core` wires it up); declared here so the
+	 * method is visible on the class.
+	 */
+	createDrag(_target: import('./drag.js').GrabTarget): import('./drag.js').ToolbarDrag {
+		throw new PaletteError(`createDrag: drag module not loaded`)
+	}
+
 	/** Remove all layout listeners (adapter teardown). Layout is kept. */
 	clearListeners(): void {
 		this.listeners.clear()

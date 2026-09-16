@@ -1,6 +1,6 @@
 # Drag interface refactor — session + events (active plan)
 
-> Status: **active plan — not started.** Normative spec is below
+> Status: **active plan — Phase 1 landed 2026-09-16.** Normative spec is below
 > (`Decisions` / `Types` / `Methods` / `Adapter responsibilities`);
 > the execution checklist is `Plan` (this file tracks only what is left).
 > `packages/svelte/src` is **out of scope** (frozen oracle, per mitosis).
@@ -337,10 +337,10 @@ Core first, vanilla follows, svelte untouched.
 
 ### Phase 0 — baseline lock (no behaviour change)
 
-- [ ] Measured 2026-09-16: core **264** unit tests / 15 files, vanilla **45** /
+- [x] Measured 2026-09-16: core **264** unit tests / 15 files, vanilla **45** /
   8 files, svelte **179** / 17 files; e2e **55** tests (14 specs; 27 shared ×
   2 projects + `vanilla.spec.ts`).
-- [ ] e2e result: **51 passed, 4 failed** — every failure is the **svelte**
+- [x] e2e result: **51 passed, 4 failed** — every failure is the **svelte**
   project: `edge-stay` (×2), `reorder-forward`, `whole-toolbar`. Those specs
   encode the *new* rules (dry-side track-gap fallback, same-toolbar forward
   index shift, whole-toolbar neighbour TB edges) which vanilla implements and
@@ -348,7 +348,7 @@ Core first, vanilla follows, svelte untouched.
   the svelte project's `testIgnore` until Phase 12, or accept the known-fail
   set. Recommendation: `testIgnore` — a gate that is red on a clean tree
   trains everyone to ignore red.
-- [ ] No test to add: the e2e suite already pins the behaviour. The dual-run in
+- [x] No test to add: the e2e suite already pins the behaviour. The dual-run in
   Phase 2 covers the wire change.
 
 ### Phase 1 — mount the session on the existing stream
@@ -356,31 +356,38 @@ Core first, vanilla follows, svelte untouched.
 The load-bearing phase: it removes the double-apply hazard and the manual
 re-render, with **no new behaviour**.
 
-- [ ] `PaletteLayoutTree.createDrag(target: GrabTarget): ToolbarDrag` —
+Landed 2026-09-16: `core/drag.ts` (`GrabTarget` / `Hoverable` / `DropZone` /
+`PointerSample` / `ToolbarDrag` + `createToolbarDrag`, `layout.createDrag`
+wired via prototype assignment), `core/drag.test.ts` (12 session tests),
+vanilla `ide.ts` on `createDrag` + `session.over()` (single `toHoverable`
+hit-test, `overItemGap` bridge, `sessionState` escape hatch). Gates:
+core 276, vanilla 45, e2e 51/4 (svelte fail set unchanged), svelte clean.
+
+- [x] `PaletteLayoutTree.createDrag(target: GrabTarget): ToolbarDrag` —
   `over` / `measure` / `end`, all `void`, `this.layout` held by the session.
   The grab target is passed at creation, so there is no separate `start`.
   Keep `DragElement` as a deprecated alias until Phase 7.
-- [ ] Route every drag commit through the tree so `LayoutOp` is emitted **and**
+- [x] Route every drag commit through the tree so `LayoutOp` is emitted **and**
   not re-emitted: the session owns the emit, the adapter applies the same
   `applyOp` path it already has. `over()` delegates to today's `dragOver`
   internally and emits `structure` when it moved; delete the return-value
   path (`DragOverDecision`) once the stream carries it.
-- [ ] Emission order: **structure first, then highlight flips, then slide** —
+- [x] Emission order: **structure first, then highlight flips, then slide** —
   what lets the adapter create/remove nodes and paint them in the same pass.
-- [ ] Session resets paint baseline on `structure` + re-paints the live toolbar
+- [x] Session resets paint baseline on `structure` + re-paints the live toolbar
   (incl. re-emitting `slide` for the element that now exists); vanilla replaces
   manual `syncBorder`/`syncStructure` after `moved` with the existing `applyOp`
   node-map path (prune victims drop nodes).
-- [ ] Assert single-writer: no `moveItem` / `moveToolbar` / `insertItem` /
+- [x] Assert single-writer: no `moveItem` / `moveToolbar` / `insertItem` /
   `removeItem` call from inside a drag session; unit test that a drag emits
   exactly one op per commit.
-- [ ] The session refuses to start when the toolbar is not in the tree
+- [x] The session refuses to start when the toolbar is not in the tree
   (replaces the `try/catch` around `dragStart` in
   `startToolDrag`/`startToolbarDrag`).
-- [ ] Vanilla: one `toHoverable(event): Hoverable | null` helper (`closest(...)`
+- [x] Vanilla: one `toHoverable(event): Hoverable | null` helper (`closest(...)`
   + node-map `===` lookup); `paintItemSpaces` / track / stack handlers become
   `over()` calls.
-- [ ] Verify: reorder-forward / track-drop / stack-highlight e2e green.
+- [x] Verify: reorder-forward / track-drop / stack-highlight e2e green.
 
 ### Phase 2 — `highlight` diffs
 
