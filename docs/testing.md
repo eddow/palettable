@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 242 tests, 15 files
+## Core unit (Vitest, node) — 264 tests, 15 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -14,7 +14,7 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation, `setTree` batching |
 | `src/palette.test.ts` | `initialValues` / `setMany` validation + batching, `ServerPointDescriptor` round-trip + action rebuild by name (+ nothing-point round-trip), `readSetterValue` (strict coercion: blank/∞ boolean-token → throw), `resolveEditablePoint` / `readActionCan` (functional), `uses` contract, `PaletteWriteError` |
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
-| `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, inline-virtual snapshot round-trip |
+| `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, the core drag engine (`dragStart` origin resolution + whole-toolbar flag, `dragOver` paint/commit per element kind incl. dark-gap no-move + editing-off dark), inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
 | `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked), `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
 | `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
@@ -80,12 +80,15 @@ Gotchas:
 - `paletteCommandBoxModel` / `hydratePaletteLayout` must be created during
   probe init, never in handlers (same init-time constraint as app code).
 
-## E2E (Playwright) — 35 tests, 6 files, 3 projects
+## E2E (Playwright) — 37 tests, 8 files, 3 projects
 
 Run: `pnpm test:e2e`. `playwright.config.ts` runs the shared suite against
 **both** demos — `svelte` (build + preview on `:4173`) and `vanilla` (vite dev
 on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
-`test.beforeEach` clears `localStorage` and reloads.
+`test.beforeEach` clears `localStorage` and reloads. The suite is the
+**adapter conformance contract**: every future adapter (vue, thinned svelte)
+must satisfy the same specs — new highlight/commit behaviour lands with its
+spec first, core unit anchors second.
 
 - `e2e/smoke.spec.ts` (1, both demos): home page renders.
 - `e2e/palette.spec.ts` (5, both demos): command-box combobox runs commands
@@ -112,8 +115,44 @@ on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
   active-item fallback paints the flanking free gaps); steps the pointer in
   small increments (per-position handlers); opens the console via JS click
   (edit-mode guards cover the Terminal button for real clicks).
+- `e2e/edge-stay.spec.ts` (2, conformance): a DZ beside a dragged tool is
+  never highlighted — ABCD with D dragged keeps TB-gap 4 dark and paints
+  track gap 1 after the toolbar; symmetrically, dragging A keeps TB-gap 0
+  dark and paints track gap 0 before the toolbar. Shared `dragOntoTool`
+  helper (guard `pointerdown` → stepped hover onto the tool itself); asserts
+  the exact `data-item-space-index` / `data-track-space-index` so future
+  adapters paint the right gap, not just any gap. Core anchors:
+  `layout.test.ts` "ABCD with D dragged keeps the gap after D dark" +
+  the `abcdFallback` track case.
+- `e2e/reorder-forward.spec.ts` (1, conformance): same-toolbar forward moves
+  land between, not after — dragging the second tool onto gap 3 reorders to
+  `[0, 2, 1, 3]`, never `[0, 2, 3, 1]`. Reads live `data-tool` order via
+  `toolOrder`; svelte oracle fails (expected divergence). Core anchor:
+  `layout.test.ts` "forward move lands between, not after" (ABCD + backward
+  case).
+- `e2e/whole-toolbar.spec.ts` (1, conformance): a whole-toolbar drag never
+  highlights neighbour track gaps — only the last TB-DZ of the previous TB
+  and the first TB-DZ of the next TB (same track). Extracts a singleton via
+  guard → leading track gap, then hovers the fresh toolbar: own flanking
+  track gaps stay dark while a neighbour TB edge paints. Vanilla passes,
+  svelte fails (expected divergence — oracle predates the rule). Core
+  anchors: `layout.test.ts` "whole-toolbar drag paints neighbour TB edges"
+  + "startDraggingState derives the whole-toolbar flag".
+- `e2e/dark-gap-no-move.spec.ts` (1, conformance): re-organisation happens
+  ONLY on a highlighted DZ — hovering dark gap 1 beside dragged tool 0
+  leaves the tool order untouched and builds no singleton. Guards the
+  paint/commit single-decision rule (vanilla reads the painted
+  `highlighted` class; core commits reject dark gaps), so future adapters
+  can never move tools under a dark gap.
 - `e2e/vanilla.spec.ts` (1, `vanilla-smoke`): vanilla demo first paint
   (heading + IDE chrome + combobox + work-zone).
+- `e2e/track-drop.spec.ts` (1, conformance): dragging a tool onto a track
+  gap extracts a new toolbar — guard → leading track gap commits a fresh
+  singleton and the session promotes to a whole-toolbar slide.
+- `e2e/stack-highlight.spec.ts` (1, conformance): dragging a tool over a
+  track background highlights the flanking stack gaps (core `dragOver`
+  `{ kind: 'track' }` active-track fallback, no commit — the dwell commit
+  stays adapter-owned).
 
 E2E lessons (see `docs/architecture.md` §19–§20):
 
@@ -128,8 +167,8 @@ E2E lessons (see `docs/architecture.md` §19–§20):
 
 ## Gates
 
-- Core: `pnpm --filter @palettable/core check` / `build` / `test` (242).
-- Vanilla: `pnpm --filter @palettable/vanilla check` / `test` (16).
+- Core: `pnpm --filter @palettable/core check` / `build` / `test` (264).
+- Vanilla: `pnpm --filter @palettable/vanilla check` / `test` (45).
 - Svelte: `pnpm --filter @palettable/svelte check` / `test` (179).
 - `npx biome check packages/core packages/vanilla tests/e2e playwright.config.ts` (clean).
-- `pnpm test:e2e` (35 passed).
+- `pnpm test:e2e` (37 passed).

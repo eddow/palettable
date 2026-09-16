@@ -2,8 +2,8 @@
  * `@palettable/vanilla` — drop-zone highlight as a class-toggle pass (no rebuild).
  *
  * The core decides *which* gaps paint (`borderStackHighlight` /
- * `parkingGapHighlight` / `itemSpaceHighlight` — pure, no DOM); this module
- * applies the decision to the existing gap nodes. Each sync diffs against
+ * `parkingGapHighlight` / `itemSpaceHighlight` / `trackSpaceHighlight` —
+ * pure, no DOM); this module applies the decision to the existing gap nodes. Each sync diffs against
  * the previous decision per root element and only touches changed indices,
  * so `pointermove` never re-renders and never touches `active` / `hovered` /
  * `committed` reactively — it just flips `highlighted` / `hovered` classes.
@@ -21,14 +21,14 @@ const prevByRoot = new WeakMap<HTMLElement, PrevDecision>()
 /**
  * Toggle `highlighted` / `hovered` on the gap nodes inside `root` whose
  * `data-*` index attribute is `attr` (e.g. `stackIndex`,
- * `parkingGapIndex`, `itemSpaceIndex`). Only changed indices are touched;
- * the previous decision is remembered per `root` (a rebuilt root starts
- * fresh, which is exactly what a structural sync wants).
+ * `parkingGapIndex`, `itemSpaceIndex`, `trackSpaceIndex`). Only changed
+ * indices are touched; the previous decision is remembered per `root` (a
+ * rebuilt root starts fresh, which is exactly what a structural sync wants).
  */
 export function syncGapClasses(
 	root: HTMLElement,
 	highlight: GapHighlight,
-	attr: 'stackIndex' | 'parkingGapIndex' | 'itemSpaceIndex'
+	attr: 'stackIndex' | 'parkingGapIndex' | 'itemSpaceIndex' | 'trackSpaceIndex'
 ): void {
 	const prev = prevByRoot.get(root) ?? { highlighted: new Set<number>(), hovered: undefined }
 	// `dataset.stackIndex` reads `data-stack-index`: the selector needs the
@@ -38,7 +38,9 @@ export function syncGapClasses(
 			? 'stack-index'
 			: attr === 'parkingGapIndex'
 				? 'parking-gap-index'
-				: 'item-space-index'
+				: attr === 'trackSpaceIndex'
+					? 'track-space-index'
+					: 'item-space-index'
 	const gaps = root.querySelectorAll(`[data-${selector}]`)
 	for (const node of gaps) {
 		if (!(node instanceof HTMLElement)) continue

@@ -25,16 +25,16 @@ import {
 	axisForRegion,
 	buttonPresenter,
 	type ConsoleStore,
-	commitDraggedToItemSpace,
 	configuration,
 	configuratorEditorCleanup,
 	type DraggingState,
+	type DragOverDecision,
+	dragOver,
+	dragStart,
 	editorChoicesFor,
 	filterCommandEntries,
 	isActionPoint,
-	isItemSpaceFree,
 	isValuedPoint,
-	itemSpaceHighlight,
 	type LayoutOp,
 	type PaletteCore,
 	type PaletteRegion,
@@ -57,6 +57,7 @@ import { renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses, syncGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
+import { clampSlideDelta, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
 
 export type IdeOptions = {
 	readonly core: PaletteCore
@@ -443,6 +444,84 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	let lastEditing: boolean | undefined
 	/** Live drag session (adapter-owned; core takes it as an explicit param). */
 	let dragging: DraggingState | undefined
+	/**
+	 * Idempotency memo: last track-space gap committed (same gap = no-op).
+	 * After a commit the fresh toolbar sits under the pointer — keeping the
+	 * memo (not clearing it) absorbs the repeat move, so a second toolbar
+	 * is never built for the same gap. Only a *different* gap commits again.
+	 * Mirrors the svelte `ToolbarTrack` memo.
+	 */
+	let hoveredTrackSpace: number | undefined
+
+	/**
+	 * Live slide-follow for a whole-toolbar drag (adapter-owned DOM write).
+	 * Gaps stay untouched during the drag — the toolbar follows the pointer
+	 * via compositor-only `transform`; a single `resizeToolbar` commit lands
+	 * on release. Mirrors the svelte `ToolbarTrack` declarative effect +
+	 * `retargetToolbarSlide` / rAF loop, armed imperatively here.
+	 */
+	let slideCleanup: (() => void) | undefined
+	let slideToolbar: Toolbar | undefined
+
+	/** Arm slide-follow over the dragged toolbar's live element. */
+	function armSlide(toolbar: Toolbar, region: PaletteRegion, event: PointerEvent): void {
+		disarmSlide()
+		const element = nodes.get(toolbar)
+		if (!(element instanceof HTMLElement)) return
+		const ownerWindow = element.ownerDocument.defaultView ?? window
+		const direction = directionFor(region)
+		const horizontal = direction === 'horizontal'
+		const grabOffset = toolbarGrabOffset({
+			toolbarElement: element,
+			clientX: event.clientX,
+			clientY: event.clientY,
+			direction,
+		})
+		const bounds = toolbarSlideBounds(element, direction)
+		if (bounds === undefined) return
+		const rect = element.getBoundingClientRect()
+		const offset0 = (horizontal ? rect.left : rect.top) - bounds.start
+		slideToolbar = toolbar
+		let latestX = event.clientX
+		let latestY = event.clientY
+		let queued = false
+		const flush = () => {
+			queued = false
+			if (dragging?.isWholeToolbar !== true || slideToolbar !== dragging.origin.toolbar) return
+			const live = nodes.get(slideToolbar)
+			if (!(live instanceof HTMLElement) || !live.isConnected) return
+			const pointer = horizontal ? latestX : latestY
+			const delta = clampSlideDelta(bounds, offset0, pointer, grabOffset)
+			live.style.transform =
+				delta === 0
+					? ''
+					: horizontal
+						? `translate3d(${delta}px, 0, 0)`
+						: `translate3d(0, ${delta}px, 0)`
+		}
+		const onMove = (move: PointerEvent) => {
+			latestX = move.clientX
+			latestY = move.clientY
+			if (!queued) {
+				queued = true
+				requestAnimationFrame(flush)
+			}
+		}
+		ownerWindow.addEventListener('pointermove', onMove)
+		slideCleanup = () => {
+			ownerWindow.removeEventListener('pointermove', onMove)
+			const live = slideToolbar !== undefined ? nodes.get(slideToolbar) : undefined
+			if (live instanceof HTMLElement) live.style.transform = ''
+			slideToolbar = undefined
+		}
+		flush()
+	}
+
+	/** Drop slide-follow and clear the live transform. */
+	function disarmSlide(): void {
+		slideCleanup?.()
+		slideCleanup = undefined
+	}
 
 	/**
 	 * Find the live toolbar array holding `item` (borders + parking).
@@ -466,31 +545,36 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Open a drag session for one tool. Core decides *which* gaps paint
-	 * (`itemSpaceHighlight`); this adapter only applies the decision as
-	 * classes (`syncGapClasses`). No session → core returns empty → dark,
-	 * so hover alone never paints. Hovering a free gap commits the move
-	 * via `commitDraggedToItemSpace` (core mutates the live arrays); the
-	 * layout op re-renders the affected border so tools reorganize
-	 * mid-drag. No slide, no dwell.
+	 * Open a drag session for one tool. The core decides whole-toolbar vs
+	 * subset at `dragStart` (element + position in, session out) — this
+	 * adapter only reports the grabbed tool and applies the core's paint /
+	 * commit decisions from `dragOver`. A lone tool in its toolbar starts
+	 * as a whole-toolbar slide (`isWholeToolbar` set at drag-start by
+	 * core), so slide-follow arms immediately. No session → core returns
+	 * empty → dark, so hover alone never paints. Restructuring happens only
+	 * on a highlighted DZ: hovering a dark gap never moves tools. The layout op
+	 * re-renders the affected border so tools reorganize mid-drag.
 	 */
 	function startToolDrag(event: PointerEvent, toolbar: Toolbar, item: ToolbarItem): void {
+		if (dragging) return
 		if (event.button !== 0) return
 		if (isEditableTarget(event.target)) return
 		if (!computeEditing()) return
 		event.preventDefault()
-		dragging = {
-			tools: [item],
-			origin: {
-				kind: 'border',
-				toolbar,
-				track: [],
-				border: core.layout.getLayout().borders.top,
-			},
-			mode: toolbar.length === 1 ? 'slide' : 'restructure',
+		try {
+			dragging = dragStart(core.layout.getLayout(), { kind: 'tool', toolbar, item })
+		} catch {
+			// Drawer-child toolbars live outside borders/parking — core has
+			// no origin for them, so no drag session (no crash on grab).
+			return
 		}
 		container.classList.add('dragging')
 		container.dataset.dragging = 'true'
+		// Lone-tool grab is already a whole-toolbar slide: arm follow now
+		// so the bar sticks under the cursor before any commit.
+		const region = (event.currentTarget as HTMLElement | null)?.closest?.('.toolbar-border')
+		const regionName = region?.getAttribute?.('data-region') as PaletteRegion | null
+		if (dragging.isWholeToolbar && regionName) armSlide(dragging.origin.toolbar, regionName, event)
 		startDragSession({
 			event,
 			onMove: () => {},
@@ -498,9 +582,47 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		})
 	}
 
-	/** End the session: drop paint classes, forget the session. */
+	/**
+	 * Open a drag session for a whole toolbar (mousedown on the bar itself,
+	 * not on a tool). All tools drag together as a slide from the start —
+	 * mirrors svelte `paletteToolbarDrag`. Slide-follow arms immediately
+	 * for border toolbars (parking rows have no track to slide along).
+	 */
+	function startToolbarDrag(
+		event: PointerEvent,
+		toolbar: Toolbar,
+		region: PaletteRegion,
+		dragTarget?: { readonly track: Track; readonly border: import('@palettable/core').Border }
+	): void {
+		if (dragging) return
+		if (event.button !== 0) return
+		if (isEditableTarget(event.target)) return
+		if (!computeEditing()) return
+		// A tool (or its guard) owns the gesture — bar drag is background only.
+		if ((event.target as HTMLElement | null)?.closest?.('.toolbar-item')) return
+		event.preventDefault()
+		try {
+			dragging = dragStart(core.layout.getLayout(), { kind: 'toolbar', toolbar })
+		} catch {
+			// Drawer-child toolbars live outside borders/parking — core has
+			// no origin for them, so no drag session (no crash on grab).
+			return
+		}
+		container.classList.add('dragging')
+		container.dataset.dragging = 'true'
+		if (dragTarget !== undefined) armSlide(dragging.origin.toolbar, region, event)
+		startDragSession({
+			event,
+			onMove: () => {},
+			onStop: () => endToolDrag(),
+		})
+	}
+
+	/** End the session: drop paint classes, slide transform, forget the session. */
 	function endToolDrag(): void {
+		disarmSlide()
 		dragging = undefined
+		hoveredTrackSpace = undefined
 		container.classList.remove('dragging')
 		delete container.dataset.dragging
 		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
@@ -509,27 +631,118 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Item-space highlight as a class-toggle pass: direct gap hover wins,
-	 * else the nearest free gap on each side of the hovered item (core
-	 * `itemSpaceHighlight`). No rebuild — just `highlighted` / `hovered`
-	 * flips on the existing gap nodes.
+	 * Apply a core `dragOver` decision: paint the returned highlight sets
+	 * as classes (item gaps on their bars, track gaps on the track, whole-
+	 * toolbar neighbour edges on the neighbour bars). Single paint path —
+	 * the core decided, this adapter only applies.
+	 */
+	function applyDragDecision(
+		bar: HTMLElement,
+		trackEl: HTMLElement | null,
+		decision: DragOverDecision
+	): void {
+		let barPainted = false
+		for (const paint of decision.itemHighlights) {
+			const node = nodes.get(paint.toolbar)
+			if (node instanceof HTMLElement) {
+				syncGapClasses(
+					node,
+					{ highlighted: new Set(paint.gaps), hovered: undefined },
+					'itemSpaceIndex'
+				)
+				if (node === bar) barPainted = true
+			}
+		}
+		// No paint for this bar → clear stale classes (moving between items
+		// must not leave the previous highlight behind).
+		if (!barPainted) clearGapClasses(bar)
+		if (trackEl instanceof HTMLElement) {
+			const paint = decision.trackHighlights[0]
+			// Scoped sync (not `clearGapClasses`): the bar lives INSIDE the
+			// track element, so a blanket clear would wipe the item gaps
+			// just painted above. Syncing the empty set only touches
+			// `data-track-space-index` nodes.
+			syncGapClasses(
+				trackEl,
+				{ highlighted: new Set(paint?.gaps ?? []), hovered: undefined },
+				'trackSpaceIndex'
+			)
+		}
+		for (const edge of decision.neighbourEdges) {
+			const neighbour = nodes.get(edge.toolbar)
+			if (neighbour instanceof HTMLElement) {
+				syncGapClasses(
+					neighbour,
+					{ highlighted: new Set([edge.gap]), hovered: undefined },
+					'itemSpaceIndex'
+				)
+			}
+		}
+	}
+
+	/**
+	 * Item-space highlight as a class-toggle pass over the core `dragOver`
+	 * decision. No rebuild — just `highlighted` flips on the existing gap
+	 * nodes. When a side runs dry (every item-space touches a dragged
+	 * tool), the core falls back to the flanking track gap or the
+	 * whole-toolbar neighbour edges — all inside the one decision.
 	 */
 	function paintItemSpaces(
 		bar: HTMLElement,
 		toolbar: Toolbar,
 		activeItem: number | undefined,
-		hovered: number | undefined
-	): void {
+		hovered: number | undefined,
+		fallback?: { readonly track: Track; readonly border: import('@palettable/core').Border }
+	): DragOverDecision | undefined {
 		const session = dragging
 		if (!computeEditing() || !session) {
 			clearGapClasses(bar)
-			return
+			return undefined
 		}
-		syncGapClasses(
-			bar,
-			itemSpaceHighlight({ toolbar, activeItem, hovered, editing: true, dragging: session }),
-			'itemSpaceIndex'
-		)
+		if (hovered === undefined && activeItem === undefined) {
+			clearGapClasses(bar)
+			const trackEl = bar.closest('.toolbar-track')
+			if (trackEl instanceof HTMLElement) clearGapClasses(trackEl)
+			return undefined
+		}
+		const live = core.layout.getLayout()
+		const trackEl = bar.closest('.toolbar-track')
+		const item = activeItem !== undefined ? toolbar[activeItem] : undefined
+		const decision =
+			hovered !== undefined
+				? fallback === undefined
+					? dragOver(
+							session,
+							live,
+							{
+								kind: 'parking-row-gap',
+								toolbar,
+								parking: live.parking,
+								index: live.parking.indexOf(toolbar),
+								gap: hovered,
+							},
+							{},
+							true
+						)
+					: dragOver(
+							session,
+							live,
+							{
+								kind: 'item-gap',
+								toolbar,
+								track: fallback.track,
+								border: fallback.border,
+								gap: hovered,
+							},
+							{},
+							true
+						)
+				: item === undefined
+					? undefined
+					: dragOver(session, live, { kind: 'tool', toolbar, item }, { activeItem }, true)
+		if (!decision) return undefined
+		applyDragDecision(bar, trackEl instanceof HTMLElement ? trackEl : null, decision)
+		return decision
 	}
 
 	container.classList.add('palette-ide')
@@ -622,6 +835,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (editing) bar.dataset.editing = 'true'
 		bar.dataset.container = containerKind
 		nodes.setToolbar(toolbar, bar)
+		// Whole-toolbar grab: mousedown on the bar background (not on a
+		// tool/guard) drags all tools together as a slide from the start —
+		// mirrors svelte `paletteToolbarDrag`. The guard's own `pointerdown`
+		// fires first and sets `dragging`, so a tool grab never double-starts
+		// here (`startToolbarDrag` bails when a session is live).
+		bar.addEventListener('pointerdown', (event) => {
+			if (!(event.target instanceof HTMLElement)) return
+			// Inside a nested toolbar → that toolbar owns the gesture.
+			if (event.target.closest('.toolbar') !== bar) return
+			startToolbarDrag(event, toolbar, region, dragTarget)
+		})
 		// Bound unconditionally: bars render before the console opens
 		// (editing=false), and `syncEditing` flips chrome without a rebuild —
 		// so an `if (editing)` gate here would leave pre-edit bars with no
@@ -636,45 +860,105 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const spaceEl = target.closest('[data-item-space-index]')
 			if (!spaceEl || !bar.contains(spaceEl)) {
 				// Hovering a tool (not a gap): highlight the nearest free
-				// gaps flanking it (active-item fallback).
+				// gaps flanking it (active-item fallback). `dragTarget`
+				// carries the track + slot, so a dry side falls back to the
+				// flanking track gap (core `trackSpaceHighlight`).
 				const itemEl = target.closest('[data-item-index]')
 				const active =
 					itemEl && bar.contains(itemEl)
 						? Number((itemEl as HTMLElement).dataset.itemIndex)
 						: undefined
-				paintItemSpaces(bar, toolbar, Number.isInteger(active) ? active : undefined, undefined)
+				paintItemSpaces(
+					bar,
+					toolbar,
+					Number.isInteger(active) ? active : undefined,
+					undefined,
+					dragTarget
+				)
 				return
 			}
 			const index = Number((spaceEl as HTMLElement).dataset.itemSpaceIndex)
 			const at = Number.isInteger(index) ? index : undefined
-			paintItemSpaces(bar, toolbar, undefined, at)
-			// Commit on DZ hover: move dragged tools into this toolbar at
-			// this position (core decides legality via `isItemSpaceFree`).
-			// The layout op re-renders the affected border, so the tools
-			// visibly reorganize mid-drag.
-			if (at === undefined || !dragging || !isItemSpaceFree(dragging, toolbar, at)) return
-			if (dragTarget !== undefined) {
-				const moved = commitDraggedToItemSpace(
-					dragging,
-					toolbar,
-					dragTarget.track,
-					dragTarget.border,
-					at
-				)
-				if (moved) {
-					// `commitDraggedTo*` mutates the live arrays silently (no
-					// layout op) — re-render the border so the move shows.
+			// `dragOver` decides paint + commit in one call: a highlighted
+			// gap restructures (core commits), a dark gap returns
+			// `moved: false` with no paint. The layout op re-renders the
+			// affected border, so the tools visibly reorganize mid-drag.
+			// Parking rows have no `dragTarget` — the core locates the row
+			// in the live parking stack itself.
+			const decision =
+				at !== undefined && dragging
+					? dragTarget !== undefined
+						? dragOver(
+								dragging,
+								core.layout.getLayout(),
+								{
+									kind: 'item-gap',
+									toolbar,
+									track: dragTarget.track,
+									border: dragTarget.border,
+									gap: at,
+								},
+								{},
+								computeEditing()
+							)
+						: dragOver(
+								dragging,
+								core.layout.getLayout(),
+								{
+									kind: 'parking-row-gap',
+									toolbar,
+									parking: core.layout.getLayout().parking,
+									index: core.layout.getLayout().parking.indexOf(toolbar),
+									gap: at,
+								},
+								{},
+								computeEditing()
+							)
+					: undefined
+			if (decision) {
+				const trackEl = bar.closest('.toolbar-track')
+				applyDragDecision(bar, trackEl instanceof HTMLElement ? trackEl : null, decision)
+				if (decision.moved) {
+					// `dragOver` mutates the live arrays silently (no layout
+					// op) — re-render the border so the move shows. The
+					// re-render rebuilds the bar, so re-apply the decision
+					// paint onto the FRESH nodes (the old bar is detached).
 					// The session (`dragging.tools`) survives by item identity.
+					// A restructure that extracts its tools promotes to a
+					// whole-toolbar slide: re-arm slide-follow over the fresh
+					// toolbar so it sticks under the cursor (mirrors the
+					// svelte track effect).
 					const region = bar
 						.closest('.toolbar-border')
 						?.getAttribute('data-region') as PaletteRegion | null
 					if (region) syncBorder(region)
 					else syncStructure()
+					const freshBar = nodes.get(toolbar)
+					const freshTrack =
+						dragging !== undefined &&
+						dragging.origin.kind === 'border' &&
+						dragging.origin.track !== undefined
+							? nodes.get(dragging.origin.track)
+							: undefined
+					if (freshBar instanceof HTMLElement) {
+						applyDragDecision(
+							freshBar,
+							freshTrack instanceof HTMLElement ? freshTrack : null,
+							decision
+						)
+					}
+					if (dragging?.isWholeToolbar && region) armSlide(dragging.origin.toolbar, region, event)
+					else disarmSlide()
 				}
 			}
 		})
 		bar.addEventListener('pointerleave', () => {
 			paintItemSpaces(bar, toolbar, undefined, undefined)
+			// The fallback paints on the track element, not the bar — clear
+			// it too, otherwise a dry-side highlight survives leaving the
+			// toolbar.
+			const trackEl = bar.closest('.toolbar-track')
+			if (trackEl instanceof HTMLElement) clearGapClasses(trackEl)
 		})
 		const appendSpace = (index: number) => {
 			const space = el('div', 'toolbar-item-space toolbar-drop-zone')
@@ -786,10 +1070,66 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		borderEl.dataset.region = region
 		const live = core.layout.getLayout()
 		const border = live.borders[region]
-		// No highlight while the movement engine is stripped: hover alone
-		// must never paint. The leave pass only clears stale classes.
+		// Stack gaps paint via the core `dragOver` decision (highlight-only:
+		// the dwell commit stays adapter-owned). Hover alone stays dark.
 		borderEl.addEventListener('pointerleave', () => {
 			clearGapClasses(borderEl)
+		})
+		borderEl.addEventListener('pointermove', (event) => {
+			if (!dragging) return
+			const target = event.target
+			if (!(target instanceof HTMLElement)) return
+			// Inside a toolbar → that toolbar owns the perpendicular DZs.
+			if (target.closest('.toolbar')) return
+			// Hovering a track background (not a gap): highlight the two
+			// flanking stack gaps (core `dragOver` on the track element).
+			const trackBg = target.closest('[data-track-index]')
+			if (trackBg && borderEl.contains(trackBg) && !target.closest('[data-stack-index]')) {
+				const trackIndex = Number((trackBg as HTMLElement).dataset.trackIndex)
+				if (Number.isInteger(trackIndex)) {
+					const decision = dragOver(
+						dragging,
+						core.layout.getLayout(),
+						{ kind: 'track', border, trackIndex },
+						{},
+						computeEditing()
+					)
+					const paint = decision.stackHighlights[0]
+					if (paint !== undefined) {
+						syncGapClasses(
+							borderEl,
+							{ highlighted: new Set(paint.gaps), hovered: undefined },
+							'stackIndex'
+						)
+					} else {
+						clearGapClasses(borderEl)
+					}
+					return
+				}
+			}
+			const spaceEl = target.closest('[data-stack-index]')
+			if (!spaceEl || !borderEl.contains(spaceEl)) return
+			const index = Number((spaceEl as HTMLElement).dataset.stackIndex)
+			const gap = Number.isInteger(index) ? index : undefined
+			if (gap === undefined) return
+			const decision = dragOver(
+				dragging,
+				core.layout.getLayout(),
+				{ kind: 'stack-gap', border, gap },
+				{},
+				computeEditing()
+			)
+			const paint = decision.stackHighlights[0]
+			if (paint !== undefined) {
+				syncGapClasses(
+					borderEl,
+					{ highlighted: new Set(paint.gaps), hovered: undefined },
+					'stackIndex'
+				)
+			} else {
+				clearGapClasses(borderEl)
+			}
+			void event
 		})
 		const ordered = inverse ? [...border].reverse() : border
 		const stackSpace = (index: number) => {
@@ -806,6 +1146,80 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			trackEl.dataset.trackIndex = String(trackIndex)
 			trackEl.dataset.paletteId = paletteId
 			nodes.setTrack(track, trackEl)
+			// Track gaps commit on hover via the core `dragOver` decision:
+			// a highlighted gap restructures (extracts the tools into a
+			// fresh singleton at that gap), a dark gap never moves tools.
+			// Mirrors svelte `ToolbarTrack`: inside a toolbar the toolbar
+			// owns the DZs (memo kept).
+			trackEl.addEventListener('pointermove', (event) => {
+				if (!dragging) return
+				const target = event.target
+				if (!(target instanceof HTMLElement)) return
+				// Inside a toolbar → that toolbar owns the perpendicular DZs.
+				// Keep the memo: after a commit the fresh toolbar sits under
+				// the pointer, and clearing would re-arm on the next move.
+				if (target.closest('.toolbar')) return
+				const spaceEl = target.closest('[data-track-space-index]')
+				if (!spaceEl || !trackEl.contains(spaceEl)) {
+					hoveredTrackSpace = undefined
+					clearGapClasses(trackEl)
+					return
+				}
+				const index = Number((spaceEl as HTMLElement).dataset.trackSpaceIndex)
+				const next = Number.isInteger(index) ? index : undefined
+				const prev = hoveredTrackSpace
+				if (next === undefined || !dragging) {
+					hoveredTrackSpace = next
+					return
+				}
+				// Idempotency memo: same gap = no-op (the fresh toolbar sits
+				// under the pointer after a commit — re-committing would
+				// build a second toolbar for the same gap).
+				if (next === prev) return
+				const decision = dragOver(
+					dragging,
+					core.layout.getLayout(),
+					{ kind: 'track-gap', track, border, gap: next },
+					{},
+					computeEditing()
+				)
+				syncGapClasses(
+					trackEl,
+					{
+						highlighted: new Set(decision.trackHighlights[0]?.gaps ?? []),
+						hovered: undefined,
+					},
+					'trackSpaceIndex'
+				)
+				if (decision.moved) {
+					hoveredTrackSpace = next
+					syncBorder(region)
+					// Re-apply the paint onto the fresh track node (the old
+					// one was rebuilt by the re-render).
+					const freshTrack = nodes.get(track)
+					if (freshTrack instanceof HTMLElement) {
+						syncGapClasses(
+							freshTrack,
+							{
+								highlighted: new Set(decision.trackHighlights[0]?.gaps ?? []),
+								hovered: undefined,
+							},
+							'trackSpaceIndex'
+						)
+					}
+					// A restructure that extracts its tools promotes to a
+					// whole-toolbar slide: re-arm slide-follow over the
+					// fresh toolbar (mirrors the svelte track effect).
+					if (dragging.isWholeToolbar) armSlide(dragging.origin.toolbar, region, event)
+					else disarmSlide()
+				} else {
+					hoveredTrackSpace = next
+				}
+			})
+			trackEl.addEventListener('pointerleave', () => {
+				hoveredTrackSpace = undefined
+				clearGapClasses(trackEl)
+			})
 			const trackSpace = (index: number) => {
 				const gap = el('div', 'toolbar-track-space toolbar-drop-zone')
 				gap.dataset.paletteId = paletteId

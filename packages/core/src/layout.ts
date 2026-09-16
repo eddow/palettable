@@ -878,6 +878,14 @@ export type DraggingState = {
 	 * toolbar is `'slide'`.
 	 */
 	mode: DragMode
+	/**
+	 * Stored whole-toolbar flag: `true` when the dragged tools are the
+	 * entire content of their toolbar. Set at drag-start via
+	 * `startDraggingState` and refreshed by `refreshDragMode` after every
+	 * commit — adapters read it, never re-derive it. Mirrors `mode` so
+	 * both the cached mode and the explicit flag stay in sync.
+	 */
+	isWholeToolbar: boolean
 }
 
 /** Check whether a toolbar item is part of the drag selection. */
@@ -889,7 +897,10 @@ export function isDraggingTool(dragging: DraggingState | undefined, item: Toolba
 /**
  * Check whether an item-space index is free: neither neighbouring tool (if
  * any) is part of the drag selection. Space `index` sits between
- * `toolbar[index - 1]` and `toolbar[index]`.
+ * `toolbar[index - 1]` and `toolbar[index]`. A DZ beside a dragged tool is
+ * never highlighted — when ABCD has D dragged, the gap after D stays dark
+ * and the candidate moves out to the track gap after the toolbar (see
+ * `trackSpaceHighlight` fallback below).
  */
 export function isItemSpaceFree(
 	dragging: DraggingState | undefined,
@@ -994,11 +1005,399 @@ export function resolveDragMode(dragging: DraggingState): DragMode {
  * the session rather than derived per pointer move, so a drag that started as
  * a subset can *become* a slide once its tools are extracted into a toolbar of
  * their own — and a slide can *become* a restructure once a merge puts other
- * items back beside it. Returns the new mode.
+ * items back beside it. Also refreshes the stored `isWholeToolbar` flag so
+ * adapters always read the current value. Returns the new mode.
  */
 export function refreshDragMode(dragging: DraggingState): DragMode {
 	dragging.mode = resolveDragMode(dragging)
+	dragging.isWholeToolbar = dragging.mode === 'slide'
 	return dragging.mode
+}
+
+/**
+ * Build a drag session with the whole-toolbar flag derived once, at
+ * drag-start. Adapters must use this (never a literal) so the stored flag
+ * and `mode` start in sync; every commit refreshes both via
+ * `refreshDragMode`.
+ *
+ * NOTE: `startDraggingState` is the legacy entry point (tools + origin
+ * only). New code should use `dragStart` below, which takes the grabbed
+ * element (tool or toolbar) plus the pointer position and resolves the
+ * origin itself.
+ */
+export function startDraggingState(options: {
+	tools: ToolbarItem[]
+	origin: DragOrigin
+}): DraggingState {
+	const dragging: DraggingState = {
+		tools: options.tools,
+		origin: options.origin,
+		mode: 'restructure',
+		isWholeToolbar: false,
+	}
+	refreshDragMode(dragging)
+	return dragging
+}
+
+// ── Core drag engine: drag-start / drag-over ─────────────────────────────
+// The core decides the action (restructure vs translate); adapters only
+// report the grabbed element (tool / toolbar / DZ) and the pointer position.
+// Element identity is by live object reference (`Toolbar` / `ToolbarItem`
+// arrays from `getLayout()`); position is an abstract slot/gap index plus
+// the pointer pixel (for slide-follow), never DOM.
+
+/** Element the pointer grabbed or hovered: a tool, a toolbar, or a DZ gap. */
+export type DragElement =
+	| { readonly kind: 'tool'; readonly toolbar: Toolbar; readonly item: ToolbarItem }
+	| { readonly kind: 'toolbar'; readonly toolbar: Toolbar }
+	| {
+			readonly kind: 'item-gap'
+			readonly toolbar: Toolbar
+			readonly track: Track
+			readonly border: Border
+			readonly gap: number
+	  }
+	| {
+			readonly kind: 'track-gap'
+			readonly track: Track
+			readonly border: Border
+			readonly gap: number
+	  }
+	| {
+			readonly kind: 'stack-gap'
+			readonly border: Border
+			readonly gap: number
+	  }
+	| {
+			readonly kind: 'track'
+			readonly border: Border
+			readonly trackIndex: number
+	  }
+	| {
+			readonly kind: 'parking-gap'
+			readonly parking: Parking
+			readonly gap: number
+	  }
+	| {
+			readonly kind: 'parking-row-gap'
+			readonly toolbar: Toolbar
+			readonly parking: Parking
+			readonly index: number
+			readonly gap: number
+	  }
+
+/** Pointer position: abstract indices (resolved by the adapter's hit test). */
+export type DragPointer = {
+	/** Item index under the pointer (active-item fallback), if any. */
+	readonly activeItem?: number
+	/** Pointer pixel along the slide axis (for slide-follow). */
+	readonly client?: number
+}
+
+/** What the core decided on drag-over: highlight paint + optional commit. */
+export type DragOverDecision = {
+	/** Item-space gaps to paint per toolbar (adapter applies as classes). */
+	readonly itemHighlights: readonly {
+		readonly toolbar: Toolbar
+		readonly gaps: readonly number[]
+	}[]
+	/** Track gaps to paint per track. */
+	readonly trackHighlights: readonly { readonly track: Track; readonly gaps: readonly number[] }[]
+	/** Stack gaps to paint per border. */
+	readonly stackHighlights: readonly { readonly border: Border; readonly gaps: readonly number[] }[]
+	/** Parking gaps to paint. */
+	readonly parkingHighlights: readonly { readonly gaps: readonly number[] }[]
+	/** Neighbour TB edges for a whole-toolbar drag (same track). */
+	readonly neighbourEdges: readonly { readonly toolbar: Toolbar; readonly gap: number }[]
+	/** Whether a restructure commit landed on this hover. */
+	readonly moved: boolean
+	/** Refreshed whole-toolbar flag (also stored on the session). */
+	readonly isWholeToolbar: boolean
+}
+
+/** Locate the track + border holding `toolbar` (identity scan). */
+function locateToolbar(
+	toolbar: Toolbar,
+	borders: Borders,
+	parking: Parking
+):
+	| { readonly kind: 'border'; readonly track: Track; readonly border: Border }
+	| { readonly kind: 'parking'; readonly parking: Parking; readonly index: number }
+	| undefined {
+	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
+	for (const region of regions) {
+		const border = borders[region]
+		for (const track of border) {
+			for (const slot of track) {
+				if (slot.toolbar === toolbar) return { kind: 'border', track, border }
+			}
+		}
+	}
+	const index = parking.indexOf(toolbar)
+	if (index >= 0) return { kind: 'parking', parking, index }
+	return undefined
+}
+
+/**
+ * Core drag-start: given the grabbed element (tool or toolbar) plus the
+ * pointer position, build the session. The core decides whole-toolbar vs
+ * subset from the live layout — the adapter never derives it.
+ */
+export function dragStart(
+	layout: { readonly borders: Borders; readonly parking: Parking },
+	element: DragElement,
+	_pointer?: DragPointer
+): DraggingState {
+	if (element.kind === 'tool') {
+		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
+		if (at === undefined) throw new PaletteError(`dragStart: toolbar not found in layout`)
+		if (at.kind === 'parking') {
+			return startDraggingState({
+				tools: [element.item],
+				origin: { kind: 'parking', toolbar: element.toolbar, parking: at.parking, index: at.index },
+			})
+		}
+		return startDraggingState({
+			tools: [element.item],
+			origin: { kind: 'border', toolbar: element.toolbar, track: at.track, border: at.border },
+		})
+	}
+	if (element.kind === 'toolbar') {
+		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
+		if (at === undefined) throw new PaletteError(`dragStart: toolbar not found in layout`)
+		if (at.kind === 'parking') {
+			return startDraggingState({
+				tools: [...element.toolbar],
+				origin: { kind: 'parking', toolbar: element.toolbar, parking: at.parking, index: at.index },
+			})
+		}
+		return startDraggingState({
+			tools: [...element.toolbar],
+			origin: { kind: 'border', toolbar: element.toolbar, track: at.track, border: at.border },
+		})
+	}
+	throw new PaletteError(`dragStart: cannot start a drag from a DZ gap`)
+}
+
+/**
+ * Core drag-over: given the hovered element (tool / toolbar / DZ gap) plus
+ * the pointer position, decide highlight paint + restructure commit. The
+ * core decides the action (restructure into a highlighted DZ, translate the
+ * sliding toolbar); the adapter applies the returned paint sets as classes
+ * and re-renders on `moved`.
+ *
+ * Restructuring happens ONLY on a highlighted DZ: hovering a dark gap
+ * returns `moved: false` with no paint for that gap.
+ */
+export function dragOver(
+	dragging: DraggingState,
+	layout: { readonly borders: Borders; readonly parking: Parking },
+	element: DragElement,
+	pointer: DragPointer,
+	editing: boolean
+): DragOverDecision {
+	const empty: DragOverDecision = {
+		itemHighlights: [],
+		trackHighlights: [],
+		stackHighlights: [],
+		parkingHighlights: [],
+		neighbourEdges: [],
+		moved: false,
+		isWholeToolbar: dragging.isWholeToolbar,
+	}
+	if (!editing) return empty
+	// Hovering a tool (not a gap): active-item fallback highlight.
+	if (element.kind === 'tool') {
+		const highlight = itemSpaceHighlight({
+			toolbar: element.toolbar,
+			activeItem: pointer.activeItem ?? element.toolbar.indexOf(element.item),
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		const itemHighlights =
+			highlight.highlighted.size > 0
+				? [{ toolbar: element.toolbar, gaps: [...highlight.highlighted] }]
+				: []
+		// Dry side falls back to the flanking track gap — except while a
+		// whole toolbar is dragged (neighbour TB edges instead).
+		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
+		if (at?.kind === 'border' && pointer.activeItem !== undefined) {
+			const slotIndex = at.track.findIndex((entry) => entry.toolbar === element.toolbar)
+			if (dragging.isWholeToolbar) {
+				return {
+					...empty,
+					itemHighlights,
+					neighbourEdges: wholeToolbarNeighbourEdges({
+						track: at.track,
+						slotIndex,
+						dragging,
+						editing: true,
+					}),
+				}
+			}
+			const fallback = trackSpaceHighlight({
+				track: at.track,
+				toolbar: element.toolbar,
+				slotIndex,
+				activeSlot: pointer.activeItem,
+				hovered: undefined,
+				editing: true,
+				dragging,
+			})
+			if (fallback.highlighted.size > 0) {
+				return {
+					...empty,
+					itemHighlights,
+					trackHighlights: [{ track: at.track, gaps: [...fallback.highlighted] }],
+				}
+			}
+		}
+		return { ...empty, itemHighlights }
+	}
+	// Hovering a toolbar body: same fallback, anchored on the pointer item.
+	if (element.kind === 'toolbar') {
+		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
+		if (at?.kind !== 'border' || pointer.activeItem === undefined) return empty
+		const slotIndex = at.track.findIndex((entry) => entry.toolbar === element.toolbar)
+		if (dragging.isWholeToolbar) {
+			return {
+				...empty,
+				neighbourEdges: wholeToolbarNeighbourEdges({
+					track: at.track,
+					slotIndex,
+					dragging,
+					editing: true,
+				}),
+			}
+		}
+		const fallback = trackSpaceHighlight({
+			track: at.track,
+			toolbar: element.toolbar,
+			slotIndex,
+			activeSlot: pointer.activeItem,
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		if (fallback.highlighted.size > 0) {
+			return { ...empty, trackHighlights: [{ track: at.track, gaps: [...fallback.highlighted] }] }
+		}
+		return empty
+	}
+	// Hovering an item-space DZ: paint + commit when highlighted.
+	if (element.kind === 'item-gap') {
+		const highlight = itemSpaceHighlight({
+			toolbar: element.toolbar,
+			activeItem: undefined,
+			hovered: element.gap,
+			editing: true,
+			dragging,
+		})
+		if (!highlight.highlighted.has(element.gap)) {
+			return { ...empty, itemHighlights: [] }
+		}
+		const result = commitDraggedToItemSpace(
+			dragging,
+			element.toolbar,
+			element.track,
+			element.border,
+			element.gap
+		)
+		return {
+			...empty,
+			itemHighlights: [{ toolbar: element.toolbar, gaps: [element.gap] }],
+			moved: result.moved,
+			isWholeToolbar: result.isWholeToolbar,
+		}
+	}
+	// Hovering a track gap: paint + commit when highlighted (not a slide flank).
+	// Direct hover only needs the flank veto, so the toolbar/slot are unused.
+	if (element.kind === 'track-gap') {
+		const highlight = trackSpaceHighlight({
+			track: element.track,
+			toolbar: [],
+			slotIndex: 0,
+			activeSlot: undefined,
+			hovered: element.gap,
+			editing: true,
+			dragging,
+		})
+		if (!highlight.highlighted.has(element.gap)) {
+			return { ...empty, trackHighlights: [] }
+		}
+		const result = commitDraggedToTrackSpace(dragging, element.track, element.border, element.gap)
+		return {
+			...empty,
+			trackHighlights: [{ track: element.track, gaps: [element.gap] }],
+			moved: result.moved,
+			isWholeToolbar: result.isWholeToolbar,
+		}
+	}
+	// Hovering a stack gap: paint when highlighted; the dwell commit stays
+	// adapter-owned (timer), core only decides paint here.
+	if (element.kind === 'stack-gap') {
+		const highlight = borderStackHighlight({
+			border: element.border,
+			active: undefined,
+			hovered: element.gap,
+			editing: true,
+			dragging,
+		})
+		if (!highlight.highlighted.has(element.gap)) return { ...empty, stackHighlights: [] }
+		return { ...empty, stackHighlights: [{ border: element.border, gaps: [element.gap] }] }
+	}
+	// Hovering a track background (not a gap): highlight the two flanking
+	// stack gaps (active-track fallback, no commit).
+	if (element.kind === 'track') {
+		const highlight = borderStackHighlight({
+			border: element.border,
+			active: element.trackIndex,
+			hovered: undefined,
+			editing: true,
+			dragging,
+		})
+		if (highlight.highlighted.size === 0) return { ...empty, stackHighlights: [] }
+		return {
+			...empty,
+			stackHighlights: [{ border: element.border, gaps: [...highlight.highlighted] }],
+		}
+	}
+	// Hovering a parking gap / row gap: paint when highlighted.
+	if (element.kind === 'parking-gap') {
+		const highlight = parkingGapHighlight({
+			parking: element.parking,
+			active: undefined,
+			hovered: element.gap,
+			editing: true,
+			dragging,
+		})
+		if (!highlight.highlighted.has(element.gap)) return { ...empty, parkingHighlights: [] }
+		return { ...empty, parkingHighlights: [{ gaps: [element.gap] }] }
+	}
+	const highlight = itemSpaceHighlight({
+		toolbar: element.toolbar,
+		activeItem: undefined,
+		hovered: element.gap,
+		editing: true,
+		dragging,
+	})
+	if (!highlight.highlighted.has(element.gap)) {
+		return { ...empty, itemHighlights: [] }
+	}
+	const result = commitDraggedToParking(
+		dragging,
+		element.toolbar,
+		element.parking,
+		element.index,
+		element.gap
+	)
+	return {
+		...empty,
+		itemHighlights: [{ toolbar: element.toolbar, gaps: [element.gap] }],
+		moved: result.moved,
+		isWholeToolbar: result.isWholeToolbar,
+	}
 }
 
 /**
@@ -1136,8 +1535,12 @@ export function parkingGapHighlight(options: {
 
 /**
  * Item-space gaps inside one toolbar (`toolbar.length + 1` of them): a gap
- * touching a dragged tool never highlights; direct hover wins, otherwise the
- * nearest free gap on each side of the hovered item highlights.
+ * touching a dragged tool never highlights — when ABCD has D dragged, the
+ * gap after D stays dark and the candidate moves out to the track gap after
+ * the toolbar (the caller paints it via `trackSpaceHighlight`, see below).
+ * Direct hover wins, otherwise the nearest free gap on each side of the
+ * hovered item highlights. When no free gap exists on a side (`nearestFree*`
+ * returns `undefined`), that side falls back to the neighbouring track gap.
  */
 export function itemSpaceHighlight(options: {
 	toolbar: Toolbar
@@ -1159,6 +1562,91 @@ export function itemSpaceHighlight(options: {
 	if (before !== undefined) highlighted.add(before)
 	if (after !== undefined) highlighted.add(after)
 	return { highlighted, hovered: undefined }
+}
+
+/**
+ * Track gaps flanking one toolbar slot (`track.length + 1` of them): the
+ * fallback paint when `itemSpaceHighlight` runs short on a side. `before`
+ * (`slotIndex`) / `after` (`slotIndex + 1`) paint exactly when the matching
+ * `nearestFree*` side returned `undefined` — i.e. every item-space on that
+ * side touches a dragged tool, so the candidate moves out to the
+ * gap-between-toolbars. Direct gap hover wins (paints only it); otherwise
+ * the `activeSlot` flanks paint. While sliding, the two gaps flanking the
+ * moved toolbar never paint (mirrors the `commitDraggedToTrackSpace` veto:
+ * hovering them is just continuing to move the toolbar).
+ */
+export function trackSpaceHighlight(options: {
+	track: Track
+	toolbar: Toolbar
+	slotIndex: number
+	activeSlot: number | undefined
+	hovered: number | undefined
+	editing: boolean
+	dragging: DraggingState | undefined
+}): GapHighlight {
+	const { track, toolbar, slotIndex, activeSlot, hovered, editing, dragging } = options
+	if (!editing || !dragging) return { highlighted: new Set(), hovered: undefined }
+	const highlighted = new Set<number>()
+	const gapCount = track.length + 1
+	const add = (gap: number) => {
+		if (gap < 0 || gap >= gapCount) return
+		if (isSlidingFlank(dragging, track, gap)) return
+		highlighted.add(gap)
+	}
+	if (hovered !== undefined) {
+		add(hovered)
+		return { highlighted, hovered }
+	}
+	if (activeSlot === undefined) return { highlighted, hovered: undefined }
+	// Only the flanks of the hovered toolbar's own slot are candidates; each
+	// paints only when the item-space side ran dry. `activeSlot` is the
+	// hovered *item* index inside the toolbar (mirrors `itemSpaceHighlight`'s
+	// `activeItem`): the before side scans back from it, the after side
+	// scans forward from `activeSlot + 1`.
+	const beforeFree = nearestFreeItemSpaceBefore(dragging, toolbar, activeSlot)
+	const afterFree = nearestFreeItemSpaceAfter(dragging, toolbar, activeSlot + 1)
+	if (beforeFree === undefined) add(slotIndex)
+	if (afterFree === undefined) add(slotIndex + 1)
+	return { highlighted, hovered: undefined }
+}
+
+/** Sliding veto shared by the track-gap highlight + commit: the two gaps
+ * flanking the moved toolbar are not destinations while sliding. Reads the
+ * stored whole-toolbar flag (set at drag-start, refreshed after every
+ * commit) — never re-derived per pointer move. */
+function isSlidingFlank(dragging: DraggingState, track: Track, gap: number): boolean {
+	if (dragging.origin.kind !== 'border') return false
+	if (dragging.origin.track !== track) return false
+	if (!dragging.isWholeToolbar) return false
+	const slot = track.findIndex((entry) => entry.toolbar === dragging.origin.toolbar)
+	if (slot < 0) return false
+	return gap === slot || gap === slot + 1
+}
+
+/**
+ * Neighbour TB-edge highlight for a whole-toolbar drag (same track only):
+ * while the dragged toolbar itself moves, the only TB-DZ candidates are
+ * the last gap of the previous toolbar and the first gap of the next
+ * toolbar. Returns the `{ toolbar, gap }` pairs the adapter should paint
+ * (empty when not a whole-toolbar border drag, or no neighbours exist).
+ */
+export function wholeToolbarNeighbourEdges(options: {
+	track: Track
+	slotIndex: number
+	dragging: DraggingState | undefined
+	editing: boolean
+}): readonly { readonly toolbar: Toolbar; readonly gap: number }[] {
+	const { track, slotIndex, dragging, editing } = options
+	if (!editing || !dragging) return []
+	if (!dragging.isWholeToolbar) return []
+	if (dragging.origin.kind !== 'border') return []
+	if (dragging.origin.track !== track) return []
+	const out: { readonly toolbar: Toolbar; readonly gap: number }[] = []
+	const prev = track[slotIndex - 1]?.toolbar
+	if (prev !== undefined) out.push({ toolbar: prev, gap: prev.length })
+	const next = track[slotIndex + 1]?.toolbar
+	if (next !== undefined) out.push({ toolbar: next, gap: 0 })
+	return out
 }
 
 // ── Movement commits (explicit drag state, no module globals) ─────────────
@@ -1204,6 +1692,19 @@ function takeDraggedTools(
 /**
  * Commit the dragged tools into a target toolbar at an item-space index.
  * The origin is pruned when emptied; the session origin follows the tools.
+ *
+ * Restructuring happens only on a highlighted DZ: callers must gate on
+ * `isItemSpaceFree` (which mirrors the highlight decision) and skip the
+ * commit otherwise — hovering a dark gap never moves tools.
+ *
+ * Same-toolbar forward moves adjust for the prune shift: the hovered gap
+ * index is read against the pre-prune toolbar, but the tools land in the
+ * pruned one — so a gap after removed tools shifts back by the count of
+ * dragged tools before it. ABCD with B dragged onto gap 3 (between C and
+ * D) lands between C and D, not after D.
+ *
+ * Returns the refreshed whole-toolbar flag (also stored on the session)
+ * so adapters update without re-deriving.
  */
 export function commitDraggedToItemSpace(
 	dragging: DraggingState,
@@ -1211,10 +1712,21 @@ export function commitDraggedToItemSpace(
 	targetTrack: Track,
 	targetBorder: Border,
 	itemSpaceIndex: number
-): boolean {
-	if (dragging.tools.length === 0) return false
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
+	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	// Dark DZs never restructure: the gap must be highlighted (free).
+	if (!isItemSpaceFree(dragging, targetToolbar, itemSpaceIndex))
+		return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	const sameToolbar = targetToolbar === dragging.origin.toolbar
+	let removedBefore = 0
+	if (sameToolbar) {
+		for (let index = 0; index < itemSpaceIndex && index <= targetToolbar.length; index += 1) {
+			const tool = targetToolbar[index]
+			if (tool !== undefined && dragging.tools.includes(tool)) removedBefore += 1
+		}
+	}
 	pruneDragOrigin(dragging)
-	const clampedIndex = Math.min(Math.max(itemSpaceIndex, 0), targetToolbar.length)
+	const clampedIndex = Math.min(Math.max(itemSpaceIndex - removedBefore, 0), targetToolbar.length)
 	targetToolbar.splice(clampedIndex, 0, ...dragging.tools)
 	dragging.origin = {
 		kind: 'border',
@@ -1223,7 +1735,7 @@ export function commitDraggedToItemSpace(
 		border: targetBorder,
 	}
 	refreshDragMode(dragging)
-	return true
+	return { moved: true, isWholeToolbar: dragging.isWholeToolbar }
 }
 
 /**
@@ -1231,23 +1743,22 @@ export function commitDraggedToItemSpace(
  * toolbar sliding. `'slide'` relocates `origin.toolbar` itself (identity
  * preserved); `'restructure'` extracts the tools into a fresh singleton.
  * While sliding, the two gaps flanking the toolbar are not destinations.
+ *
+ * Restructuring happens only on a highlighted DZ: the sliding-flank veto
+ * mirrors the highlight decision, so hovering a dark gap never moves tools.
+ * Returns the refreshed whole-toolbar flag (also stored on the session).
  */
 export function commitDraggedToTrackSpace(
 	dragging: DraggingState,
 	targetTrack: Track,
 	targetBorder: Border,
 	trackSpaceIndex: number
-): boolean {
-	if (dragging.tools.length === 0) return false
-	const originToolbar = dragging.origin.toolbar
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
+	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	if (isSlidingFlank(dragging, targetTrack, trackSpaceIndex))
+		return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	const originTrack = dragging.origin.kind === 'border' ? dragging.origin.track : undefined
-	const mode = resolveDragMode(dragging)
-	if (mode === 'slide' && originTrack !== undefined && targetTrack === originTrack) {
-		const originSlot = originTrack.findIndex((entry) => entry.toolbar === originToolbar)
-		if (originSlot >= 0) {
-			if (trackSpaceIndex === originSlot || trackSpaceIndex === originSlot + 1) return false
-		}
-	}
+	const mode = dragging.isWholeToolbar ? 'slide' : 'restructure'
 	const taken = takeDraggedTools(dragging, mode)
 	const destination = taken.destination
 	const prunedSlot = taken.prunedSlot
@@ -1266,26 +1777,27 @@ export function commitDraggedToTrackSpace(
 	const placed = targetTrack[insertionIndex]?.toolbar ?? destination
 	dragging.origin = { kind: 'border', toolbar: placed, track: targetTrack, border: targetBorder }
 	refreshDragMode(dragging)
-	return true
+	return { moved: true, isWholeToolbar: dragging.isWholeToolbar }
 }
 
 /**
  * Commit the dragged tools into a stack gap, creating a new single-toolbar
  * track at that stack. The emptied-track veto mirrors the highlight rule: a
  * drag that would empty its origin track cannot land on the two stacks
- * touching that track.
+ * touching that track. Returns the refreshed whole-toolbar flag (also
+ * stored on the session).
  */
 export function commitDraggedToStackSpace(
 	dragging: DraggingState,
 	targetBorder: Border,
 	stackIndex: number
-): boolean {
-	if (dragging.tools.length === 0) return false
-	const mode = resolveDragMode(dragging)
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
+	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	const mode = dragging.isWholeToolbar ? 'slide' : 'restructure'
 	if (dragging.origin.kind === 'border') {
 		const emptied = draggingEmptiesTrackIndex(dragging, targetBorder)
 		if (emptied !== undefined && (stackIndex === emptied || stackIndex === emptied + 1))
-			return false
+			return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	}
 	const originBorder = dragging.origin.kind === 'border' ? dragging.origin.border : undefined
 	const originTrack = dragging.origin.kind === 'border' ? dragging.origin.track : undefined
@@ -1309,24 +1821,26 @@ export function commitDraggedToStackSpace(
 	const placedToolbar = placed[0]?.toolbar ?? destination
 	dragging.origin = { kind: 'border', toolbar: placedToolbar, track: placed, border: targetBorder }
 	refreshDragMode(dragging)
-	return true
+	return { moved: true, isWholeToolbar: dragging.isWholeToolbar }
 }
 
 /**
  * Commit the dragged tools into a parking stack gap, creating a new row at
  * that gap. Parking analogue of `commitDraggedToStackSpace` (no tracks, no
  * spacing to split). The emptied-row veto mirrors the highlight rule.
+ * Returns the refreshed whole-toolbar flag (also stored on the session).
  */
 export function commitDraggedToParkingRow(
 	dragging: DraggingState,
 	targetParking: Parking,
 	gapIndex: number
-): boolean {
-	if (dragging.tools.length === 0) return false
-	const mode = resolveDragMode(dragging)
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
+	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	const mode = dragging.isWholeToolbar ? 'slide' : 'restructure'
 	if (dragging.origin.kind === 'parking') {
 		const emptied = draggingEmptiesParkingRow(dragging, targetParking)
-		if (emptied !== undefined && (gapIndex === emptied || gapIndex === emptied + 1)) return false
+		if (emptied !== undefined && (gapIndex === emptied || gapIndex === emptied + 1))
+			return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	}
 	const originParking = dragging.origin.kind === 'parking' ? dragging.origin.parking : undefined
 	const originRowBefore =
@@ -1348,12 +1862,14 @@ export function commitDraggedToParkingRow(
 	const placed = targetParking[at] ?? destination
 	dragging.origin = { kind: 'parking', toolbar: placed, parking: targetParking, index: at }
 	refreshDragMode(dragging)
-	return true
+	return { moved: true, isWholeToolbar: dragging.isWholeToolbar }
 }
 
 /**
  * Commit the dragged tools into a parking row at an item-space index
- * (ownership-transfer merge into an existing row).
+ * (ownership-transfer merge into an existing row). Restructuring happens
+ * only on a highlighted DZ: dark gaps never move tools. Returns the
+ * refreshed whole-toolbar flag (also stored on the session).
  */
 export function commitDraggedToParking(
 	dragging: DraggingState,
@@ -1361,8 +1877,10 @@ export function commitDraggedToParking(
 	targetParking: Parking,
 	targetIndex: number,
 	itemSpaceIndex: number
-): boolean {
-	if (dragging.tools.length === 0) return false
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
+	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
+	if (!isItemSpaceFree(dragging, targetToolbar, itemSpaceIndex))
+		return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	pruneDragOrigin(dragging)
 	const clampedIndex = Math.min(Math.max(itemSpaceIndex, 0), targetToolbar.length)
 	targetToolbar.splice(clampedIndex, 0, ...dragging.tools)
@@ -1374,7 +1892,7 @@ export function commitDraggedToParking(
 		index: Math.min(Math.max(targetIndex, 0), Math.max(targetParking.length - 1, 0)),
 	}
 	refreshDragMode(dragging)
-	return true
+	return { moved: true, isWholeToolbar: dragging.isWholeToolbar }
 }
 
 /**
@@ -1386,7 +1904,7 @@ export function moveToolbarToTrack(
 	targetTrack: Track,
 	targetBorder: Border,
 	trackSpaceIndex: number
-): boolean {
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
 	return commitDraggedToTrackSpace(dragging, targetTrack, targetBorder, trackSpaceIndex)
 }
 
@@ -1398,7 +1916,7 @@ export function moveToolbarToStack(
 	dragging: DraggingState,
 	targetBorder: Border,
 	stackIndex: number
-): boolean {
+): { readonly moved: boolean; readonly isWholeToolbar: boolean } {
 	return commitDraggedToStackSpace(dragging, targetBorder, stackIndex)
 }
 
