@@ -74,9 +74,11 @@ test('dragging the last tool highlights the track gap after the toolbar', async 
 		await expect
 			.poll(
 				() =>
-					border.locator(
-						'.toolbar-track-space.toolbar-drop-zone[data-track-space-index="1"].highlighted'
-					).count(),
+					border
+						.locator(
+							'.toolbar-track-space.toolbar-drop-zone[data-track-space-index="1"].highlighted'
+						)
+						.count(),
 				{ timeout: 3000 }
 			)
 			.toBeGreaterThan(0)
@@ -103,9 +105,11 @@ test('dragging the first tool highlights the track gap before the toolbar', asyn
 		await expect
 			.poll(
 				() =>
-					border.locator(
-						'.toolbar-track-space.toolbar-drop-zone[data-track-space-index="0"].highlighted'
-					).count(),
+					border
+						.locator(
+							'.toolbar-track-space.toolbar-drop-zone[data-track-space-index="0"].highlighted'
+						)
+						.count(),
 				{ timeout: 3000 }
 			)
 			.toBeGreaterThan(0)

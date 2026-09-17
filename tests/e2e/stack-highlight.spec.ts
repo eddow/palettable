@@ -66,7 +66,9 @@ test('dragging a tool over a track highlights the flanking stack gaps', async ({
 				() => border.locator(':scope > .toolbar-stack-space.toolbar-drop-zone.highlighted').count(),
 				{ timeout: 3000 }
 			)
-			.toBeGreaterThan(0)
+			// Both flanking gaps paint — a single gap means the track-background
+			// hover was misrouted to a direct `stack-gap` hover.
+			.toBe(2)
 	} finally {
 		await page.mouse.up()
 	}

@@ -8,6 +8,9 @@
  */
 
 import { configuration } from './configuration.js'
+// One-way: `drag.ts` takes the engine by injection (see `DragEngine`), so it
+// never imports this module at runtime and there is no cycle.
+import { createToolbarDrag, type GrabTarget, type ToolbarDrag } from './drag.js'
 import { PaletteError } from './errors.js'
 import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
@@ -439,12 +442,16 @@ export class PaletteLayoutTree {
 	 * `measure` / `end`, all `void`). Resolves the grab target against the
 	 * live tree and throws when it is not there (a drawer child). The
 	 * session holds this tree, so no session method ever takes a layout
-	 * parameter. Implemented in `drag.ts` (prototype assignment there —
-	 * importing `@palettable/core` wires it up); declared here so the
-	 * method is visible on the class.
+	 * parameter.
 	 */
-	createDrag(_target: import('./drag.js').GrabTarget): import('./drag.js').ToolbarDrag {
-		throw new PaletteError(`createDrag: drag module not loaded`)
+	createDrag(target: GrabTarget): ToolbarDrag {
+		return createToolbarDrag(this, target, {
+			dragStart,
+			dragOver,
+			commitDraggedToStackSpace,
+			commitDraggedToParkingRow,
+			stackFlanks,
+		})
 	}
 
 	/** Remove all layout listeners (adapter teardown). Layout is kept. */
@@ -1005,6 +1012,8 @@ export function isDraggedToolbarAt(
  * tools are the *entire* content of their current toolbar (nothing else is
  * left behind), `'restructure'` otherwise.
  *
+ * @deprecated Phase 7 — becomes a session internal; do not add new callers.
+ *
  * This is the single question the whole drag engine asks: *"is there anything
  * else than `dragging` in my toolbar?"* — no → the toolbar itself moves;
  * yes → the selection is a subset being restructured.
@@ -1020,6 +1029,8 @@ export function resolveDragMode(dragging: DraggingState): DragMode {
  * their own — and a slide can *become* a restructure once a merge puts other
  * items back beside it. Also refreshes the stored `isWholeToolbar` flag so
  * adapters always read the current value. Returns the new mode.
+ *
+ * @deprecated Phase 7 — becomes a session internal; do not add new callers.
  */
 export function refreshDragMode(dragging: DraggingState): DragMode {
 	dragging.mode = resolveDragMode(dragging)
@@ -1032,6 +1043,8 @@ export function refreshDragMode(dragging: DraggingState): DragMode {
  * drag-start. Adapters must use this (never a literal) so the stored flag
  * and `mode` start in sync; every commit refreshes both via
  * `refreshDragMode`.
+ *
+ * @deprecated Phase 7 — the session resolves the grab target itself; do not add new callers.
  *
  * NOTE: `startDraggingState` is the legacy entry point (tools + origin
  * only). New code should use `dragStart` below, which takes the grabbed
@@ -1059,7 +1072,11 @@ export function startDraggingState(options: {
 // arrays from `getLayout()`); position is an abstract slot/gap index plus
 // the pointer pixel (for slide-follow), never DOM.
 
-/** Element the pointer grabbed or hovered: a tool, a toolbar, or a DZ gap. */
+/**
+ * Element the pointer grabbed or hovered: a tool, a toolbar, or a DZ gap.
+ *
+ * @deprecated Phase 7 — replaced by the session `Hoverable` vocabulary; do not add new uses.
+ */
 export type DragElement =
 	| { readonly kind: 'tool'; readonly toolbar: Toolbar; readonly item: ToolbarItem }
 	| { readonly kind: 'toolbar'; readonly toolbar: Toolbar }
@@ -1099,7 +1116,11 @@ export type DragElement =
 			readonly gap: number
 	  }
 
-/** Pointer position: abstract indices (resolved by the adapter's hit test). */
+/**
+ * Pointer position: abstract indices (resolved by the adapter's hit test).
+ *
+ * @deprecated Phase 7 — replaced by `PointerSample` + `SlideFrame`; do not add new uses.
+ */
 export type DragPointer = {
 	/** Item index under the pointer (active-item fallback), if any. */
 	readonly activeItem?: number
@@ -1107,7 +1128,11 @@ export type DragPointer = {
 	readonly client?: number
 }
 
-/** What the core decided on drag-over: highlight paint + optional commit. */
+/**
+ * What the core decided on drag-over: highlight paint + optional commit.
+ *
+ * @deprecated Phase 7 — methods return `void` and raise `DragEvent`s; do not add new readers.
+ */
 export type DragOverDecision = {
 	/** Item-space gaps to paint per toolbar (adapter applies as classes). */
 	readonly itemHighlights: readonly {
@@ -1155,6 +1180,8 @@ function locateToolbar(
  * Core drag-start: given the grabbed element (tool or toolbar) plus the
  * pointer position, build the session. The core decides whole-toolbar vs
  * subset from the live layout — the adapter never derives it.
+ *
+ * @deprecated Phase 7 — creation is `layout.createDrag(target)`; do not add new callers.
  */
 export function dragStart(
 	layout: { readonly borders: Borders; readonly parking: Parking },
@@ -1198,6 +1225,8 @@ export function dragStart(
  * core decides the action (restructure into a highlighted DZ, translate the
  * sliding toolbar); the adapter applies the returned paint sets as classes
  * and re-renders on `moved`.
+ *
+ * @deprecated Phase 7 — the session `over()` raises `DragEvent`s; do not add new callers.
  *
  * Restructuring happens ONLY on a highlighted DZ: hovering a dark gap
  * returns `moved: false` with no paint for that gap.
@@ -1523,6 +1552,28 @@ export function borderStackHighlight(options: {
 }
 
 /**
+ * The two stack gaps flanking `trackIndex` in `border` (the "active track"
+ * fallback), with the would-be-emptied-track veto applied — the paint every
+ * in-track hover derives in addition to its own DZs (`Hoverable` carries no
+ * `track-background` kind; this is how a track hover lights its neighbours).
+ * Empty when both flanking stacks are vetoed (the drag would empty the track).
+ */
+export function stackFlanks(
+	dragging: DraggingState | undefined,
+	border: Border,
+	trackIndex: number
+): readonly number[] {
+	const emptied = draggingEmptiesTrackIndex(dragging, border)
+	const out: number[] = []
+	for (const gap of [trackIndex, trackIndex + 1]) {
+		if (gap < 0 || gap > border.length) continue
+		if (emptied !== undefined && (gap === emptied || gap === emptied + 1)) continue
+		out.push(gap)
+	}
+	return out
+}
+
+/**
  * Parking stack gaps (`parking.length + 1` of them): same protocol as border
  * stacks, with the would-be-emptied row veto.
  */
@@ -1642,6 +1693,8 @@ function isSlidingFlank(dragging: DraggingState, track: Track, gap: number): boo
  * the last gap of the previous toolbar and the first gap of the next
  * toolbar. Returns the `{ toolbar, gap }` pairs the adapter should paint
  * (empty when not a whole-toolbar border drag, or no neighbours exist).
+ *
+ * @deprecated Phase 7 — the return-value form goes away with `DragOverDecision`; do not add new callers.
  */
 export function wholeToolbarNeighbourEdges(options: {
 	track: Track

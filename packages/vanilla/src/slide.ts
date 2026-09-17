@@ -48,6 +48,8 @@ export function toolbarSlideBounds(
  * (relative to the toolbar's resting position). `bounds.start` is the
  * *leading gap's* edge; `offset0` is the toolbar's resting offset inside
  * that span, so the result is a `transform`-ready shift from resting.
+ *
+ * @deprecated Phase 4 — the arithmetic moves to core; do not add new callers.
  */
 export function clampSlideDelta(
 	bounds: SlideBounds,

@@ -24,6 +24,8 @@ const prevByRoot = new WeakMap<HTMLElement, PrevDecision>()
  * `parkingGapIndex`, `itemSpaceIndex`, `trackSpaceIndex`). Only changed
  * indices are touched; the previous decision is remembered per `root` (a
  * rebuilt root starts fresh, which is exactly what a structural sync wants).
+ *
+ * @deprecated Phase 7 — highlight arrives as per-gap `DragEvent`s; do not add new callers.
  */
 export function syncGapClasses(
 	root: HTMLElement,

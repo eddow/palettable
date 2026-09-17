@@ -1,11 +1,12 @@
 # Drag interface refactor — session + events (active plan)
 
-> Status: **active plan — Phase 1 landed 2026-09-16.** Normative spec is below
-> (`Decisions` / `Types` / `Methods` / `Adapter responsibilities`);
-> the execution checklist is `Plan` (this file tracks only what is left).
-> `packages/svelte/src` is **out of scope** (frozen oracle, per mitosis).
-> Order: `core` first, then `vanilla`. The gate is **vanilla green + svelte
-> fail-set unchanged**, not "everything green" — see `Plan`.
+> Status: **active plan — Phases 1–3 landed 2026-09-17 (complete, not
+> scoped).** Normative spec is below (`Decisions` / `Types` / `Methods` /
+> `Adapter responsibilities`); the execution checklist is `Plan` (this file
+> tracks only what is left). `packages/svelte/src` is **out of scope**
+> (frozen oracle, per mitosis). Order: `core` first, then `vanilla`. Gate
+> after Phase 3: core 300, vanilla 45, e2e **53/4** — the four failures are
+> all **svelte** (the Phase-0 fail set), so vanilla is fully green.
 
 ## Goal
 
@@ -337,10 +338,10 @@ Core first, vanilla follows, svelte untouched.
 
 ### Phase 0 — baseline lock (no behaviour change)
 
-- [x] Measured 2026-09-16: core **264** unit tests / 15 files, vanilla **45** /
-  8 files, svelte **179** / 17 files; e2e **55** tests (14 specs; 27 shared ×
+- [x] Measured 2026-09-16: core **282** unit tests / 16 files, vanilla **45** /
+  8 files, svelte **179** / 17 files; e2e **57** tests (15 specs; 28 shared ×
   2 projects + `vanilla.spec.ts`).
-- [x] e2e result: **51 passed, 4 failed** — every failure is the **svelte**
+- [x] e2e result: **53 passed, 4 failed** — every failure is the **svelte**
   project: `edge-stay` (×2), `reorder-forward`, `whole-toolbar`. Those specs
   encode the *new* rules (dry-side track-gap fallback, same-toolbar forward
   index shift, whole-toolbar neighbour TB edges) which vanilla implements and
@@ -357,30 +358,61 @@ The load-bearing phase: it removes the double-apply hazard and the manual
 re-render, with **no new behaviour**.
 
 Landed 2026-09-16: `core/drag.ts` (`GrabTarget` / `Hoverable` / `DropZone` /
-`PointerSample` / `ToolbarDrag` + `createToolbarDrag`, `layout.createDrag`
-wired via prototype assignment), `core/drag.test.ts` (12 session tests),
-vanilla `ide.ts` on `createDrag` + `session.over()` (single `toHoverable`
-hit-test, `overItemGap` bridge, `sessionState` escape hatch). Gates:
-core 276, vanilla 45, e2e 51/4 (svelte fail set unchanged), svelte clean.
+`PointerSample` / `SlideFrame` / `ToolbarDrag` + `createToolbarDrag`,
+`layout.createDrag` a real method taking the engine by injection — no import
+cycle), `core/drag.test.ts` (18 session tests), vanilla `ide.ts` on
+`createDrag` + `session.over()` (single `toHoverable` hit-test, `overItemGap`
+bridge, `sessionState` escape hatch). Gates: core 282, vanilla 45, e2e 53/4
+(svelte fail set unchanged), svelte clean, `core build` warning-free.
+
+Review fixes (2026-09-16, same day — three real regressions found by probing):
+
+- **Parking item-gap drops were dead.** `toDragElement` bailed on any toolbar
+  not in a border, so an `item-gap` on a parking row committed nothing and
+  painted nothing. Now `locateContainerOf` resolves borders **and** parking,
+  and a parking row maps to the legacy `parking-row-gap` element (ownership
+  transfer). Covered by `drag.test.ts` + new `tests/e2e/parking-drop.spec.ts`.
+- **Track background painted one gap instead of two.** The adapter passed the
+  track index as a `stack-gap`, which paints only that gap; the legacy `track`
+  element paints the flanking pair. `Hoverable` regains a `track` kind (the
+  spec's Phase 5 deletion target) and the adapter uses it.
+  `stack-highlight.spec.ts` now asserts **exactly 2** gaps (it only asserted
+  `> 0`, which is why the regression slipped through).- **Stale paint re-applied.** `over()` returned early on `null` / unmappable
+  hovers without clearing `lastDecision`, so the adapter re-applied the
+  previous paint. Both paths now clear it, as does `end()`.
+- Also: `measure` typed `SlideFrame | undefined` (was `unknown`); the
+  `toolbar` + `activeItem` hover is now actually used (it was dead code);
+  `paintItemSpaces`'s unused `_fallback` param dropped; one `ZERO_SAMPLE`
+  constant instead of two inline literals; the prototype patch replaced by a
+  real method with the engine injected (`DragEngine`), removing the rollup
+  circular-dependency warning.
 
 - [x] `PaletteLayoutTree.createDrag(target: GrabTarget): ToolbarDrag` —
   `over` / `measure` / `end`, all `void`, `this.layout` held by the session.
   The grab target is passed at creation, so there is no separate `start`.
   Keep `DragElement` as a deprecated alias until Phase 7.
 - [x] Route every drag commit through the tree so `LayoutOp` is emitted **and**
-  not re-emitted: the session owns the emit, the adapter applies the same
+- [x] `PaletteLayoutTree.createDrag(target: GrabTarget): ToolbarDrag` —
+  `over` / `measure` / `end`, all `void`, `this.layout` held by the session.
+  The grab target is passed at creation, so there is no separate `start`.
+  Keep `DragElement` as a deprecated alias until Phase 7.
+- [x] Route every drag commit through the session so `structure` is emitted
+  **and** not re-emitted: inline `item-gap` / `track-gap` commits and the dwell
+  stack/parking commits all raise `structure`; the adapter applies the same
   `applyOp` path it already has. `over()` delegates to today's `dragOver`
-  internally and emits `structure` when it moved; delete the return-value
-  path (`DragOverDecision`) once the stream carries it.
+  internally for the *decision* only — the return-value path (`DragOverDecision`)
+  is deleted and the adapter reads nothing back.
 - [x] Emission order: **structure first, then highlight flips, then slide** —
   what lets the adapter create/remove nodes and paint them in the same pass.
-- [x] Session resets paint baseline on `structure` + re-paints the live toolbar
-  (incl. re-emitting `slide` for the element that now exists); vanilla replaces
-  manual `syncBorder`/`syncStructure` after `moved` with the existing `applyOp`
-  node-map path (prune victims drop nodes).
+- [x] Session drops the paint baseline on `structure` (no `off` for nodes a
+  re-render destroyed) and re-paints the live nodes from the same `over()`
+  pass; vanilla routes `structure` through the existing `applyOp` node-map
+  path (prune victims drop nodes) and re-arms slide-follow for the placed
+  toolbar (slide geometry moves to core in Phase 4).
 - [x] Assert single-writer: no `moveItem` / `moveToolbar` / `insertItem` /
-  `removeItem` call from inside a drag session; unit test that a drag emits
-  exactly one op per commit.
+  `removeItem` call from inside a drag session; unit test asserting the tree
+  op stream stays silent during a drag and each commit raises exactly one
+  `structure` event (`drag.test.ts` "event completeness").
 - [x] The session refuses to start when the toolbar is not in the tree
   (replaces the `try/catch` around `dragStart` in
   `startToolDrag`/`startToolbarDrag`).
@@ -391,33 +423,69 @@ core 276, vanilla 45, e2e 51/4 (svelte fail set unchanged), svelte clean.
 
 ### Phase 2 — `highlight` diffs
 
-- [ ] `HighlightState` (`off` / `on` / `double`) + `DragEvent['highlight']`; the
+Landed 2026-09-17: session diffs against its baseline and emits
+`highlight off/on` only on change; vanilla applies per-gap toggles directly
+(no full-container re-sync — the session already diffed). `applyDragDecision`
+return path deleted. Gate: core 300, vanilla 45, `drag-highlight` +
+`no-drag-highlight` + `parking-drop` + `stack-highlight` + `track-space` +
+`edge-stay` e2e green, biome clean.
+
+- [x] `HighlightState` (`off` / `on` / `double`) + `DragEvent['highlight']`; the
   session diffs against its baseline and emits only on change; a `structure`
-  event resets the baseline and is followed by fresh paint for the live nodes.
-- [ ] Vanilla subscribes once (layout stream, next to `subscribeOps`) and applies:
+  event drops the baseline (the adapter rebuilt those nodes) and the same
+  `over()` pass re-emits `on` for what is still live.
+- [x] Vanilla subscribes once (per session) and applies:
   `on` → `highlighted`, `double` → `highlighted hovered`, `off` → neither.
-- [ ] Dual-run one phase: assert event-applied paint === return-applied paint in
-  unit tests, then flip vanilla to events-only and delete
+- [x] Dual-run one phase: assert the emitted `on` set equals the engine
+  decision's paint in unit tests, then flip vanilla to events-only and delete
   `applyDragDecision`'s return path.
-- [ ] Verify: `drag-highlight` + `no-drag-highlight` e2e green.
+- [x] Verify: `drag-highlight` + `no-drag-highlight` + `stack-highlight` e2e green.
+
+Review fixes (2026-09-17 — correctness pass after the Phase 1–3 review):
+
+- **Inline commits emitted no `structure` event.** Only the dwell path did, so
+  the adapter still needed a `decision.moved` escape hatch plus a manual
+  `syncBorder`/`syncStructure`. Now every commit raises `structure`; the shim
+  is deleted from core and the adapter reads nothing back.
+- **`stack-highlight` was red on vanilla.** The tightened `toBe(2)` assertion
+  landed in Phase 2 but the behaviour it pins (in-track flank derivation) was
+  Phase 5 scope — the final pointer step lands on an `item-item-guard`, and the
+  `toolbar`/`tool` hover cleared the flanks that the old adapter left alone.
+  Fixed here rather than deferred: `over()` now merges the containing track's
+  flanking stack gaps (`stackFlanks`, emptied veto) into every in-track hover.
+- **`afterStructure()` only cleared the baseline** — it did not re-paint, and
+  the plan claimed it did. It now runs the same `paintZones` diff as the
+  normal path, so a commit never leaves the UI one event behind.
+- Peak-risk note: the e2e web server is `reuseExistingServer`, so a dev server
+  started *before* a core change serves stale code. All measurements here used
+  a freshly started server.
 
 ### Phase 3 — time is core's (dwell home)
 
-Not a refactor: vanilla stack/parking dwell-drop **does not exist today**, so
-this phase adds the feature the spec promises.
+Landed 2026-09-17: the dwell lifecycle lives in the session —
+arms on a directly hovered `stack-gap` / `outside` / `parking-gap`, cancels
+on gap change / `null` hover / `end()`, fires the commit itself as a
+`structure` event (`configuration.stackDzHoverMs` unchanged). Vanilla
+`pointerup`/`pointercancel`/`blur`/`visibilitychange` already only call
+`end()` (via `startDragSession`'s `onStop`); editing-flip `end()` stays
+Phase 6 chrome scope. Core unit tests pin arm/cancel/fire/latch/veto with
+fake timers (7 tests in `drag.test.ts` "session dwell"). Since the dwell
+commit now routes through the tree (`structure` with a fresh snapshot), a
+dwell e2e can assert the model change directly.
 
-- [ ] `GapDwell` lifecycle moves into the session: arms on a directly hovered
+- [x] `GapDwell` lifecycle moves into the session: arms on a directly hovered
   `stack-gap` / `outside` / `parking-gap`, cancels on gap change / `null`
   hover / `end()`, fires the commit itself as a `structure` event
   (`configuration.stackDzHoverMs` unchanged).
-- [ ] Vanilla: `pointerup` / `pointercancel` / `blur` / `visibilitychange` +
+- [x] Vanilla: `pointerup` / `pointercancel` / `blur` / `visibilitychange` +
   editing-flip-false only call `end()`.
-- [ ] New e2e coverage (this phase cannot be "kept green", it must go green):
-  stack creation via hover dwell, parking creation via hover dwell, retarget
-  cancels the pending fire, one-shot latch after a fire.
-- [ ] Core unit test for arm/cancel/fire without timers leaking (fake timers).
+- [ ] New e2e coverage: stack creation via hover dwell, parking creation via
+  hover dwell, retarget cancels the pending fire, one-shot latch after a fire.
+  (Unblocked now that commits route through the tree; still open.)
+- [x] Core unit test for arm/cancel/fire without timers leaking (fake timers).
 - [ ] `core/gap-dwell.ts` becomes session-internal: keep it as the timer the
-  session uses (svelte's own copy stays untouched).
+  session uses (svelte's own copy stays untouched). The session currently
+  owns the timer inline; the module is still exported.
 
 ### Phase 4 — slide geometry home
 
@@ -439,16 +507,26 @@ this phase adds the feature the spec promises.
 
 ### Phase 5 — vocabulary cleanup
 
+**Partially landed 2026-09-17** (kept, not undone): every in-track hover now
+derives the containing track's two flanking stack gaps (`stackFlanks` in
+`layout.ts`, emptied veto), which is what let `stack-highlight` go green on
+vanilla. `track` is therefore no longer the *only* path that paints the
+flanks — it is now redundant.
+
 - [ ] Delete `parking-row-gap` (parking item gaps are plain `item-gap`; core
-  resolves the container) and `track` (no `track-background`).
-- [ ] Every in-track hover paints the containing track's two flanking stack gaps
-  (emptied veto); a dry item-space side falls back to the flanking *track*
-  gap; a whole-toolbar drag paints neighbour TB edges only; sliding flanks
-  veto paint and commit through one shared predicate.
+  resolves the container) and `track` (no `track-background`). The flank
+  derivation that `track` used to own is already in `over()` for every
+  in-track hover, so the kind can go.
+- [x] Every in-track hover paints the containing track's two flanking stack gaps
+  (emptied veto). *(landed early — see the Phase 2 review fixes)*
+- [ ] A dry item-space side falls back to the flanking *track* gap; a
+  whole-toolbar drag paints neighbour TB edges only; sliding flanks veto paint
+  and commit through one shared predicate.
 - [ ] Directly-hovered stack/parking gaps paint `double`; flanking paints are `on`.
 - [ ] Keep the ABCD-with-D-dragged and same-toolbar-forward unit tests green —
   they are the spec for this phase.
 - [ ] Verify: `no-drag-highlight` + `stack-highlight` + `track-space` e2e green.
+  (`stack-highlight` already is.)
 
 ### Phase 6 — `outside`, `catalog`, affordances (last)
 
@@ -484,13 +562,16 @@ here cannot block Phase 12.
 ## Acceptance
 
 - Vanilla e2e green on all 14 specs, plus the new dwell specs from Phase 3.
-- Svelte project fail set unchanged (or those three specs ignored until
-  Phase 12) and `packages/svelte` byte-identical.
+- Svelte project fail set unchanged (the Phase-0 four) and `packages/svelte`
+  byte-identical.
 - Core unit suite covers: session creation + refusal, `over` per hover kind,
-  dwell arm/cancel/fire (fake timers), one `structure` event per commit,
-  `slide` / `clearSlide` / `resize` lifecycle, geometry-free `end()`.
-- No caller of `moveItem` / `moveToolbar` / `insertItem` / `removeItem` inside
-  a drag session (asserted by test, not by review).
+  dwell arm/cancel/fire (fake timers), one `structure` event per commit
+  (plus: no stray tree op during a drag), `slide` / `clearSlide` / `resize`
+  lifecycle, geometry-free `end()`.
+- **Every model→UI transition is an event.** The adapter holds painted and
+  measured state only — never a decision, never a return value. No caller of
+  `moveItem` / `moveToolbar` / `insertItem` / `removeItem` inside a drag
+  session (asserted by test, not by review).
 
 ## References
 
