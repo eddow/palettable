@@ -1,13 +1,16 @@
 /**
- * `@palettable/vanilla` — slide math + add-item builder probes.
+ * `@palettable/vanilla` — slide math (single-copy check) + add-item builder probes.
  *
- * `clampSlideDelta` is pure arithmetic (no DOM): clamp the pointer into the
- * free span, return the shift from resting. `itemFromAddSelection` builds a
- * `ToolbarItem` from a console add-flow selection without touching layout.
+ * `clampSlideDelta` lives in core (the single copy of the slide arithmetic);
+ * the vanilla re-export keeps the old import path compiling until the Phase 7
+ * close-out deletes it. `itemFromAddSelection` builds a `ToolbarItem` from a
+ * console add-flow selection without touching layout.
  */
+
+import { clampSlideDelta as clampSlideDeltaCore } from '@palettable/core'
 import { describe, expect, it } from 'vitest'
 import { itemFromAddSelection } from './add-item.js'
-import { clampSlideDelta } from './slide.js'
+import { clampSlideDelta, extractionGrabOffset } from './slide.js'
 
 describe('clampSlideDelta', () => {
 	const bounds = { start: 100, available: 200 }
@@ -21,6 +24,58 @@ describe('clampSlideDelta', () => {
 	})
 	it('accounts for the grab offset', () => {
 		expect(clampSlideDelta(bounds, 40, 190, 10)).toBe(40)
+	})
+	it('matches the core single copy', () => {
+		// Same numbers through both spellings: the vanilla wrapper is the
+		// core arithmetic, not a fork.
+		const frame = { axis: 'horizontal' as const, start: 100, available: 200, resting: 40, grab: 0 }
+		expect(clampSlideDelta(bounds, 40, 180, 0)).toBe(clampSlideDeltaCore(frame, 180))
+		expect(clampSlideDelta(bounds, 40, -1000, 0)).toBe(clampSlideDeltaCore(frame, -1000))
+		expect(clampSlideDelta(bounds, 40, 10000, 0)).toBe(clampSlideDeltaCore(frame, 10000))
+	})
+})
+
+describe('extractionGrabOffset', () => {
+	// Fresh singleton toolbar at left 200, width 60; the dragged button
+	// sits at left 210 (10px inside the toolbar); mousedown was 5px
+	// inside the button → grab = 10 + 5 = 15 (pointer stays on the icon).
+	const toolbarAt = (left: number, width: number) =>
+		({
+			getBoundingClientRect: () => ({ left, top: 0, width, height: 20 }),
+		}) as unknown as HTMLElement
+	const buttonAt = (left: number, width: number) =>
+		({
+			getBoundingClientRect: () => ({ left, top: 0, width, height: 20 }),
+		}) as unknown as HTMLElement
+	it('adds the intra-button offset to the button fresh offset', () => {
+		expect(
+			extractionGrabOffset({
+				toolbarElement: toolbarAt(200, 60),
+				buttonElement: buttonAt(210, 40),
+				buttonGrab: { x: 5, y: 0 },
+				direction: 'horizontal',
+			})
+		).toBe(15)
+	})
+	it('falls back to the middle when the button is unmeasurable', () => {
+		expect(
+			extractionGrabOffset({
+				toolbarElement: toolbarAt(200, 60),
+				buttonElement: undefined,
+				buttonGrab: { x: 5, y: 0 },
+				direction: 'horizontal',
+			})
+		).toBe(30)
+	})
+	it('falls back to the middle when the offset lands outside the toolbar', () => {
+		expect(
+			extractionGrabOffset({
+				toolbarElement: toolbarAt(200, 60),
+				buttonElement: buttonAt(500, 40),
+				buttonGrab: { x: 5, y: 0 },
+				direction: 'horizontal',
+			})
+		).toBe(30)
 	})
 })
 

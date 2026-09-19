@@ -11,7 +11,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { configuration } from './configuration.js'
 import type { DragEvent, GrabTarget, Hoverable } from './drag.js'
-import { dragOver, dragStart, PaletteLayoutTree, type SerializedLayout } from './layout.js'
+import {
+	dragOver,
+	dragStart,
+	type LayoutPruneVictim,
+	PaletteLayoutTree,
+	type SerializedLayout,
+} from './layout.js'
 
 afterEach(() => {
 	vi.useRealTimers()
@@ -188,6 +194,150 @@ describe('createDrag session shell', () => {
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 10, grab: 5 })
 		session.measure(undefined)
+		session.end()
+	})
+})
+
+describe('slide geometry home (Phase 4)', () => {
+	function wholeToolbarLayout(): SerializedLayout {
+		return {
+			version: 1,
+			borders: {
+				top: [
+					{ space: 0.2, toolbar: [{ tool: 'a' }] },
+					{ space: 0.3, toolbar: [{ tool: 'b' }] },
+				],
+				right: [],
+				bottom: [],
+				left: [],
+			},
+			parking: [],
+		}
+	}
+
+	it('clampSlideDelta clamps the pointer into the free span, from resting', async () => {
+		const { clampSlideDelta } = await import('./drag.js')
+		const frame = { axis: 'horizontal' as const, start: 100, available: 200, resting: 40, grab: 0 }
+		expect(clampSlideDelta(frame, 180)).toBe(40)
+		expect(clampSlideDelta(frame, -1000)).toBe(-40)
+		expect(clampSlideDelta(frame, 10000)).toBe(160)
+		const grabbed = { ...frame, grab: 10 }
+		expect(clampSlideDelta(grabbed, 190)).toBe(40)
+	})
+
+	it('emits slide for a whole-toolbar drag with a frame, clearSlide on disarm', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		// Lone tool in its toolbar: whole-toolbar slide from the start.
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 10, grab: 5 })
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 60, clientY: 0 })
+		const slides = events.filter((event) => event.type === 'slide')
+		expect(slides).toHaveLength(1)
+		expect(slides[0]).toMatchObject({ toolbar, delta: 45 })
+		session.measure(undefined)
+		expect(events.some((event) => event.type === 'clearSlide')).toBe(true)
+		session.end()
+	})
+
+	it('available: 0 stays armed (no slide) and is distinct from disarm', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.measure({ axis: 'horizontal', start: 0, available: 0, resting: 0, grab: 0 })
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 50, clientY: 0 })
+		expect(events.some((event) => event.type === 'slide')).toBe(false)
+		expect(events.some((event) => event.type === 'clearSlide')).toBe(false)
+		session.end()
+	})
+
+	it('a gesture with no slide emits no resize (resting position)', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		// Pointer exactly at resting (start 0 + grab 5 + resting 10 = 15):
+		// delta 0, no slide, and end() commits nothing.
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 10, grab: 5 })
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 15, clientY: 0 })
+		expect(events.some((event) => event.type === 'slide')).toBe(false)
+		session.end()
+		expect(events.some((event) => event.type === 'resize')).toBe(false)
+	})
+
+	it('end() commits the cached split as resize, then clearSlide, then off', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 10, grab: 5 })
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 60, clientY: 0 })
+		session.end()
+		const types = events.map((event) => event.type)
+		const resizeAt = types.lastIndexOf('resize')
+		const clearAt = types.lastIndexOf('clearSlide')
+		expect(resizeAt).toBeGreaterThan(-1)
+		expect(clearAt).toBeGreaterThan(resizeAt)
+		const resize = events[resizeAt]
+		if (resize?.type !== 'resize') throw new Error('expected resize')
+		// (resting 10 + delta 45) / available 100 = 0.55.
+		expect(resize.split).toBeCloseTo(0.55)
+		expect(resize.index).toBe(0)
+		// The model moved: the single-toolbar track's leading space now
+		// holds 55% of the whole span (0.2 + trailing 0.8 merged, then split).
+		const track = live.borders.top[0] ?? []
+		expect(track[0]?.space).toBeCloseTo(0.55)
+	})
+
+	it('a subset drag never slides (no frame effect)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 10, grab: 5 })
+		session.over({ kind: 'tool', toolbar, item }, sample)
+		expect(events.some((event) => event.type === 'slide')).toBe(false)
+		session.end()
+		expect(events.some((event) => event.type === 'resize')).toBe(false)
+	})
+
+	it('stays armed across a structure event (adapter re-measures)', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		const frame = { axis: 'horizontal' as const, start: 0, available: 100, resting: 10, grab: 5 }
+		session.measure(frame)
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 60, clientY: 0 })
+		expect(events.filter((event) => event.type === 'slide')).toHaveLength(1)
+		// A slide relocation commits a structure but keeps the toolbar identity —
+		// the follow stays armed, and the re-measured frame slides again.
+		const target = live.borders.top[1] ?? []
+		session.over({ kind: 'track-gap', track: target, gap: 0 }, { clientX: 60, clientY: 0 })
+		expect(events.some((event) => event.type === 'structure')).toBe(true)
+		session.measure(frame)
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 70, clientY: 0 })
+		expect(events.filter((event) => event.type === 'slide')).toHaveLength(3)
 		session.end()
 	})
 })
@@ -404,6 +554,131 @@ describe('event completeness (every transition is an event)', () => {
 		session.end()
 		expect(ops).toEqual([])
 	})
+
+	it('an inline item-gap commit raises a move-toolbar op (not replace)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const a = live.borders.top[0]?.[0]?.toolbar ?? []
+		const c = live.borders.top[1]?.[0]?.toolbar ?? []
+		const item = a[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar: a, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'item-gap', toolbar: c, gap: 1 }, sample)
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		expect(structure.op.toolbar).toBe(c)
+		// Restructure: `from` is the pre-mutation origin (where the tools
+		// came from), `to` is where they landed — one event covers both.
+		expect(structure.op.from).toEqual({
+			container: 'border',
+			region: 'top',
+			trackIndex: 0,
+			toolbarIndex: 0,
+		})
+		expect(structure.op.to).toBeDefined()
+		session.end()
+	})
+
+	it('a track-gap commit raises a move-toolbar op', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const a = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = a[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar: a, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'track-gap', track: live.borders.top[1] ?? [], gap: 1 }, sample)
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		session.end()
+	})
+
+	it('a dwell stack-gap commit raises a move-toolbar op', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const a = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = a[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar: a, item })
+		const { events } = collectEvents(session)
+		// Hover a stack gap to arm the dwell.
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 1 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs)
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		session.end()
+		vi.useRealTimers()
+	})
+
+	it('a slide release raises a move-toolbar op', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const session = tree.createDrag({ kind: 'toolbar', toolbar })
+		const { events } = collectEvents(session)
+		// Arm slide follow.
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 50, grab: 25 })
+		// Pass a null hover with a pointer that produces a non-zero delta
+		// (raw = 100-25-0 = 75, clamped = 75, delta = 75-50 = 25).
+		session.over(null, { clientX: 100, clientY: 0 })
+		session.end()
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		// Slide: same toolbar identity, from and to both defined.
+		expect(structure.op.from).toBeDefined()
+		expect(structure.op.to).toBeDefined()
+	})
+
+	it('a restructure commit carries pruned origin toolbar when emptied', () => {
+		// Use a layout where the origin toolbar has exactly one item, so
+		// dragging it out empties and prunes the toolbar.
+		const singleItemLayout: SerializedLayout = {
+			version: 1,
+			borders: {
+				top: [
+					{ space: 1, toolbar: [{ tool: 'x' }] },
+					{ space: 1, toolbar: [{ tool: 'y' }] },
+				],
+				right: [],
+				bottom: [],
+				left: [],
+			},
+			parking: [],
+		}
+		const tree = new PaletteLayoutTree(singleItemLayout)
+		const live = tree.getLayout()
+		const x = live.borders.top[0]?.[0]?.toolbar ?? []
+		const y = live.borders.top[1]?.[0]?.toolbar ?? []
+		const item = x[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar: x, item })
+		const { events } = collectEvents(session)
+		// Move the only tool from `x` into `y` — `x` should be pruned.
+		session.over({ kind: 'item-gap', toolbar: y, gap: 1 }, sample)
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		// The origin toolbar `x` should be in pruned.
+		expect(structure.op.pruned.length).toBeGreaterThan(0)
+		expect(structure.op.pruned.some((v: LayoutPruneVictim) => v.toolbar === x)).toBe(true)
+		session.end()
+	})
 })
 
 describe('highlight diff events (Phase 2)', () => {
@@ -438,11 +713,91 @@ describe('highlight diff events (Phase 2)', () => {
 		session.over({ kind: 'tool', toolbar, item: other }, sample)
 		const painted = events.filter((event) => event.type === 'highlight')
 		expect(painted.length).toBeGreaterThan(0)
-		// Move to a stack gap: item paint flips off, stack paint flips on.
+		// Move to a stack gap: item paint flips off, stack paint flips on —
+		// as `double` (the directly-hovered dwell target).
 		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
 		const states = events.filter((event) => event.type === 'highlight').map((event) => event.state)
 		expect(states).toContain('off')
-		expect(states).toContain('on')
+		expect(states).toContain('double')
+		session.end()
+	})
+
+	it('a directly-hovered stack gap paints double, flanks stay on', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		// Track background first: the two flanking stack gaps paint `on`.
+		session.over({ kind: 'track', border: live.borders.top, trackIndex: 0 }, sample)
+		const flanked = events.filter((event) => event.type === 'highlight')
+		expect(flanked.length).toBe(2)
+		expect(flanked.every((event) => event.state === 'on')).toBe(true)
+		// Step onto gap 0 directly: gap 0 flips `on` → `double`, gap 1
+		// flips `off` (only the hovered gap paints now).
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		const after = events.slice(flanked.length)
+		const doubled = after.filter(
+			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+				event.type === 'highlight' && event.state === 'double'
+		)
+		expect(doubled).toHaveLength(1)
+		expect(doubled[0]?.dz).toMatchObject({ kind: 'stack-gap', gap: 0 })
+		expect(
+			after.some(
+				(event) =>
+					event.type === 'highlight' &&
+					event.state === 'off' &&
+					event.dz.kind === 'stack-gap' &&
+					event.dz.gap === 1
+			)
+		).toBe(true)
+		session.end()
+	})
+
+	it('leaving the doubled gap for the track background drops back to on', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		const doubled = events.filter((event) => event.type === 'highlight')
+		expect(doubled.some((event) => event.state === 'double')).toBe(true)
+		// Back to the track background: the same gap flips `double` → `on`
+		// (re-emitted with the new state), the flank repaints `on`.
+		session.over({ kind: 'track', border: live.borders.top, trackIndex: 0 }, sample)
+		const after = events.slice(doubled.length)
+		const flipped = after.filter(
+			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+				event.type === 'highlight' &&
+				event.dz.kind === 'stack-gap' &&
+				event.dz.gap === 0 &&
+				event.state === 'on'
+		)
+		expect(flipped).toHaveLength(1)
+		session.end()
+	})
+
+	it('a directly-hovered parking gap paints double', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'parking-gap', parking: live.parking, gap: 1 }, sample)
+		const doubled = events.filter(
+			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+				event.type === 'highlight' && event.state === 'double'
+		)
+		expect(doubled).toHaveLength(1)
+		expect(doubled[0]?.dz).toMatchObject({ kind: 'parking-gap', gap: 1 })
 		session.end()
 	})
 
@@ -665,6 +1020,55 @@ describe('session dwell (Phase 3)', () => {
 		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 1 }, sample)
 		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
 		expect(live.borders.top).toHaveLength(before)
+		session.end()
+	})
+
+	it('re-paints the live gap after a dwell commit (no stale UI)', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		// Parking: after the row is created the armed gap stays valid (two
+		// rows, no emptied veto), so the re-paint lands on the live gap.
+		session.over({ kind: 'parking-gap', parking: live.parking, gap: 1 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
+		expect(live.parking).toHaveLength(2)
+		const structureAt = events.findIndex((event) => event.type === 'structure')
+		expect(structureAt).toBeGreaterThan(-1)
+		const after = events.slice(structureAt + 1)
+		// The still-hovered gap keeps its `double` state (dwell target);
+		// anything else re-paints `on`. Either way the live gap repaints.
+		const repainted = after.filter(
+			(event) => event.type === 'highlight' && (event.state === 'on' || event.state === 'double')
+		)
+		expect(repainted.length).toBeGreaterThan(0)
+		// Never a diff against nodes a re-render destroyed: no `off` after
+		// the structure event (the baseline was cleared, not diffed).
+		expect(after.some((event) => event.type === 'highlight' && event.state === 'off')).toBe(false)
+		session.end()
+	})
+
+	it('a stack dwell leaves vetoed gaps dark after the commit', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
+		// The dwell extracted the tool into a new track holding it wholly —
+		// the armed gap is now veto-adjacent, so nothing re-paints (and no
+		// `off` for the destroyed node either).
+		const structureAt = events.findIndex((event) => event.type === 'structure')
+		expect(structureAt).toBeGreaterThan(-1)
+		expect(events.slice(structureAt + 1)).toHaveLength(0)
 		session.end()
 	})
 })

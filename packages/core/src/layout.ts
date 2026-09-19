@@ -269,7 +269,35 @@ function isSerializedItem(item: unknown): boolean {
 	return true
 }
 
-// ── Structural locators (abstract ids, no coordinates) ──────────────────────
+/** Where a toolbar lives: resolved against the live layout (identity scan). */
+export function toolbarLocationOf(
+	toolbar: Toolbar,
+	layout: PaletteLayout
+): ToolbarLocation | undefined {
+	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
+	for (const region of regions) {
+		const border = layout.borders[region]
+		for (let trackIndex = 0; trackIndex < border.length; trackIndex += 1) {
+			const track = border[trackIndex]!
+			for (let toolbarIndex = 0; toolbarIndex < track.length; toolbarIndex += 1) {
+				if (track[toolbarIndex]?.toolbar === toolbar)
+					return { container: 'border', region, trackIndex, toolbarIndex }
+			}
+		}
+	}
+	const toolbarIndex = layout.parking.indexOf(toolbar)
+	if (toolbarIndex >= 0) return { container: 'parking', toolbarIndex }
+	return undefined
+}
+
+/** Region holding `border` (identity scan). */
+export function regionOfBorder(border: Border, layout: PaletteLayout): PaletteRegion | undefined {
+	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
+	for (const region of regions) {
+		if (layout.borders[region] === border) return region
+	}
+	return undefined
+}
 
 export type BorderToolbarLocation = {
 	readonly container: 'border'
@@ -450,6 +478,7 @@ export class PaletteLayoutTree {
 			dragOver,
 			commitDraggedToStackSpace,
 			commitDraggedToParkingRow,
+			commitSlide,
 			stackFlanks,
 		})
 	}
@@ -824,6 +853,30 @@ export function resizeToolbar(track: Track, index: number, split: number): void 
 	const after = merged - before
 	spaces.splice(index, 2, before, after)
 	applyTrackSpaces(track, spaces)
+}
+
+/**
+ * Phase 4 slide release: write the two flanking `space` values around the
+ * dragged toolbar in its live track (`resizeToolbar`) and report the
+ * `{ track, index, split }` the session's `resize` event carries.
+ *
+ * Returns `undefined` when there is nothing to commit: not a whole-toolbar
+ * border drag, or the toolbar left its track (pruned/moved mid-gesture).
+ * The `split` is clamped into the unit interval (`clampUnit`) so the
+ * adapter's flex write can never disagree with the model.
+ */
+export function commitSlide(
+	session: DraggingState,
+	split: number
+): { readonly track: Track; readonly index: number; readonly split: number } | undefined {
+	if (!session.isWholeToolbar) return undefined
+	if (session.origin.kind !== 'border') return undefined
+	const track = session.origin.track
+	const index = track.findIndex((entry) => entry.toolbar === session.origin.toolbar)
+	if (index < 0) return undefined
+	const clamped = clampUnit(split)
+	resizeToolbar(track, index, clamped)
+	return { track, index, split: clamped }
 }
 
 /**

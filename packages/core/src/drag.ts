@@ -17,11 +17,13 @@ import type {
 	DraggingState,
 	DragOverDecision,
 	LayoutOp,
+	LayoutPruneVictim,
 	PaletteLayout,
 	PaletteLayoutTree,
 	Parking,
 	Toolbar,
 	ToolbarItem,
+	ToolbarLocation,
 	Track,
 } from './layout.js'
 
@@ -54,6 +56,17 @@ export type DragEngine = {
 		targetParking: Parking,
 		gapIndex: number
 	): { readonly moved: boolean; readonly isWholeToolbar: boolean }
+	/**
+	 * Phase 4 slide release: write the two flanking `space` values around
+	 * the dragged toolbar in its live track (`resizeToolbar`) and report
+	 * the `{ track, index, split }` the `resize` event carries. Returns
+	 * `undefined` when there is nothing to commit (not a whole-toolbar
+	 * border drag, or the toolbar left its track).
+	 */
+	commitSlide(
+		session: DraggingState,
+		split: number
+	): { readonly track: Track; readonly index: number; readonly split: number } | undefined
 	/**
 	 * Phase 5 flank derivation: the stack gaps flanking `trackIndex` in
 	 * `border` (emptied veto applied) — what every in-track hover paints in
@@ -116,6 +129,22 @@ export type Hoverable =
 
 /** Two raw client numbers, passed on every hover. No measurement, no axis. */
 export type PointerSample = { readonly clientX: number; readonly clientY: number }
+
+/**
+ * Clamp the pointer to the slide's free span and return the shift to apply
+ * (relative to the toolbar's resting position). `frame.start` is the
+ * *leading gap's* edge; `frame.resting` is the toolbar's resting offset
+ * inside that span, so the result is a `transform`-ready shift from resting.
+ *
+ * Single copy of the slide arithmetic (Phase 4): both the per-move `slide`
+ * delta and the release `resize` split derive from it, so the visual
+ * position and the committed `space` can never disagree.
+ */
+export function clampSlideDelta(frame: SlideFrame, pointer: number): number {
+	const raw = pointer - frame.grab - frame.start
+	const clamped = Math.min(Math.max(raw, 0), frame.available)
+	return clamped - frame.resting
+}
 
 /**
  * Adapter-measured slide frame: axis-projected plain numbers, no DOM.
@@ -237,6 +266,28 @@ function locateContainerOf(toolbar: Toolbar, layout: PaletteLayout): ToolbarCont
 	return undefined
 }
 
+/**
+ * Where a toolbar lives in the live layout (identity scan).
+ * Local copy of `layout.toolbarLocationOf` — avoids a value-import cycle
+ * (`layout.ts` imports `createToolbarDrag` from this module).
+ */
+function toolbarLocationOf(toolbar: Toolbar, layout: PaletteLayout): ToolbarLocation | undefined {
+	const regions = ['top', 'right', 'bottom', 'left'] as const
+	for (const region of regions) {
+		const border = layout.borders[region]
+		for (let trackIndex = 0; trackIndex < border.length; trackIndex += 1) {
+			const track = border[trackIndex]!
+			for (let toolbarIndex = 0; toolbarIndex < track.length; toolbarIndex += 1) {
+				if (track[toolbarIndex]?.toolbar === toolbar)
+					return { container: 'border', region, trackIndex, toolbarIndex }
+			}
+		}
+	}
+	const toolbarIndex = layout.parking.indexOf(toolbar)
+	if (toolbarIndex >= 0) return { container: 'parking', toolbarIndex }
+	return undefined
+}
+
 function borderOf(track: Track, layout: PaletteLayout): Border {
 	const regions = ['top', 'right', 'bottom', 'left'] as const
 	for (const region of regions) {
@@ -280,19 +331,35 @@ class CoreToolbarDrag implements ToolbarDrag {
 	/**
 	 * Paint baseline: the DZs currently lit, keyed by a stable string.
 	 * `over` diffs the fresh decision against it and emits `highlight`
-	 * only for changed gaps; `end` / `null` hover flips every lit DZ `off`.
+	 * only on change — a new gap emits `on` (or `double` for the
+	 * directly-hovered stack/parking gap), a state flip (`on` ↔ `double`)
+	 * re-emits with the new state so the adapter toggles `hovered`, and
+	 * `end` / `null` hover flips every lit DZ `off`.
 	 *
 	 * A `structure` event clears the baseline **without** emitting `off`:
 	 * the adapter rebuilds the affected nodes from the live layout, so the
-	 * fresh DOM carries no paint — the next `paintZones` re-emits `on`.
+	 * fresh DOM carries no paint — the next `paintZones` re-emits for
+	 * whatever is still hovered.
 	 */
-	private readonly painted = new Map<string, DropZone>()
+	private readonly painted = new Map<string, { dz: DropZone; state: 'on' | 'double' }>()
 	/** Dwell timer for directly-hovered stack/parking gaps (Phase 3). */
 	private dwellTimer: unknown | undefined = undefined
 	/** The directly-hovered gap the dwell is armed on (gap change cancels). */
 	private dwellGap: string | undefined = undefined
 	/** One-shot latch: the gap that already fired (re-arm needs a leave). */
 	private dwellCommitted: string | undefined = undefined
+	// ── Slide (Phase 4) ─────────────────────────────────────────────
+	// `measure()` pushes the adapter-measured frame (one per arm, never per
+	// move); `over()` derives the `slide` delta from it + the sample and
+	// caches the `resize` split, so `end()` is geometry-free.
+	/** Adapter-measured frame (`undefined` = disarmed). */
+	private slideFrame: SlideFrame | undefined = undefined
+	/** Toolbar currently followed (`origin.toolbar` while sliding). */
+	private slideToolbar: Toolbar | undefined = undefined
+	/** Cached release split (`(resting + delta) / available`). */
+	private pendingSplit: number | undefined = undefined
+	/** Last pointer sample seen (reused by the dwell re-paint, which has no fresh hover). */
+	private lastSample: PointerSample = { clientX: 0, clientY: 0 }
 
 	constructor(layout: PaletteLayoutTree, target: GrabTarget, engine: DragEngine) {
 		this.layout = layout
@@ -307,8 +374,9 @@ class CoreToolbarDrag implements ToolbarDrag {
 		} as DragElement)
 	}
 
-	over(hover: Hoverable | null, _sample: PointerSample): void {
+	over(hover: Hoverable | null, sample: PointerSample): void {
 		if (this.ended) return
+		this.lastSample = sample
 		// A hover that resolves to nothing (pointer left every container, or a
 		// hover the legacy engine cannot express) clears the paint baseline —
 		// otherwise the adapter re-applies stale paint.
@@ -316,6 +384,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 			this.cancelDwell()
 			this.dwellCommitted = undefined
 			this.clearPaint()
+			this.updateSlide(sample)
 			return
 		}
 		const live = this.layout.getLayout()
@@ -323,6 +392,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		if (element === undefined) {
 			this.cancelDwell()
 			this.clearPaint()
+			this.updateSlide(sample)
 			return
 		}
 		// Delegate the decision to the engine, then raise the events that let
@@ -338,6 +408,11 @@ class CoreToolbarDrag implements ToolbarDrag {
 				: hover.kind === 'tool'
 					? { activeItem: hover.toolbar.indexOf(hover.item) }
 					: {}
+		// Capture origin location before the engine mutates the live arrays.
+		const originBefore = toolbarLocationOf(this.session.origin.toolbar, live)
+		const originToolbar = this.session.origin.toolbar
+		const originTrack =
+			this.session.origin.kind === 'border' ? this.session.origin.track : undefined
 		const decision = this.engine.dragOver(this.session, live, element, pointer, true)
 		const zones = this.decisionDropZones(decision)
 		// Phase 5: every hover resolving inside a border track *additionally*
@@ -348,22 +423,74 @@ class CoreToolbarDrag implements ToolbarDrag {
 		// no `off` emissions: the adapter rebuilds the affected subtree, so the
 		// fresh DOM carries no paint and the diff below re-emits `on`.
 		if (decision.moved) {
-			this.emit({ type: 'structure', op: this.commitOp() })
+			this.emit({ type: 'structure', op: this.commitOp(originBefore, originToolbar, originTrack) })
 			this.afterStructure()
 		}
-		this.paintZones(zones)
+		this.paintZones(zones, hover)
 		this.armDwell(hover)
+		this.updateSlide(sample)
 	}
 
 	/**
 	 * The `LayoutOp` describing the commit the engine just applied to the live
-	 * arrays. The engine mutates in place, so the op is a fresh `replace`
-	 * snapshot: the adapter re-reads the live layout through its existing
-	 * `applyOp` path (node map rebuilt from the live objects, never a diff
-	 * against nodes a re-render destroyed).
+	 * arrays. Derives a precise `move-toolbar` op from the origin location
+	 * captured before the engine mutated and the session origin after — no
+	 * `replace` snapshot, so the adapter can surgically insert/remove/move
+	 * nodes without a full rebuild.
+	 *
+	 * @param originBefore Location of the session origin toolbar before mutation.
+	 * @param originToolbar The session origin toolbar before mutation.
+	 * @param originTrack The track containing `originToolbar` before mutation (border only).
 	 */
-	private commitOp(): LayoutOp {
-		return { kind: 'replace', snapshot: liveSnapshot(this.layout.getLayout()) }
+	private commitOp(
+		originBefore: ToolbarLocation | undefined,
+		originToolbar: Toolbar,
+		originTrack?: Track
+	): LayoutOp {
+		const live = this.layout.getLayout()
+		const newToolbar = this.session.origin.toolbar
+		const to = toolbarLocationOf(newToolbar, live)
+		const pruned: LayoutPruneVictim[] = []
+
+		// Slide: same toolbar identity moved to a new location.
+		// Restructure: new toolbar (or existing target), items changed.
+		const isSlide = newToolbar === originToolbar
+
+		if (originBefore !== undefined) {
+			if (originBefore.container === 'border') {
+				// Detect pruned origin toolbar (restructure extraction emptied it).
+				if (!isSlide && toolbarLocationOf(originToolbar, live) === undefined) {
+					pruned.push({ kind: 'toolbar', toolbar: originToolbar, from: originBefore })
+				}
+				// Detect pruned origin track (emptied and removed from border).
+				if (originTrack !== undefined) {
+					const border = live.borders[originBefore.region]
+					if (!border.includes(originTrack)) {
+						pruned.push({ kind: 'track', toolbar: originToolbar, from: originBefore })
+					}
+				}
+			} else {
+				// Parking: detect pruned origin row (removed from parking array).
+				if (!isSlide && !live.parking.includes(originToolbar)) {
+					pruned.push({ kind: 'row', toolbar: originToolbar, from: originBefore })
+				}
+			}
+		}
+
+		// `from` is the pre-mutation origin location (where the dragged tools
+		// came from). For a slide that's the toolbar's own old spot; for a
+		// restructure it tells the adapter which region lost items, so both
+		// source and target regions re-sync from one event. Absent only when
+		// there was no origin (catalog creation, Phase 6).
+		const from = originBefore
+
+		return {
+			kind: 'move-toolbar',
+			toolbar: newToolbar,
+			from,
+			to,
+			pruned,
+		}
 	}
 
 	/**
@@ -424,27 +551,47 @@ class CoreToolbarDrag implements ToolbarDrag {
 		return out
 	}
 
-	/** Diff the fresh DZ set against the baseline; emit `highlight` on change. */
-	private paintZones(fresh: Map<string, DropZone>): void {
-		for (const [key, dz] of this.painted) {
-			if (!fresh.has(key)) {
+	/** Diff the fresh DZ set against the baseline; emit `highlight` on change.
+	 *
+	 * The directly-hovered stack/parking gap (the dwell target) paints
+	 * `double` (CSS `.highlighted.hovered`, doubled size) while the dwell
+	 * timer counts; every other lit gap paints `on`. A state flip on an
+	 * already-lit gap (`on` ↔ `double`) re-emits with the new state so the
+	 * adapter toggles `hovered` without dropping `highlighted`.
+	 */
+	private paintZones(fresh: Map<string, DropZone>, hover: Hoverable): void {
+		const doubleTarget = this.dwellTargetOf(hover)
+		const live = this.layout.getLayout()
+		const doubleKey = doubleTarget === undefined ? undefined : dropZoneKey(doubleTarget, live)
+		const stateOf = (key: string): 'on' | 'double' =>
+			doubleKey !== undefined && key === doubleKey ? 'double' : 'on'
+		for (const [key, record] of [...this.painted]) {
+			const next = fresh.get(key)
+			if (next === undefined) {
 				this.painted.delete(key)
-				this.emit({ type: 'highlight', dz, state: 'off' })
+				this.emit({ type: 'highlight', dz: record.dz, state: 'off' })
+				continue
+			}
+			const state = stateOf(key)
+			if (record.state !== state) {
+				this.painted.set(key, { dz: next, state })
+				this.emit({ type: 'highlight', dz: next, state })
 			}
 		}
 		for (const [key, dz] of fresh) {
 			if (!this.painted.has(key)) {
-				this.painted.set(key, dz)
-				this.emit({ type: 'highlight', dz, state: 'on' })
+				const state = stateOf(key)
+				this.painted.set(key, { dz, state })
+				this.emit({ type: 'highlight', dz, state })
 			}
 		}
 	}
 
 	/** Flip every lit DZ `off` and reset the baseline. */
 	private clearPaint(): void {
-		for (const [key, dz] of this.painted) {
+		for (const [key, record] of [...this.painted]) {
 			this.painted.delete(key)
-			this.emit({ type: 'highlight', dz, state: 'off' })
+			this.emit({ type: 'highlight', dz: record.dz, state: 'off' })
 		}
 	}
 
@@ -517,19 +664,46 @@ class CoreToolbarDrag implements ToolbarDrag {
 
 	/** Fire the dwell commit and emit it as a `structure` event. */
 	private fireDwell(target: DropZone): void {
+		const live = this.layout.getLayout()
+		const originBefore = toolbarLocationOf(this.session.origin.toolbar, live)
+		const originToolbar = this.session.origin.toolbar
+		const originTrack =
+			this.session.origin.kind === 'border' ? this.session.origin.track : undefined
 		if (target.kind === 'stack-gap' || target.kind === 'outside') {
 			if (!this.engine.commitDraggedToStackSpace(this.session, target.border, target.gap).moved)
 				return
-			this.emit({ type: 'structure', op: this.commitOp() })
+			this.emit({ type: 'structure', op: this.commitOp(originBefore, originToolbar, originTrack) })
 			this.afterStructure()
+			this.repaintAfterDwell(target)
 			return
 		}
 		if (target.kind === 'parking-gap') {
 			if (!this.engine.commitDraggedToParkingRow(this.session, target.parking, target.gap).moved)
 				return
-			this.emit({ type: 'structure', op: this.commitOp() })
+			this.emit({ type: 'structure', op: this.commitOp(originBefore, originToolbar, originTrack) })
 			this.afterStructure()
+			this.repaintAfterDwell(target)
 		}
+	}
+
+	/**
+	 * Re-paint after a dwell commit (timer callback, not an `over()` pass):
+	 * re-derive the zones for the still-hovered gap against the live layout
+	 * and diff them on, so the UI is never one event behind. Mirrors the
+	 * `afterStructure()` → `paintZones` step of the `over()` path. The
+	 * still-hovered gap keeps its `double` state (the dwell target is the
+	 * hover itself).
+	 */
+	private repaintAfterDwell(target: DropZone): void {
+		if (this.ended) return
+		const live = this.layout.getLayout()
+		const element = toDragElement(target, live)
+		if (element === undefined) return
+		const decision = this.engine.dragOver(this.session, live, element, {}, true)
+		const zones = this.decisionDropZones(decision)
+		this.addTrackFlanks(target, zones)
+		this.paintZones(zones, target)
+		this.updateSlide(this.lastSample)
 	}
 
 	/**
@@ -538,14 +712,81 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * — the following `paintZones` re-emits `on` for whatever is still
 	 * hovered (never a diff against nodes a re-render destroyed, and never an
 	 * `off` for a node that no longer exists).
+	 *
+	 * A commit also re-resolves the slide target: the dragged toolbar may be
+	 * a fresh object (restructure extraction) or pruned (merge) — the next
+	 * `updateSlide` follows `origin.toolbar` live, and a pruned toolbar
+	 * emits `clearSlide` there.
 	 */
 	private afterStructure(): void {
 		this.painted.clear()
 	}
 
-	measure(_frame: SlideFrame | undefined): void {
+	// ── Slide (Phase 4) ─────────────────────────────────────────────
+	// The frame is pushed by `measure()` (one per arm, never per move); the
+	// pointer component comes from the `over()` sample (axis off the frame).
+	// `updateSlide` runs at the end of every `over()` (after paint + dwell)
+	// so emission order stays structure → highlight → slide.
+
+	/**
+	 * Derive the follow state from the live origin + frame + sample and
+	 * emit `slide` / `clearSlide`. Only a whole-toolbar border drag with a
+	 * frame slides; anything else disarms (emitting `clearSlide` when a
+	 * follow was live).
+	 */
+	private updateSlide(sample: PointerSample): void {
+		const frame = this.slideFrame
+		const toolbar =
+			this.session.isWholeToolbar && this.session.origin.kind === 'border'
+				? this.session.origin.toolbar
+				: undefined
+		if (frame === undefined || toolbar === undefined) {
+			this.clearSlide()
+			return
+		}
+		// The followed toolbar changed (restructure extraction / relocation):
+		// the old follow is over — the adapter re-measures against the fresh
+		// node and pushes a new frame, which re-arms from there.
+		if (this.slideToolbar !== undefined && this.slideToolbar !== toolbar) {
+			this.clearSlide()
+		}
+		this.slideToolbar = toolbar
+		const pointer = frame.axis === 'horizontal' ? sample.clientX : sample.clientY
+		const delta = clampSlideDelta(frame, pointer)
+		if (delta === 0) {
+			// Resting position: no transform to write and nothing to commit.
+			// `pendingSplit` stays `undefined` so `end()` emits only the
+			// highlight clears ("a gesture with no slide"). A live follow
+			// stays armed (no event — the adapter holds no transform), so a
+			// later move emits `slide` from the same frame.
+			this.pendingSplit = undefined
+			return
+		}
+		this.pendingSplit = frame.available > 0 ? (frame.resting + delta) / frame.available : 0
+		this.emit({ type: 'slide', toolbar, delta })
+	}
+
+	/** Drop the follow: emit `clearSlide` when a follow was live. */
+	private clearSlide(): void {
+		const toolbar = this.slideToolbar
+		this.slideToolbar = undefined
+		this.pendingSplit = undefined
+		if (toolbar !== undefined) this.emit({ type: 'clearSlide', toolbar })
+	}
+
+	measure(frame: SlideFrame | undefined): void {
 		if (this.ended) return
-		// Phase 1: accepted (slide geometry consumes it in Phase 4).
+		// `undefined` disarms (emitting `clearSlide` when a follow was live);
+		// a frame (re)arms — the next `over()` derives the delta from it.
+		// `available: 0` is a legitimate measurement ("cannot slide right
+		// now"): it stays armed and `updateSlide` clamps every delta to the
+		// resting position.
+		if (frame === undefined) {
+			this.slideFrame = undefined
+			this.clearSlide()
+			return
+		}
+		this.slideFrame = { ...frame }
 	}
 
 	/** Subscribe to drag events (highlight diffs + structure + slide). */
@@ -561,6 +802,39 @@ class CoreToolbarDrag implements ToolbarDrag {
 		this.ended = true
 		this.cancelDwell()
 		this.dwellCommitted = undefined
+		// Geometry-free finalise: the split was cached per move, so release
+		// writes the model first (`resize`), then drops the follow
+		// (`clearSlide`), then clears the paint — in apply order.
+		if (this.pendingSplit !== undefined) {
+			const live = this.layout.getLayout()
+			const originBefore = toolbarLocationOf(this.session.origin.toolbar, live)
+			const originToolbar = this.session.origin.toolbar
+			const originTrack =
+				this.session.origin.kind === 'border' ? this.session.origin.track : undefined
+			const committed = this.engine.commitSlide(this.session, this.pendingSplit)
+			this.slideToolbar = undefined
+			this.pendingSplit = undefined
+			this.slideFrame = undefined
+			if (committed !== undefined) {
+				this.emit({
+					type: 'structure',
+					op: this.commitOp(originBefore, originToolbar, originTrack),
+				})
+				this.afterStructure()
+				this.emit({
+					type: 'resize',
+					track: committed.track,
+					index: committed.index,
+					split: committed.split,
+				})
+				this.emit({ type: 'clearSlide', toolbar: this.session.origin.toolbar })
+			} else {
+				this.clearSlide()
+			}
+		} else {
+			this.slideFrame = undefined
+			this.clearSlide()
+		}
 		this.clearPaint()
 	}
 
@@ -640,26 +914,4 @@ function locateTrack(
 		if (index >= 0) return { region, trackIndex: index }
 	}
 	return undefined
-}
-
-/** Fresh JSON-safe snapshot of the live layout (the `getSnapshot` moment). */
-function liveSnapshot(live: PaletteLayout): import('./layout.js').SerializedLayout {
-	// Flat slot list per region (mirrors `snapshotLayout` in `layout.ts` —
-	// inlined here because `drag.ts` takes the engine by injection to avoid
-	// a value import cycle with `layout.ts`).
-	const regions = ['top', 'right', 'bottom', 'left'] as const
-	const borders = {} as import('./layout.js').SerializedLayout['borders']
-	for (const region of regions) {
-		borders[region] = live.borders[region].flatMap((track) =>
-			track.map((slot) => ({
-				space: slot.space,
-				toolbar: slot.toolbar.map((item) => ({ ...item })),
-			}))
-		)
-	}
-	return {
-		version: 1,
-		borders,
-		parking: live.parking.map((toolbar) => toolbar.map((item) => ({ ...item }))),
-	}
 }

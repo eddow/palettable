@@ -910,9 +910,14 @@ rules, in one place:
   `LayoutOp` to the affected border(s) only (`syncBorder`), so untouched
   borders keep their DOM. Parking renders inside the console overlay, so any
   parking-side involvement (including a prune victim) takes the console path.
-  `renderBorder` tries `diffBorder`/`diffTrack` first (per-node
-  create/move/remove + track-space flex in place, keyed by `===`); only a
-  framing disagreement falls back to a full region rebuild.
+  During a drag session a `move-toolbar` op applies at track granularity
+  (`syncTrack` for exactly the tracks named by `from`/`to`/`pruned`; a
+  region whose track list itself changed falls back to `syncBorder` for
+  that region only) — unmoved tracks keep DOM identity, paint, and slide
+  transforms. Drag `structure` events never carry `replace` (whole-loads
+  only); the session derives a precise `move-toolbar` op per commit
+  (`drag.ts:commitOp`, `from` = pre-mutation origin, `to` = placed toolbar,
+  `pruned` = emptied toolbar/track/row victims).
 - **Values never touch the layout.** Each tool editor subscribes per-id
   (`core.values.subscribe(id, …)`) and patches its own node in place
   (`updateToolNode` re-runs the presenter and writes only the changed

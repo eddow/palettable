@@ -2,7 +2,14 @@
  * `@palettable/core` — shared hover-dwell state machine for stack gaps
  * (border stacks + parking).
  *
- * Adapters run the same protocol:
+ * Session-internal since the Phase 3 dwell home: the drag session owns the
+ * timer inline (`drag.ts`), and this module stays only for the frozen svelte
+ * oracle (`packages/svelte/src/lib/palette/gap-dwell.ts` is its own copy —
+ * untouched per mitosis) plus the `phase2.test.ts` pins below.
+ *
+ * @deprecated Phase 7 — the session owns the dwell; do not add new callers.
+ *
+ * Adapters ran the same protocol:
  *
  * - `active` — the row/track hovered (flanking gaps highlight)
  * - `hovered` — the gap directly hovered (only it highlights + arms the timer)

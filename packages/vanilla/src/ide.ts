@@ -43,6 +43,7 @@ import {
 	paletteCommandEntries,
 	paletteDerivedVariants,
 	parsePointSpec,
+	type SlideFrame,
 	type SurfaceContext,
 	selectPresenter,
 	sliderPresenter,
@@ -61,7 +62,7 @@ import { renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
-import { clampSlideDelta, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
+import { extractionGrabOffset, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
 
 export type IdeOptions = {
 	readonly core: PaletteCore
@@ -468,14 +469,37 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	let hoveredTrackSpace: number | undefined
 
 	/**
-	 * Live slide-follow for a whole-toolbar drag (adapter-owned DOM write).
-	 * Gaps stay untouched during the drag — the toolbar follows the pointer
-	 * via compositor-only `transform`; a single `resizeToolbar` commit lands
-	 * on release. Mirrors the svelte `ToolbarTrack` declarative effect +
-	 * `retargetToolbarSlide` / rAF loop, armed imperatively here.
+	 * Live slide-follow for a whole-toolbar drag (Phase 4: core decides the
+	 * delta, the adapter only writes it). Gaps stay untouched during the
+	 * drag — the toolbar follows the pointer via compositor-only `transform`
+	 * from core `slide` events; `clearSlide` drops the transform and disarms
+	 * the follow loop; `resize` re-reads the two gaps' `space` into flex.
+	 * Mirrors the svelte `ToolbarTrack` declarative effect + rAF loop, armed
+	 * imperatively here.
 	 */
 	let slideCleanup: (() => void) | undefined
 	let slideToolbar: Toolbar | undefined
+	/** Latest `slide` delta per followed toolbar (rAF write cache). */
+	let slideDelta: number | undefined
+	/** Queued rAF write for the follow loop. */
+	let slideQueued = false
+	/**
+	 * Grab offset within the followed toolbar, captured at mousedown and
+	 * preserved across relocations. A fresh singleton from a restructure
+	 * extraction has no mousedown grab, so it derives one from the
+	 * mousedown point within the dragged button instead (mirrors svelte
+	 * `retargetToolbarSlide` + `recenter`, but exact rather than middle).
+	 */
+	let slideGrabOffset: number | undefined
+	/**
+	 * Mousedown point within the dragged item (button), captured at grab
+	 * time. A restructure extraction promotes the dragged button into a
+	 * fresh singleton toolbar — the re-arm adds this intra-button offset
+	 * to the button's fresh offset inside its new toolbar, so the pointer
+	 * stays glued to the same point on the icon. Falls back to the
+	 * toolbar middle when unmeasurable (mirrors svelte `recenter`).
+	 */
+	let slideItemGrab: { readonly x: number; readonly y: number } | undefined
 	/**
 	 * The pointer event a structure event is being applied for, so the
 	 * adapter can re-arm slide-follow against the freshly placed toolbar
@@ -485,35 +509,72 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 */
 	let slideRearmEvent: PointerEvent | undefined
 
-	/** Arm slide-follow over the dragged toolbar's live element. */
-	function armSlide(toolbar: Toolbar, region: PaletteRegion, event: PointerEvent): void {
+	/**
+	 * Arm slide-follow over the dragged toolbar's live element: measure once
+	 * (bounds + resting + grab), push the frame to the session, and attach
+	 * the rAF write cache that applies whatever `slide` events say. Never
+	 * measures per move — only here and on re-arm after `structure`. Per-move
+	 * deltas arrive as `slide` events from the `over()` calls the hit-test
+	 * handlers already make (they now carry the real pointer sample); this
+	 * function only writes them to the DOM.
+	 *
+	 * `grab` is the cursor offset *within the followed toolbar*: the
+	 * mousedown offset for a whole-toolbar grab (kept across relocations so
+	 * the cursor stays glued to the same point), or — for a restructure
+	 * extraction — the dragged button's fresh offset inside its new toolbar
+	 * plus the mousedown point within the button (so the pointer stays on
+	 * the icon, not on the toolbar middle). Passing the mousedown offset of
+	 * the *old* toolbar would shift the fresh singleton by the width
+	 * difference — the "far too right / far too left" jump.
+	 */
+	function armSlide(
+		toolbar: Toolbar,
+		region: PaletteRegion,
+		event: PointerEvent,
+		options?: { readonly recenter?: boolean }
+	): void {
 		disarmSlide()
 		const element = nodes.get(toolbar)
 		if (!(element instanceof HTMLElement)) return
+		if (dragSession === undefined) return
 		const ownerWindow = element.ownerDocument.defaultView ?? window
 		const direction = directionFor(region)
 		const horizontal = direction === 'horizontal'
-		const grabOffset = toolbarGrabOffset({
-			toolbarElement: element,
-			clientX: event.clientX,
-			clientY: event.clientY,
-			direction,
-		})
+		const rect = element.getBoundingClientRect()
+		let grabOffset: number
+		if (options?.recenter === true) {
+			grabOffset = recenterGrabOffset(element, direction)
+		} else if (slideGrabOffset !== undefined) {
+			grabOffset = slideGrabOffset
+		} else {
+			grabOffset = toolbarGrabOffset({
+				toolbarElement: element,
+				clientX: event.clientX,
+				clientY: event.clientY,
+				direction,
+			})
+		}
+		slideGrabOffset = grabOffset
 		const bounds = toolbarSlideBounds(element, direction)
 		if (bounds === undefined) return
-		const rect = element.getBoundingClientRect()
-		const offset0 = (horizontal ? rect.left : rect.top) - bounds.start
+		const resting = (horizontal ? rect.left : rect.top) - bounds.start
+		const frame: SlideFrame = {
+			axis: horizontal ? 'horizontal' : 'vertical',
+			start: bounds.start,
+			available: bounds.available,
+			resting,
+			grab: grabOffset,
+		}
 		slideToolbar = toolbar
-		let latestX = event.clientX
-		let latestY = event.clientY
-		let queued = false
+		slideDelta = undefined
+		slideQueued = false
+		dragSession.measure(frame)
 		const flush = () => {
-			queued = false
-			if (dragging?.isWholeToolbar !== true || slideToolbar !== dragging.origin.toolbar) return
-			const live = nodes.get(slideToolbar)
+			slideQueued = false
+			const live = slideToolbar !== undefined ? nodes.get(slideToolbar) : undefined
 			if (!(live instanceof HTMLElement) || !live.isConnected) return
-			const pointer = horizontal ? latestX : latestY
-			const delta = clampSlideDelta(bounds, offset0, pointer, grabOffset)
+			const delta = slideDelta
+			if (delta === undefined) return
 			live.style.transform =
 				delta === 0
 					? ''
@@ -521,26 +582,51 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 						? `translate3d(${delta}px, 0, 0)`
 						: `translate3d(0, ${delta}px, 0)`
 		}
-		const onMove = (move: PointerEvent) => {
-			latestX = move.clientX
-			latestY = move.clientY
-			if (!queued) {
-				queued = true
-				requestAnimationFrame(flush)
+		/** Queue one rAF write (coalesces a move burst into one frame). */
+		slideQueueWrite = () => {
+			if (!slideQueued) {
+				slideQueued = true
+				ownerWindow.requestAnimationFrame(flush)
 			}
 		}
-		ownerWindow.addEventListener('pointermove', onMove)
 		slideCleanup = () => {
-			ownerWindow.removeEventListener('pointermove', onMove)
 			const live = slideToolbar !== undefined ? nodes.get(slideToolbar) : undefined
 			if (live instanceof HTMLElement) live.style.transform = ''
 			slideToolbar = undefined
+			slideDelta = undefined
+			slideQueued = false
+			slideQueueWrite = undefined
 		}
-		flush()
+	}
+
+	/** Latest queued rAF write for the follow loop (set at arm time). */
+	let slideQueueWrite: (() => void) | undefined
+
+	/**
+	 * Grab offset for a restructure extraction: the dragged button's fresh
+	 * offset inside its new toolbar plus the mousedown point within the
+	 * button — so the pointer stays glued to the same point on the icon.
+	 * Falls back to the toolbar middle when the button is unmeasurable
+	 * (mirrors svelte `recenter`). Single copy lives in `slide.ts`
+	 * (`extractionGrabOffset`) — this is the thin adapter call-site.
+	 */
+	function recenterGrabOffset(
+		toolbarElement: HTMLElement,
+		direction: 'horizontal' | 'vertical'
+	): number {
+		const item = dragging?.tools[0]
+		const itemNode = item !== undefined ? nodes.get(item) : undefined
+		return extractionGrabOffset({
+			toolbarElement,
+			buttonElement: itemNode,
+			buttonGrab: slideItemGrab,
+			direction,
+		})
 	}
 
 	/** Drop slide-follow and clear the live transform. */
 	function disarmSlide(): void {
+		dragSession?.measure(undefined)
 		slideCleanup?.()
 		slideCleanup = undefined
 	}
@@ -581,6 +667,25 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (isEditableTarget(event.target)) return
 		if (!computeEditing()) return
 		event.preventDefault()
+		// Mousedown point within the dragged button: a restructure
+		// extraction promotes this button into a fresh singleton toolbar,
+		// and the re-arm adds this intra-button offset to the button's
+		// fresh offset inside its new toolbar — so the pointer stays on
+		// the icon. Captured off the button wrapper (the guard bleeds
+		// 3px past it via `inset: -3px`, so the guard's own rect would
+		// bias the offset by up to 3px).
+		const guard = event.currentTarget
+		const buttonNode = guard instanceof HTMLElement ? nodes.get(item) : undefined
+		const buttonBox = buttonNode ?? guard
+		if (buttonBox instanceof HTMLElement) {
+			const buttonRect = buttonBox.getBoundingClientRect()
+			slideItemGrab = {
+				x: event.clientX - buttonRect.left,
+				y: event.clientY - buttonRect.top,
+			}
+		} else {
+			slideItemGrab = undefined
+		}
 		try {
 			dragSession = core.layout.createDrag({ kind: 'tool', toolbar, item })
 			dragging = sessionState(dragSession)
@@ -650,13 +755,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 
 	/** End the session: drop paint classes, slide transform, forget the session. */
 	function endToolDrag(): void {
-		disarmSlide()
-		// `end()` flips every lit DZ `off` via events (applied synchronously
-		// by the subscription below) before the session is dropped.
+		// `end()` first: it emits `resize` (model write) → `clearSlide` →
+		// highlight clears, all applied synchronously by the subscription
+		// below. `disarmSlide()` after only drops the rAF loop + transform
+		// (`measure(undefined)` on the ended session is a no-op).
 		dragSession?.end()
+		disarmSlide()
 		dragSession = undefined
 		dragging = undefined
 		hoveredTrackSpace = undefined
+		slideGrabOffset = undefined
+		slideItemGrab = undefined
 		container.classList.remove('dragging')
 		delete container.dataset.dragging
 		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
@@ -667,7 +776,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	/**
 	 * Single event entry: apply session events in emission order with
 	 * minimal DOM work. `highlight` toggles classes; `structure` re-syncs
-	 * the node map; `slide`/`clearSlide`/`resize` land in Phase 4.
+	 * the node map (and re-arms slide-follow against the placed toolbar);
+	 * `slide` caches the delta + queues the rAF write; `clearSlide` drops
+	 * the transform + disarms the follow loop; `resize` re-reads the two
+	 * gaps' `space` into flex.
 	 */
 	function applySessionEvent(event: DragEvent): void {
 		switch (event.type) {
@@ -678,20 +790,69 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				applyStructureEvent(event)
 				return
 			case 'slide':
+				applySlideEvent(event.toolbar, event.delta)
+				return
 			case 'clearSlide':
+				applyClearSlideEvent(event.toolbar)
+				return
 			case 'resize':
-				// Phase 4: slide geometry home.
+				applyResizeEvent(event.track, event.index)
 				return
 		}
 	}
 
 	/**
-	 * Re-arm slide-follow after a commit. Slide-follow is still adapter-owned
-	 * (Phase 4 moves the geometry into core), so the adapter must re-attach it
-	 * to the toolbar the commit placed — a restructure that extracts its tools
-	 * promotes to a whole-toolbar slide, and the fresh toolbar sits under the
-	 * cursor (mirrors the svelte track effect). `armSlide` re-measures, so it
-	 * is the same one call whether the toolbar is the old or a new object.
+	 * Cache the core-decided delta and queue the single rAF write. Ignores
+	 * events for a toolbar this adapter is not following (a stale session
+	 * event after re-arm).
+	 */
+	function applySlideEvent(toolbar: Toolbar, delta: number): void {
+		if (slideToolbar === undefined || slideToolbar !== toolbar) return
+		slideDelta = delta
+		slideQueueWrite?.()
+	}
+
+	/** Drop the transform + disarm the follow loop for `toolbar`. */
+	function applyClearSlideEvent(toolbar: Toolbar): void {
+		if (slideToolbar !== undefined && slideToolbar !== toolbar) return
+		const live = slideToolbar !== undefined ? nodes.get(slideToolbar) : undefined
+		if (live instanceof HTMLElement) live.style.transform = ''
+		slideToolbar = undefined
+		slideDelta = undefined
+		slideQueued = false
+	}
+
+	/**
+	 * Re-read the two gaps flanking `track[index]` after core wrote their
+	 * `space` values, so the gaps take over exactly where the transform
+	 * left the toolbar (nothing visibly moves).
+	 */
+	function applyResizeEvent(track: Track, index: number): void {
+		const trackEl = nodes.get(track)
+		if (!(trackEl instanceof HTMLElement)) return
+		for (const gap of [index, index + 1]) {
+			const node = trackEl.querySelector(`[data-track-space-index="${gap}"]`)
+			if (!(node instanceof HTMLElement)) continue
+			const space = actualTrackSpaceAt(track, gap)
+			node.style.flexBasis = `${space * 100}%`
+			node.style.flexGrow = `${Math.max(space, configuration.trackGapMinGrow)}`
+		}
+	}
+
+	/**
+	 * Re-arm slide-follow after a commit: re-measure against the freshly
+	 * placed toolbar and push the new frame (the DOM moved, so the old
+	 * frame's `start`/`resting` are stale). A restructure that extracts its
+	 * tools promotes to a whole-toolbar slide, and the fresh toolbar sits
+	 * under the cursor (mirrors the svelte track effect). `armSlide`
+	 * re-measures, so it is the same one call whether the toolbar is the
+	 * old or a new object — except for the grab: a fresh extraction has no
+	 * mousedown grab yet (`slideGrabOffset` undefined), so it recenters to
+	 * its middle (the dragged icon — mirrors svelte `retargetToolbarSlide`
+	 * `recenter: dragging.grabOffset === undefined`), while a relocated
+	 * toolbar keeps the mousedown offset. Measuring the grab off the fresh
+	 * toolbar (`pointer − freshLeft`) would freeze a gap-sized offset into
+	 * every later delta — the "far too right / far too left" jump.
 	 */
 	function rearmSlideAfterStructure(): void {
 		const target = dragging?.origin.toolbar
@@ -705,7 +866,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			disarmSlide()
 			return
 		}
-		armSlide(target, region, event)
+		armSlide(target, region, event, {
+			recenter: slideGrabOffset === undefined,
+		})
 	}
 
 	/** Live region of a toolbar (border only — parking rows never slide). */
@@ -805,13 +968,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Sample for hovers that carry no pointer information (paint-only paths:
-	 * item-space fallback, track background). Phase 4 reads the axis off the
-	 * measured frame, so a zero sample is inert.
-	 */
-	const ZERO_SAMPLE = { clientX: 0, clientY: 0 } as const
-
-	/**
 	 * Apply one session `highlight` event: toggle classes on the live gap
 	 * node (`on` → `highlighted`, `double` → `highlighted hovered`,
 	 * `off` → neither). The DZ carries its live container, so the node is
@@ -898,24 +1054,28 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		_bar: HTMLElement,
 		toolbar: Toolbar,
 		activeItem: number | undefined,
-		hovered: number | undefined
+		hovered: number | undefined,
+		event: PointerEvent
 	): void {
 		const session = dragSession
 		if (!computeEditing() || !session) {
-			session?.over(null, ZERO_SAMPLE)
+			session?.over(null, pointerSample(event))
 			return
 		}
 		// No anchor at all → nothing to paint, and the previous paint must go
 		// (a hover that resolves to nothing is not "keep the last highlight").
 		if (hovered === undefined && activeItem === undefined) {
-			session.over(null, ZERO_SAMPLE)
+			session.over(null, pointerSample(event))
 			return
 		}
 		const hover: Hoverable =
 			hovered !== undefined
 				? { kind: 'item-gap', toolbar, gap: hovered }
 				: { kind: 'toolbar', toolbar, activeItem }
-		session.over(hover, ZERO_SAMPLE)
+		// Real pointer sample: the session derives the slide delta from it
+		// whenever a frame is armed — a zero sample would emit a spurious
+		// `slide` while sliding.
+		session.over(hover, pointerSample(event))
 	}
 
 	container.classList.add('palette-ide')
@@ -1039,7 +1199,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					itemEl && bar.contains(itemEl)
 						? Number((itemEl as HTMLElement).dataset.itemIndex)
 						: undefined
-				paintItemSpaces(bar, toolbar, Number.isInteger(active) ? active : undefined, undefined)
+				paintItemSpaces(
+					bar,
+					toolbar,
+					Number.isInteger(active) ? active : undefined,
+					undefined,
+					event
+				)
 				return
 			}
 			if (hover.kind !== 'item-gap') {
@@ -1048,7 +1214,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				// gaps flanking it (active-item fallback). A dry side falls
 				// back to the flanking track gap (core `trackSpaceHighlight`).
 				const active = toolbar.indexOf(hover.item)
-				paintItemSpaces(bar, toolbar, active >= 0 ? active : undefined, undefined)
+				paintItemSpaces(bar, toolbar, active >= 0 ? active : undefined, undefined, event)
 				return
 			}
 			// `session.over()` decides paint + commit in one call: a highlighted
@@ -1177,8 +1343,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const border = live.borders[region]
 		// Stack gaps paint via session `highlight` events (the dwell commit
 		// fires from the session itself in Phase 3). Hover alone stays dark.
-		borderEl.addEventListener('pointerleave', () => {
-			dragSession?.over(null, ZERO_SAMPLE)
+		borderEl.addEventListener('pointerleave', (event) => {
+			dragSession?.over(null, pointerSample(event))
 		})
 		borderEl.addEventListener('pointermove', (event) => {
 			const session = dragSession
@@ -1246,7 +1412,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					// Still inside the border (stack gap / track bg): the
 					// border handler's `over()` owns the diff. Null only
 					// when the pointer left the border entirely.
-					if (!borderEl.contains(target)) session.over(null, ZERO_SAMPLE)
+					if (!borderEl.contains(target)) session.over(null, pointerSample(event))
 					return
 				}
 				const index = Number((spaceEl as HTMLElement).dataset.trackSpaceIndex)
@@ -1313,13 +1479,33 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	function renderParking(host: HTMLElement, editing: boolean): void {
 		host.textContent = ''
 		const live = core.layout.getLayout()
+		const parking = live.parking
 		const stack = el('div', 'palette-parking palette-horizontal stack-vertical')
 		stack.dataset.paletteId = paletteId
 		stack.dataset.container = 'parking'
-		// No highlight while the movement engine is stripped: the leave
-		// pass only clears stale classes.
-		stack.addEventListener('pointerleave', () => {
-			clearGapClasses(stack)
+		// Leaving the stack is a null hover (all lit DZs flip `off`); the
+		// session owns the paint, so the adapter never clears classes
+		// itself here.
+		stack.addEventListener('pointerleave', (event) => {
+			dragSession?.over(null, pointerSample(event))
+		})
+		stack.addEventListener('pointermove', (event) => {
+			const session = dragSession
+			if (!session) return
+			const target = event.target
+			if (!(target instanceof HTMLElement)) return
+			// Inside a row toolbar → that toolbar owns the item DZs.
+			if (target.closest('.toolbar')) return
+			const gapEl = target.closest('[data-parking-gap-index]')
+			if (!gapEl || !stack.contains(gapEl)) {
+				// Over a row (not a gap): no direct hover — the session
+				// keeps whatever the row's own handlers painted.
+				return
+			}
+			const index = Number((gapEl as HTMLElement).dataset.parkingGapIndex)
+			if (!Number.isInteger(index)) return
+			// Direct parking-gap hover: paints now, dwell fires the commit.
+			session.over({ kind: 'parking-gap', parking, gap: index }, pointerSample(event))
 		})
 		const visible = live.parking
 			.map((toolbar, index) => ({ toolbar, index }))
@@ -1517,6 +1703,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * Reconcile the editing flag without rebuilding: when `computeEditing()`
 	 * flips, run the chrome pass + console; otherwise leave the DOM alone.
 	 * Structural renders call this after rebuilding so `lastEditing` tracks.
+	 *
+	 * An editing flip false mid-gesture ends the session (spec: the adapter
+	 * only creates a session while editing) — the session emits its
+	 * `highlight off` clears synchronously before it is dropped.
 	 */
 	function syncEditing(): void {
 		if (disposed) return
@@ -1524,6 +1714,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (editing === lastEditing) return
 		lastEditing = editing
 		if (!editing) {
+			if (dragSession !== undefined) endToolDrag()
 			if (inspecting !== undefined) {
 				const oldNode = inspectingNodeOf(inspecting)
 				if (oldNode) delete oldNode.dataset.inspected
@@ -2105,9 +2296,155 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
+	 * Re-render one track inside its border element, in place. The track's
+	 * live object is resolved by `===` against the current layout (never by
+	 * the op's stale index — a prune earlier in the same op may have shifted
+	 * indices). Unchanged sibling tracks, stack gaps, and the border's own
+	 * listeners keep DOM identity; only the named track's children are
+	 * rebuilt. Paint on the rebuilt track is fresh (no classes) — the
+	 * session re-emits `highlight` for whatever is still hovered right
+	 * after the `structure` event, in the same `over()` pass.
+	 */
+	function syncTrack(
+		borderEl: HTMLElement,
+		region: PaletteRegion,
+		trackIndex: number,
+		editing: boolean
+	): void {
+		const live = core.layout.getLayout()
+		const border = live.borders[region]
+		const track = border[trackIndex]
+		if (track === undefined) return
+		const direction = directionFor(region)
+		const trackEl = borderEl.querySelector(
+			`:scope > .toolbar-track[data-track-index="${trackIndex}"]`
+		)
+		if (!(trackEl instanceof HTMLElement)) {
+			// Track node missing (new track the full render would create):
+			// fall back to the per-border path for this region only.
+			syncBorder(region)
+			return
+		}
+		dropBindingsIn(trackEl)
+		trackEl.textContent = ''
+		nodes.setTrack(track, trackEl)
+		const trackSpace = (index: number) => {
+			const gap = el('div', 'toolbar-track-space toolbar-drop-zone')
+			gap.dataset.paletteId = paletteId
+			gap.dataset.trackSpaceIndex = String(index)
+			const space = actualTrackSpaceAt(track, index)
+			gap.style.flexBasis = `${space * 100}%`
+			gap.style.flexGrow = `${Math.max(space, configuration.trackGapMinGrow)}`
+			trackEl.append(gap)
+		}
+		trackSpace(0)
+		track.forEach((slot, slotIndex) => {
+			const slotEl = el('div', 'toolbar-track-slot')
+			slotEl.dataset.toolbarSlotIndex = String(slotIndex)
+			slotEl.append(
+				renderToolbarElement(
+					slot.toolbar,
+					direction,
+					region,
+					editing,
+					'border',
+					{ container: 'border', region, trackIndex, slotIndex },
+					{ track, border }
+				)
+			)
+			trackEl.append(slotEl)
+			trackSpace(slotIndex + 1)
+		})
+		clearGapClasses(trackEl)
+	}
+
+	/**
+	 * Surgical `move-toolbar` apply for the drag path. Collects the
+	 * affected `(region, trackIndex)` pairs from `from`/`to`/`pruned` and
+	 * re-renders exactly those tracks; a region whose track list itself
+	 * changed (track created or removed — the new index is absent from the
+	 * DOM, or a DOM track has no live counterpart) falls back to
+	 * `syncBorder` for that region only. Parking still takes the console
+	 * pass. Re-arms slide-follow afterwards, like the coarse path.
+	 */
+	function applyMoveToolbarDuringDrag(op: Extract<LayoutOp, { kind: 'move-toolbar' }>): void {
+		const touchesParking =
+			op.from?.container === 'parking' ||
+			op.to?.container === 'parking' ||
+			op.pruned.some((victim) => victim.from.container === 'parking')
+		if (touchesParking) {
+			syncStructure()
+			return
+		}
+		const editing = computeEditing()
+		const tracks = new Map<PaletteRegion, Set<number>>()
+		const addTrack = (region: PaletteRegion, trackIndex: number) => {
+			let set = tracks.get(region)
+			if (set === undefined) {
+				set = new Set<number>()
+				tracks.set(region, set)
+			}
+			set.add(trackIndex)
+		}
+		if (op.from?.container === 'border') addTrack(op.from.region, op.from.trackIndex)
+		if (op.to?.container === 'border') addTrack(op.to.region, op.to.trackIndex)
+		for (const victim of op.pruned) {
+			if (victim.from.container === 'border') addTrack(victim.from.region, victim.from.trackIndex)
+		}
+		for (const [region, indices] of tracks) {
+			const host =
+				region === 'top'
+					? topHost
+					: region === 'left'
+						? leftHost
+						: region === 'right'
+							? rightHost
+							: bottomHost
+			const borderEl = host.querySelector('.toolbar-border')
+			if (!(borderEl instanceof HTMLElement)) {
+				syncBorder(region)
+				continue
+			}
+			const live = core.layout.getLayout()
+			const border = live.borders[region]
+			const domTracks = new Set<number>()
+			for (const node of borderEl.querySelectorAll(':scope > .toolbar-track')) {
+				if (!(node instanceof HTMLElement)) continue
+				const raw = Number(node.dataset.trackIndex)
+				if (Number.isInteger(raw)) domTracks.add(raw)
+			}
+			const liveIndices = new Set(border.map((_, index) => index))
+			// Track-list shape changed (create/prune): indices shifted, so a
+			// per-track patch would place toolbars wrong — one border sync.
+			let shapeChanged = domTracks.size !== liveIndices.size
+			if (!shapeChanged) {
+				for (const index of liveIndices) {
+					if (!domTracks.has(index)) {
+						shapeChanged = true
+						break
+					}
+				}
+			}
+			if (shapeChanged) {
+				syncBorder(region)
+				continue
+			}
+			for (const trackIndex of indices) syncTrack(borderEl, region, trackIndex, editing)
+		}
+		if (dragSession) rearmSlideAfterStructure()
+	}
+
+	/**
 	 * Layout-op interceptor: route structural mutations to the affected
 	 * border(s) only, so untouched borders keep DOM identity. `replace`
 	 * (whole-load) clears the registry and rebuilds everything.
+	 *
+	 * During a drag (`dragSession` live) a `move-toolbar` op is applied
+	 * surgically: the op's `toolbar`/`from`/`to`/`pruned` describe exactly
+	 * what changed, so only the affected track(s) re-render — the rest of
+	 * the border (and every other border) keeps DOM identity, paint, and
+	 * slide transforms. Outside a drag the same op takes the coarse
+	 * per-border path (console add/delete flows).
 	 */
 	function applyOp(op: LayoutOp): void {
 		if (disposed) return
@@ -2134,6 +2471,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				return
 			}
 			case 'move-toolbar': {
+				// During a drag, apply surgically at track granularity: only
+				// the tracks named by `from`/`to`/`pruned` re-render. A
+				// same-region move re-renders one region's two tracks; a
+				// cross-region move re-renders one track per region; parking
+				// still needs the console pass (parking renders inside it).
+				if (dragSession !== undefined) {
+					applyMoveToolbarDuringDrag(op)
+					return
+				}
 				const regions = new Set<PaletteRegion>()
 				if (op.from?.container === 'border') regions.add(op.from.region)
 				if (op.to?.container === 'border') regions.add(op.to.region)
@@ -2153,6 +2499,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					return
 				}
 				for (const region of regions) syncBorder(region)
+				// Re-measure slide geometry after structure change so the
+				// follow loop stays accurate against the fresh DOM.
+				if (dragSession) rearmSlideAfterStructure()
 				return
 			}
 		}

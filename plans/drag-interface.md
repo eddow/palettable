@@ -1,12 +1,19 @@
 # Drag interface refactor — session + events (active plan)
 
-> Status: **active plan — Phases 1–3 landed 2026-09-17 (complete, not
-> scoped).** Normative spec is below (`Decisions` / `Types` / `Methods` /
+> Status: **active plan — Phases 1–4 landed 2026-09-17 (complete, not
+> scoped) + granular drag ops landed 2026-09-19.** Review fixes 2026-09-17 (kept): dwell re-paint after `structure`,
+> no `resize` on a slideless gesture, vanilla `end()`-before-disarm +
+> real pointer samples. Granular ops 2026-09-19: every drag commit emits a
+> precise `move-toolbar` op (`from` = pre-mutation origin, `to` = placed
+> toolbar, `pruned` = emptied toolbar/track/row victims — never `replace`,
+> which stays whole-load-only); vanilla applies it at track granularity
+> (`syncTrack` for exactly the named tracks, per-region `syncBorder`
+> fallback only when the track list itself changed). Normative spec is below (`Decisions` / `Types` / `Methods` /
 > `Adapter responsibilities`); the execution checklist is `Plan` (this file
 > tracks only what is left). `packages/svelte/src` is **out of scope**
 > (frozen oracle, per mitosis). Order: `core` first, then `vanilla`. Gate
-> after Phase 3: core 300, vanilla 45, e2e **53/4** — the four failures are
-> all **svelte** (the Phase-0 fail set), so vanilla is fully green.
+> after granular ops: core 317, vanilla 51, e2e **vanilla 31 green** — the svelte
+> failures are still only the Phase-0 fail set (4), so vanilla is fully green.
 
 ## Goal
 
@@ -59,9 +66,12 @@ for every adapter) and deletes the legacy surface once vanilla is green.
   `LayoutOp`). The adapter subscribes once and follows events in emission
   order — it never reconciles a return value, and nothing can be applied
   twice because during a drag there is one stream and one writer.
-- **Paint events are diffs; structure events are whole ops.** `highlight` is
+- **Paint events are diffs; structure events are precise ops.** `highlight` is
   emitted only when a gap's paint actually changed (`off` / `on` / `double`),
-  and `structure` carries a `LayoutOp` verbatim. A structure event resets the
+  and `structure` carries a `move-toolbar` op derived per commit (`from` =
+  pre-mutation origin location, `to` = placed toolbar location, `pruned` =
+  emptied toolbar/track/row victims). `replace` never fires during a drag
+  (whole-loads only). A structure event resets the
   session's paint baseline and re-paints the live toolbar afterwards
   (including re-emitting `slide` for the element that now exists) — never a
   diff against nodes that a re-render destroyed.
@@ -311,8 +321,11 @@ teardown.
   plain pointer move.
 - **Apply** events in emission order with minimal DOM work: `highlight` →
   toggle classes (`on` → `highlighted`, `double` → `highlighted hovered`, `off`
-  → neither); `structure` → create/move/remove nodes via the node map;
-  `resize` → re-read the two gaps' `space` and update their flex; `slide` →
+  → neither); `structure` → re-render exactly the tracks named by the
+  `move-toolbar` op (`from`/`to`/`pruned`), falling back to one border sync
+  only when the track list itself changed (create/prune), and to the console
+  pass only for parking-side ops; `resize` → re-read the two gaps' `space`
+  and update their flex; `slide` →
   write `transform` (rAF-coalesced); `clearSlide` → drop it.
 - **Own** the `pointerup` / `pointercancel` / `blur` / `visibilitychange`
   listeners and call `end()`; mirror the `.dragging` / `data-dragged`
@@ -466,12 +479,13 @@ Landed 2026-09-17: the dwell lifecycle lives in the session —
 arms on a directly hovered `stack-gap` / `outside` / `parking-gap`, cancels
 on gap change / `null` hover / `end()`, fires the commit itself as a
 `structure` event (`configuration.stackDzHoverMs` unchanged). Vanilla
-`pointerup`/`pointercancel`/`blur`/`visibilitychange` already only call
-`end()` (via `startDragSession`'s `onStop`); editing-flip `end()` stays
-Phase 6 chrome scope. Core unit tests pin arm/cancel/fire/latch/veto with
-fake timers (7 tests in `drag.test.ts` "session dwell"). Since the dwell
-commit now routes through the tree (`structure` with a fresh snapshot), a
-dwell e2e can assert the model change directly.
+`pointerup`/`pointercancel`/`blur`/`visibilitychange` only call
+`end()` (via `startDragSession`'s `onStop`); editing-flip `end()` landed as
+a Phase 6 low-hanging fruit (see below). Core unit tests pin
+arm/cancel/fire/latch/veto with fake timers (7 tests in `drag.test.ts`
+"session dwell"). Dwell commits route through the tree (`structure` with a
+fresh snapshot), and `tests/e2e/dwell-stack.spec.ts` asserts the model
+change directly (stack fire, parking fire, leave-cancels).
 
 - [x] `GapDwell` lifecycle moves into the session: arms on a directly hovered
   `stack-gap` / `outside` / `parking-gap`, cancels on gap change / `null`
@@ -479,31 +493,100 @@ dwell e2e can assert the model change directly.
   (`configuration.stackDzHoverMs` unchanged).
 - [x] Vanilla: `pointerup` / `pointercancel` / `blur` / `visibilitychange` +
   editing-flip-false only call `end()`.
-- [ ] New e2e coverage: stack creation via hover dwell, parking creation via
-  hover dwell, retarget cancels the pending fire, one-shot latch after a fire.
-  (Unblocked now that commits route through the tree; still open.)
+- [x] New e2e coverage (`tests/e2e/dwell-stack.spec.ts`, vanilla + svelte
+  green): stack creation via hover dwell, parking creation via hover dwell,
+  leaving the armed gap cancels the pending fire. Gap→gap retarget is the
+  same session path (any non-dwellable hover cancels — pinned by the
+  `drag.test.ts` "gap change cancels" unit test); it is not e2e-hittable
+  because a non-hovered stack gap is zero-size until painted. One-shot latch
+  after a fire is pinned by the `drag.test.ts` latch unit test.
 - [x] Core unit test for arm/cancel/fire without timers leaking (fake timers).
-- [ ] `core/gap-dwell.ts` becomes session-internal: keep it as the timer the
-  session uses (svelte's own copy stays untouched). The session currently
-  owns the timer inline; the module is still exported.
+- [x] `core/gap-dwell.ts` is session-internal: the session owns the timer
+  inline (`drag.ts`); the module stays only for the frozen svelte oracle
+  (its own copy is untouched) plus the `phase2.test.ts` pins, and is marked
+  `@deprecated Phase 7`.
 
 ### Phase 4 — slide geometry home
 
-- [ ] `SlideFrame` + `PointerSample` types; `measure(frame | undefined)` stores the
+Landed 2026-09-17: `SlideFrame` + `PointerSample` are the wire types;
+`measure(frame | undefined)` stores the frame (`undefined` disarms, never
+measured per move); `clampSlideDelta` lives in core (pure, single copy —
+`vanilla/slide.ts` is a thin deprecated wrapper, deleted in Phase 7);
+the session emits `slide` / `clearSlide` and caches the pending split, so
+`end()` is geometry-free (`resize` → `clearSlide` → `highlight off`).
+Vanilla `armSlide` measures once per arm, re-measures after every
+`structure` event, pushes via `measure()`; the rAF loop only writes what
+`slide` events say; `resize` updates the two gaps' flex; `clearSlide` drops
+the transform. Unit tests pin `clampSlideDelta`, `slide`/`clearSlide` on
+disarm, `available: 0` vs `measure(undefined)`, re-arm across a structure
+event, `resize` split equals the
+last `slide` delta's position, and subset-drags never sliding
+(`drag.test.ts` "slide geometry home", 6 tests + vanilla single-copy
+check). Verified: `dark-gap-no-move` + `edge-stay` + `reorder-forward` e2e
+green.
+
+- [x] `SlideFrame` + `PointerSample` types; `measure(frame | undefined)` stores the
   frame (`undefined` disarms); never measured per move.
-- [ ] `clampSlideDelta` moves to core (pure); `getBoundingClientRect` projection
+- [x] `clampSlideDelta` moves to core (pure); `getBoundingClientRect` projection
   (`toolbarSlideBounds` / `toolbarGrabOffset`) stays in vanilla. One copy of
-  the arithmetic, shared by the per-move delta and the release split.
-- [ ] Session emits `slide` / `clearSlide` and caches the pending split, so
+  the arithmetic, shared by the per-move delta and the release split
+  (plus `layout.commitSlide` for the release write).
+- [x] Session emits `slide` / `clearSlide` and caches the pending split, so
   `end()` is geometry-free: `resize` → `clearSlide` → `highlight off`.
-- [ ] Vanilla: `armSlide` measures once per arm, re-measures after every
+- [x] Vanilla: `armSlide` measures once per arm, re-measures after every
   `structure` event, pushes via `measure()`; the rAF loop only writes what
   `slide` events say; `resize` updates the two gaps' flex; `clearSlide` drops
-  the transform. Delete the `vanilla/slide.ts` clamp copy.
-- [ ] Pin with unit tests: `available: 0` vs `measure(undefined)`, re-arm after a
+  the transform. The `vanilla/slide.ts` clamp is a deprecated wrapper over
+  core (deleted in Phase 7).
+- [x] Pin with unit tests: `available: 0` vs `measure(undefined)`, re-arm after a
   structure event, `resize` split equals the last `slide` delta's position.
-- [ ] Verify: `dark-gap-no-move` + `edge-stay` + `reorder-forward` e2e green
+- [x] Verify: `dark-gap-no-move` + `edge-stay` + `reorder-forward` e2e green
   (slide vetoes + release commit covered).
+
+Low-hanging fruits of Phases 5–6 (landed 2026-09-17, kept, not undone):
+
+- [x] Parking-gap hover wiring in vanilla `renderParking` (`pointermove` →
+  `session.over({ kind: 'parking-gap', ... })`, `pointerleave` → `over(null)`)
+  — what lets the parking dwell e2e fire.
+- [x] Editing-flip `end()`: `syncEditing()` ends the session when editing
+  flips false mid-gesture (Phase 6 chrome scope, landed early).
+
+Review fixes (2026-09-17 — from the Phases 3–4 review, kept, not undone):
+
+- **Dwell commits left the UI one event behind.** `fireDwell` (timer
+  callback) emitted `structure` + `afterStructure()` with no following
+  `paintZones`, unlike the `over()` path. It now re-derives the zones for
+  the still-hovered gap against the live layout (`repaintAfterDwell`,
+  reusing the last pointer sample for the slide delta). Pinned by two
+  `drag.test.ts` tests: parking re-paints live (no `off` after `structure`),
+  stack stays dark when the armed gap is veto-adjacent post-commit.
+- **A slideless gesture committed a `resize`.** `updateSlide` cached
+  `pendingSplit` even at `delta: 0`, so `end()` wrote `space` for a
+  toolbar that never moved. Resting now leaves `pendingSplit` undefined
+  (pinned: "a gesture with no slide emits no resize").
+- **Vanilla never reached the core `resize` path.** `endToolDrag()` called
+  `disarmSlide()` (`measure(undefined)` clears `pendingSplit`) *before*
+  `session.end()`. Now `end()` runs first (events drive the DOM), then
+  `disarmSlide()` drops the rAF loop.
+- **Spurious `slide` from paint-only hovers.** `paintItemSpaces` and the
+  `pointerleave`/`null` paths passed `ZERO_SAMPLE` while a frame could be
+  armed — `clampSlideDelta(frame, 0)` is a large negative delta, not
+  inert. All `over()` calls now carry the real `pointerSample(event)`
+  (`ZERO_SAMPLE` deleted).
+- Gate after fix: core **309**, vanilla 46, e2e **59 passed / 4 failed**
+  (all 4 svelte = Phase-0 fail set), biome clean, svelte clean.
+
+Human bug 1 — extraction grab jump (2026-09-17): taking a tool out of a
+toolbar shifted the fresh singleton by the width difference ("far too
+right / far too left"). Root cause: the re-arm measured the grab off the
+fresh toolbar (`pointer − freshLeft`), freezing a gap-sized offset into
+every later delta. Fix: capture the mousedown point within the dragged
+button at grab time (`slideItemGrab`, off the button wrapper — never the
+guard, which bleeds 3px via `inset: -3px`); the re-arm adds it to the
+button's fresh offset inside its new toolbar (`extractionGrabOffset` in
+`vanilla/slide.ts`, middle fallback mirroring svelte `recenter`). Pinned
+by 3 `drag.test.ts` tests; e2e `track-drop` + `whole-toolbar` +
+`dwell-stack` green.
 
 ### Phase 5 — vocabulary cleanup
 
@@ -522,7 +605,13 @@ flanks — it is now redundant.
 - [ ] A dry item-space side falls back to the flanking *track* gap; a
   whole-toolbar drag paints neighbour TB edges only; sliding flanks veto paint
   and commit through one shared predicate.
-- [ ] Directly-hovered stack/parking gaps paint `double`; flanking paints are `on`.
+- [x] Directly-hovered stack/parking gaps paint `double`; flanking paints are `on`.
+  *(landed 2026-09-17 as human bug 2: the session's `paintZones` takes the
+  hover, derives the dwell target, and emits `double` for it / `on` for the
+  rest — including `on` ↔ `double` flips on the same gap; the vanilla
+  adapter already mapped `double` → `highlighted hovered`. Pinned by 4
+  `drag.test.ts` tests + the `dwell-stack` e2e `.highlighted.hovered`
+  assertion.)*
 - [ ] Keep the ABCD-with-D-dragged and same-toolbar-forward unit tests green —
   they are the spec for this phase.
 - [ ] Verify: `no-drag-highlight` + `stack-highlight` + `track-space` e2e green.
@@ -561,7 +650,7 @@ here cannot block Phase 12.
 
 ## Acceptance
 
-- Vanilla e2e green on all 14 specs, plus the new dwell specs from Phase 3.
+- Vanilla e2e green on all specs, including the new `dwell-stack` specs from Phase 3.
 - Svelte project fail set unchanged (the Phase-0 four) and `packages/svelte`
   byte-identical.
 - Core unit suite covers: session creation + refusal, `over` per hover kind,
@@ -588,3 +677,75 @@ here cannot block Phase 12.
   listeners (kept; they only call `end()` from Phase 3 on).
 - `plans/mitosis.md` — svelte stays the frozen oracle until vue parity.
 - `plans/phase10.md` — last green baseline + verification commands.
+
+## To see
+
+Read , lines 300 to 509
+
+Read , lines 1 to 80
+
+Searched for files matching `**/tests/e2e/*.spec.ts`, 14 matches
+
+Manual browser tests per phase — all on the vanilla demo (`http://localhost:4174/`). Setup every time: load page, click `Terminal` (opens console → edit mode), use the **left** border (clear of the centered overlay). Use devtools element inspector to check `.highlighted` / `.hovered` classes and `transform` styles.
+
+## Phase 0 — baseline (already locked)
+
+- Tool drag paints: `pointerdown` on item-guard 0, hover item 1 → nearest free item-space gaps get `.highlighted`.
+- Hover with no drag paints nothing.
+- Dark gap no-move: drag D in ABCD onto gap touching D → stays dark, tools do not reorder.
+- Track-gap extract: drag a tool onto a `.toolbar-track-space` → fresh singleton toolbar appears.
+
+## Phase 1 — session shell (landed, test now)
+
+No new behaviour — same as Phase 0, proving the session did not break anything:
+
+- Reorder forward: drag tool B onto gap 3 → lands between C and D, not after D.
+- Track-drop: drag onto track gap → new toolbar, keeps dragging as whole-toolbar slide.
+- Stack-highlight: hover a track body → two flanking `.toolbar-stack-space` gaps light.
+- Drawer-child grab: `pointerdown` on a tool inside an open drawer popup → no crash, no session.
+- Release anywhere / `Escape` → all highlights clear, no stuck `.dragging` class.
+
+## Phase 2 — `highlight` diffs
+
+- Move slowly across item gaps: each gap lights on enter, clears on leave — no stuck highlights, no flicker.
+- Directly-hovered stack/parking gap shows `.highlighted.hovered` (`double`); flanking-only paints show `.highlighted` alone.
+- After a mid-drag restructure (tools jump), paint follows the **new** nodes — no highlight left on a detached node.
+- `pointerleave` of every container → all gaps `off`.
+
+## Phase 3 — dwell (new feature, not a refactor)
+
+- Hover a `stack-gap` directly, hold still ~500 ms → new single-toolbar track created at that stack.
+- Same on a parking gap → new parking row created.
+- Retarget to another gap before the timeout → pending fire cancelled, no track created.
+- Stay on the gap after a fire → fires once only (one-shot latch); leave and re-enter → arms again.
+- `pointerup` mid-dwell → no fire.
+
+## Phase 4 — slide geometry
+
+- Grab a whole toolbar (bar background) or a lone tool: bar follows the pointer via `transform: translate3d(...)`, gaps untouched.
+- Release mid-track → bar snaps to gaps with no visible jump (`resize` wrote the two flanking `space` values); `transform` attribute removed (`clearSlide`).
+- Sliding flanks: the two track gaps directly beside the dragged bar never paint and never commit.
+- `available: 0` case (bar fills the track): no follow, no `slide`.
+
+## Phase 5 — vocabulary cleanup
+
+- Parking row item gaps behave exactly like border item gaps (merge on hover).
+- Every in-track hover (tool, toolbar, item-gap, track-gap) also paints the containing track's two flanking stack gaps.
+- ABCD with D dragged, hover D: item gaps beside D stay dark, flanking **track** gap paints instead.
+- Whole-toolbar drag: only neighbour TB edges paint (last gap of previous bar, first gap of next bar) — never neighbour track gaps.
+
+## Phase 6 — `outside`, `catalog`, affordances
+
+- `outside`: pointer just beside a border, aligned with a track → nearest stack gap paints + dwells like an in-border `stack-gap`.
+- `catalog`: drag from console add-panel → first placement inserts, subsequent hovers move it.
+- Mask: pointer over dimmed work zone → inner end gap of each border paints, nothing commits.
+- Panel: pointer over console panel background above/below parking → parking end gap paints; parking end gap still dwells + commits.
+- `editing` flip to false mid-drag (close console / toggle to run) → session ends, highlights + transform cleared.
+- `.dragging` / `data-dragged` chrome mirrors the grabbed tool/toolbar for the whole gesture.
+
+## Phase 7 — close-out
+
+No user-visible change — full regression pass:
+
+- Repeat Phases 1–6 spot checks (highlight, dwell, slide, vocabulary, affordances).
+- Console add-flow (add-panel → toolbar) and parking row delete (× button) unaffected.

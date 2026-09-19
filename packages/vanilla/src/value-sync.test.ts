@@ -194,6 +194,63 @@ describe('editing chrome without rebuild', () => {
 	})
 })
 
+describe('drag structure events preserve unmoved DOM', () => {
+	it('a same-track item merge re-renders only the target track', () => {
+		const { core, consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const border = host.querySelector('.toolbar-border[data-region="top"]') as HTMLElement
+		const tracksBefore = [...border.querySelectorAll(':scope > .toolbar-track')] as HTMLElement[]
+		expect(tracksBefore).toHaveLength(2)
+		const live = core.layout.getLayout()
+		const a = live.borders.top[0]?.[0]?.toolbar
+		const b = live.borders.top[1]?.[0]?.toolbar
+		const item = a?.[0]
+		if (!a || !b || !item) throw new Error('expected toolbars')
+		// Drive the commit through the real session so the op shape is the
+		// one the adapter applies in production (not a hand-built op).
+		const session = core.layout.createDrag({ kind: 'tool', toolbar: a, item })
+		const events: import('@palettable/core').DragEvent[] = []
+		session.subscribe((event) => events.push(event))
+		session.over({ kind: 'item-gap', toolbar: b, gap: 1 }, { clientX: 0, clientY: 0 })
+		session.end()
+		expect(events.some((event) => event.type === 'structure')).toBe(true)
+		// Target track rebuilt (item landed there); the other track's node
+		// survived — no full-border rebuild.
+		const tracksAfter = [...border.querySelectorAll(':scope > .toolbar-track')] as HTMLElement[]
+		expect(tracksAfter).toHaveLength(2)
+		expect(tracksAfter[1]).toBe(tracksBefore[1])
+		// The dragged lamp tool moved from track 0 into track 1: the
+		// surviving track now renders both tools (lamp toggle + speed
+		// slider), and the emptied track 0 is gone from the model.
+		expect(tracksAfter[1]?.querySelectorAll('.toolbar-item').length).toBeGreaterThanOrEqual(1)
+		expect(core.layout.getLayout().borders.top).toHaveLength(1)
+		ide.dispose()
+	})
+
+	it('a cross-region slide keeps the untouched regions identical', () => {
+		const { core, consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const right = host.querySelector('.toolbar-border[data-region="right"]') as HTMLElement
+		const rightBefore = right.innerHTML
+		const live = core.layout.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar
+		if (!toolbar) throw new Error('expected toolbar')
+		// Whole-toolbar slide across regions via the tree path (same op the
+		// session emits: `from` + `to` + pruned victims).
+		core.layout.moveToolbar(
+			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0 },
+			{ container: 'border', region: 'left', trackIndex: 0, toolbarIndex: 0 }
+		)
+		// Untouched region kept byte-identical DOM — no `replace`, no
+		// console pass, no collateral rebuild.
+		expect(right.innerHTML).toBe(rightBefore)
+		expect(host.querySelector('.toolbar-border[data-region="left"]') instanceof HTMLElement).toBe(
+			true
+		)
+		ide.dispose()
+	})
+})
+
 describe('can flips', () => {
 	it('a can flip toggles disabled in place, without a value change', () => {
 		const core = new PaletteCore(

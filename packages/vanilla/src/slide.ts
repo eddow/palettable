@@ -1,13 +1,13 @@
 /**
- * `@palettable/vanilla` — slide math home (adapter-owned).
+ * `@palettable/vanilla` — slide measuring (adapter-owned DOM projection).
  *
- * `clampSlideDelta` + `toolbarSlideBounds` need DOM metrics
+ * `toolbarSlideBounds` / `toolbarGrabOffset` need DOM metrics
  * (`getBoundingClientRect`), so they live here — never in core. Core owns
- * the commit (`resizeToolbar`); the adapter owns measuring + the per-frame
- * `transform` write. The single-copy rule holds: both the rAF `transform`
- * write and the release commit use `clampSlideDelta`, so the visual
- * position and the committed `space` can never disagree.
+ * the arithmetic (`clampSlideDelta`) + the release commit (`commitSlide`);
+ * the adapter owns measuring + the per-frame `transform` write.
  */
+
+import { clampSlideDelta as clampSlideDeltaCore } from '@palettable/core'
 
 export type SlideDirection = 'horizontal' | 'vertical'
 
@@ -49,7 +49,12 @@ export function toolbarSlideBounds(
  * *leading gap's* edge; `offset0` is the toolbar's resting offset inside
  * that span, so the result is a `transform`-ready shift from resting.
  *
- * @deprecated Phase 4 — the arithmetic moves to core; do not add new callers.
+ * Single-copy rule (Phase 4): this is the core arithmetic
+ * (`clampSlideDelta` in `@palettable/core`), not a fork — both the rAF
+ * `transform` write and the release commit derive from it, so the visual
+ * position and the committed `space` can never disagree.
+ *
+ * @deprecated Phase 7 — import `clampSlideDelta` from `@palettable/core`; do not add new callers.
  */
 export function clampSlideDelta(
 	bounds: SlideBounds,
@@ -57,15 +62,23 @@ export function clampSlideDelta(
 	pointer: number,
 	grabOffset: number
 ): number {
-	const raw = pointer - grabOffset - bounds.start
-	const clamped = Math.min(Math.max(raw, 0), bounds.available)
-	return clamped - offset0
+	return clampSlideDeltaCore(
+		{
+			axis: 'horizontal',
+			start: bounds.start,
+			available: bounds.available,
+			resting: offset0,
+			grab: grabOffset,
+		},
+		pointer
+	)
 }
 
 /**
  * Grab offset of the cursor *within* the toolbar, in pixels. Captured once
  * on pointerdown so the cursor stays at the same point on the toolbar
- * (natural grab).
+ * (natural grab). The caller passes the button's live node (never the
+ * guard — it bleeds 3px past the button via `inset: -3px`).
  */
 export function toolbarGrabOffset(options: {
 	toolbarElement: HTMLElement
@@ -76,4 +89,35 @@ export function toolbarGrabOffset(options: {
 	const rect = options.toolbarElement.getBoundingClientRect()
 	const horizontal = options.direction === 'horizontal'
 	return (horizontal ? options.clientX : options.clientY) - (horizontal ? rect.left : rect.top)
+}
+
+/**
+ * Intra-button grab: the mousedown point within the dragged button, in
+ * pixels. A restructure extraction promotes the button into a fresh
+ * singleton toolbar — adding this to the button's fresh offset inside its
+ * new toolbar keeps the pointer glued to the same point on the icon
+ * (the extraction grab). Falls back to the toolbar middle when the button
+ * is unmeasurable (mirrors svelte `recenter`).
+ */
+export function extractionGrabOffset(options: {
+	toolbarElement: HTMLElement
+	buttonElement: HTMLElement | undefined
+	buttonGrab: { readonly x: number; readonly y: number } | undefined
+	direction: SlideDirection
+}): number {
+	const horizontal = options.direction === 'horizontal'
+	const rect = options.toolbarElement.getBoundingClientRect()
+	const middle = (horizontal ? rect.width : rect.height) / 2
+	const fallback = middle > 0 ? middle : 0
+	const button = options.buttonElement
+	const grab = options.buttonGrab
+	if (button === undefined || grab === undefined) return fallback
+	if (typeof button.getBoundingClientRect !== 'function') return fallback
+	const buttonRect = button.getBoundingClientRect()
+	const buttonEdge = horizontal ? buttonRect.left : buttonRect.top
+	const toolbarEdge = horizontal ? rect.left : rect.top
+	const offset = buttonEdge - toolbarEdge + (horizontal ? grab.x : grab.y)
+	const size = horizontal ? rect.width : rect.height
+	if (!(offset >= 0 && offset <= size)) return fallback
+	return offset
 }
