@@ -1,7 +1,7 @@
 # Drag interface refactor — session + events (active plan)
 
-> Status: **active plan — Phases 1–4 landed 2026-09-17 (complete, not
-> scoped) + granular drag ops landed 2026-09-19.** Review fixes 2026-09-17 (kept): dwell re-paint after `structure`,
+> Status: **active plan — Phases 1–5 landed 2026-09-19 (complete, not
+> scoped) + granular drag ops + `track` kind deleted.** Review fixes 2026-09-17 (kept): dwell re-paint after `structure`,
 > no `resize` on a slideless gesture, vanilla `end()`-before-disarm +
 > real pointer samples. Granular ops 2026-09-19: every drag commit emits a
 > precise `move-toolbar` op (`from` = pre-mutation origin, `to` = placed
@@ -12,7 +12,7 @@
 > `Adapter responsibilities`); the execution checklist is `Plan` (this file
 > tracks only what is left). `packages/svelte/src` is **out of scope**
 > (frozen oracle, per mitosis). Order: `core` first, then `vanilla`. Gate
-> after granular ops: core 317, vanilla 51, e2e **vanilla 31 green** — the svelte
+> after Phase 5: core 321, vanilla 51, e2e **vanilla 31 green** — the svelte
 > failures are still only the Phase-0 fail set (4), so vanilla is fully green.
 
 ## Goal
@@ -596,15 +596,26 @@ derives the containing track's two flanking stack gaps (`stackFlanks` in
 vanilla. `track` is therefore no longer the *only* path that paints the
 flanks — it is now redundant.
 
-- [ ] Delete `parking-row-gap` (parking item gaps are plain `item-gap`; core
-  resolves the container) and `track` (no `track-background`). The flank
-  derivation that `track` used to own is already in `over()` for every
-  in-track hover, so the kind can go.
+- [x] Delete `track` (no `track-background`). The flank derivation that
+  `track` used to own is already in `over()` for every in-track hover, so the
+  kind is gone: the vanilla border handler reports a `track-gap` hover for
+  track-space targets (commit + flanks in one event), and the
+  `stack-highlight` e2e now hovers a real track gap. *(landed 2026-09-19;
+  `parking-row-gap` stays — it is the legacy engine's element kind for the
+  parking ownership-transfer commit, removed with the engine in Phase 7.)*
 - [x] Every in-track hover paints the containing track's two flanking stack gaps
   (emptied veto). *(landed early — see the Phase 2 review fixes)*
-- [ ] A dry item-space side falls back to the flanking *track* gap; a
+- [x] A dry item-space side falls back to the flanking *track* gap; a
   whole-toolbar drag paints neighbour TB edges only; sliding flanks veto paint
-  and commit through one shared predicate.
+  and commit through one shared predicate. *(landed 2026-09-19 as
+  session-level pins in `drag.test.ts` "vocabulary cleanup (Phase 5)": ABCD
+  with D dragged paints free gap 2 + track gap 1 + both stacks; forward
+  hover paints free gaps 0 + 3; whole-toolbar hover paints the neighbour TB
+  edge and no track gap; direct flank hover is dark with no commit. The
+  engine rules already lived in `layout.ts` (`itemSpaceHighlight` /
+  `trackSpaceHighlight` / `wholeToolbarNeighbourEdges` / `isSlidingFlank`,
+  pinned in `layout.test.ts`); these pins assert the same rules through the
+  session `highlight` event stream.)*
 - [x] Directly-hovered stack/parking gaps paint `double`; flanking paints are `on`.
   *(landed 2026-09-17 as human bug 2: the session's `paintZones` takes the
   hover, derives the dwell target, and emits `double` for it / `on` for the
@@ -612,27 +623,49 @@ flanks — it is now redundant.
   adapter already mapped `double` → `highlighted hovered`. Pinned by 4
   `drag.test.ts` tests + the `dwell-stack` e2e `.highlighted.hovered`
   assertion.)*
-- [ ] Keep the ABCD-with-D-dragged and same-toolbar-forward unit tests green —
-  they are the spec for this phase.
-- [ ] Verify: `no-drag-highlight` + `stack-highlight` + `track-space` e2e green.
-  (`stack-highlight` already is.)
+- [x] Keep the ABCD-with-D-dragged and same-toolbar-forward unit tests green —
+  they are the spec for this phase. *(done 2026-09-19: the session-level
+  pins above plus the `layout.test.ts` engine pins and the `edge-stay` /
+  `reorder-forward` / `whole-toolbar` e2e specs, all green on vanilla.)*
+- [x] Verify: `no-drag-highlight` + `stack-highlight` + `track-space` e2e green.
+  (`stack-highlight` already is — full vanilla project 31/31 on 2026-09-19.)
 
 ### Phase 6 — `outside`, `catalog`, affordances (last)
 
 Deliberately last: none of it is needed for the core invariant, so a stall
 here cannot block Phase 12.
 
-- [ ] `outside`: adapter projects beside-border pointers onto the border's stack
-  axis (alongside track *i* → nearer of gaps *i* / *i+1*); core paints and
-  dwells it exactly like `stack-gap`.
-- [ ] `catalog`: grab with no origin/mode until the first placement inserts; the
-  discrete `insertItem` console path stays as it is.
-- [ ] Mask + panel: adapter-owned paint-only, using the core-exported veto
+Landed 2026-09-19: core `outside` + `catalog` session support (329 tests),
+vanilla `outside` hit-test + mask/panel + catalog source (54 tests), full
+vanilla e2e 31 green, svelte fail set unchanged (4 Phase-0). Deferred:
+`data-dragged` / `palette-dragging` chrome mirror — setting `data-dragged`
+adds `2 × --palette-dz-size` padding to the dragged toolbar (CSS already
+has the rules), which shifts every `getBoundingClientRect` the slide +
+outside measurements read; wire it only with e2e pins proving the shift is
+compensated. `editing`-flip `end()` already landed in Phase 4.
+
+- [x] `outside`: adapter projects beside-border pointers onto the border's stack
+  axis (alongside track *i* → nearer of gaps *i* / *i+1*; pure
+  `vanilla/outside.ts:outsideGapForTrack`, unit-pinned); core paints and
+  dwells it exactly like `stack-gap` (one index space: unified
+  `dropZoneKey` `stack:region:gap`, so cross-flips keep `double` without
+  `off` + `on`).
+- [x] `catalog`: grab with no origin/mode until the first placement inserts
+  (detached singleton + `catalogPending`; `item-gap` merges, `track-gap`
+  extracts a singleton, stack/parking gaps dwell-create; `from` absent on
+  the creation op, subsequent hovers move normally); vanilla builds the
+  item via `add-item.ts:itemFromAddSelection` (same factory as the
+  discrete flow) on add-panel variant `pointerdown`. The discrete
+  `insertItem` console path stays as it is.
+- [x] Mask + panel: adapter-owned paint-only, using the core-exported veto
   predicates; the parking end gap reports a normal `parking-gap` hover so
-  dwell and commit stay core's, everything else reports `null`.
-- [ ] Chrome: mirror `.dragging` / `data-dragged` from the grab target; an
-  `editing` flip false mid-gesture calls `end()`.
-- [ ] Verify: full vanilla e2e green; console add/delete flows unaffected.
+  dwell and commit stay core's, the border mask toggles its own end-gap
+  classes directly (never through the session — a mask position maps to
+  nothing, so `over(null)` would clear the session's own paint).
+- [ ] Chrome: mirror `.dragging` / `data-dragged` from the grab target
+  (deferred — see above); an `editing` flip false mid-gesture calls `end()`
+  (already landed Phase 4).
+- [x] Verify: full vanilla e2e green (31/31); console add/delete flows unaffected.
 
 ### Phase 7 — close-out (AGENTS.md protocol)
 

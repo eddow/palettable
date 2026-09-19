@@ -17,6 +17,7 @@ import {
 	type LayoutPruneVictim,
 	PaletteLayoutTree,
 	type SerializedLayout,
+	type ToolbarItem,
 } from './layout.js'
 
 afterEach(() => {
@@ -80,13 +81,12 @@ describe('createDrag session shell', () => {
 		expect(() => tree.createDrag({ kind: 'tool', toolbar: [], item: toolbar[0]! })).toThrow()
 	})
 
-	it('catalog grabs wait for Phase 6', () => {
+	it('catalog grabs create a pending creation (no origin until placement)', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
-		const live = tree.getLayout()
-		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
-		const item = toolbar[0]
-		if (!item) throw new Error('expected item')
-		expect(() => tree.createDrag({ kind: 'catalog', item })).toThrow(/Phase 6/)
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		expect(session.layout).toBe(tree)
+		session.end()
 	})
 
 	it('over(tool) paints the active-item fallback without committing', () => {
@@ -365,16 +365,18 @@ describe('createDrag hover mapping (review regressions)', () => {
 		session.end()
 	})
 
-	it('track background paints the two FLANKING stack gaps, not one', () => {
+	it('an in-track hover paints the two FLANKING stack gaps, not one', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
 		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
 		const item = toolbar[0]
-		if (!item) throw new Error('expected item')
+		const other = toolbar[1]
+		if (!item || !other) throw new Error('expected items')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		const { events } = collectEvents(session)
-		// Track 0 of the top border: flanking stacks are 0 and 1.
-		session.over({ kind: 'track', border: live.borders.top, trackIndex: 0 }, sample)
+		// Hovering a tool inside track 0 paints the active-item fallback
+		// plus the track's two flanking stacks (0 and 1).
+		session.over({ kind: 'tool', toolbar, item: other }, sample)
 		const lit = events
 			.filter(
 				(event): event is Extract<DragEvent, { type: 'highlight' }> => event.type === 'highlight'
@@ -621,28 +623,6 @@ describe('event completeness (every transition is an event)', () => {
 		vi.useRealTimers()
 	})
 
-	it('a slide release raises a move-toolbar op', () => {
-		const tree = new PaletteLayoutTree(twoItemLayout())
-		const live = tree.getLayout()
-		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
-		const session = tree.createDrag({ kind: 'toolbar', toolbar })
-		const { events } = collectEvents(session)
-		// Arm slide follow.
-		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 50, grab: 25 })
-		// Pass a null hover with a pointer that produces a non-zero delta
-		// (raw = 100-25-0 = 75, clamped = 75, delta = 75-50 = 25).
-		session.over(null, { clientX: 100, clientY: 0 })
-		session.end()
-		const structure = events.find(
-			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
-		)
-		expect(structure).toBeDefined()
-		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
-		// Slide: same toolbar identity, from and to both defined.
-		expect(structure.op.from).toBeDefined()
-		expect(structure.op.to).toBeDefined()
-	})
-
 	it('a restructure commit carries pruned origin toolbar when emptied', () => {
 		// Use a layout where the origin toolbar has exactly one item, so
 		// dragging it out empties and prunes the toolbar.
@@ -677,6 +657,177 @@ describe('event completeness (every transition is an event)', () => {
 		// The origin toolbar `x` should be in pruned.
 		expect(structure.op.pruned.length).toBeGreaterThan(0)
 		expect(structure.op.pruned.some((v: LayoutPruneVictim) => v.toolbar === x)).toBe(true)
+		session.end()
+	})
+
+	it('a slide release raises a move-toolbar op', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const session = tree.createDrag({ kind: 'toolbar', toolbar })
+		const { events } = collectEvents(session)
+		// Arm slide follow.
+		session.measure({ axis: 'horizontal', start: 0, available: 100, resting: 50, grab: 25 })
+		// Pass a null hover with a pointer that produces a non-zero delta
+		// (raw = 100-25-0 = 75, clamped = 75, delta = 75-50 = 25).
+		session.over(null, { clientX: 100, clientY: 0 })
+		session.end()
+		const structure = events.find(
+			(e): e is DragEvent & { type: 'structure' } => e.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		// Slide: same toolbar identity, from and to both defined.
+		expect(structure.op.from).toBeDefined()
+		expect(structure.op.to).toBeDefined()
+	})
+})
+
+/**
+ * Phase 5 vocabulary conformance at the session level: the dry-side
+ * track-gap fallback, the whole-toolbar neighbour-TB-edges rule, and the
+ * shared sliding-flank veto — all observed through the `highlight` event
+ * stream (never the legacy return-value form).
+ */
+describe('vocabulary cleanup (Phase 5)', () => {
+	function stackGapEvents(events: DragEvent[]): Array<{ gap: number; state: string }> {
+		return events
+			.filter(
+				(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+					event.type === 'highlight' && event.dz.kind === 'stack-gap'
+			)
+			.map((event) => ({
+				gap: event.dz.kind === 'stack-gap' ? event.dz.gap : -1,
+				state: event.state,
+			}))
+	}
+
+	function trackGapEvents(events: DragEvent[]): Array<{ gap: number; state: string }> {
+		return events
+			.filter(
+				(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+					event.type === 'highlight' && event.dz.kind === 'track-gap'
+			)
+			.map((event) => ({
+				gap: event.dz.kind === 'track-gap' ? event.dz.gap : -1,
+				state: event.state,
+			}))
+	}
+
+	function itemGapEvents(events: DragEvent[]): Array<{ gap: number; state: string }> {
+		return events
+			.filter(
+				(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+					event.type === 'highlight' && event.dz.kind === 'item-gap'
+			)
+			.map((event) => ({
+				gap: event.dz.kind === 'item-gap' ? event.dz.gap : -1,
+				state: event.state,
+			}))
+	}
+
+	it('ABCD with D dragged: hovering D paints the flanking track gap, dragged gaps stay dark', () => {
+		// Session-level anchor for the `edge-stay` e2e: the before side
+		// still has free gap 2, the after side runs dry (gap 4 touches
+		// the dragged tool) so the candidate moves out to the track gap
+		// after the toolbar — while the flanking stacks still paint via
+		// the containing track.
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragged = toolbar[3]
+		if (!dragged) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item: dragged })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'tool', toolbar, item: dragged }, sample)
+		// Free gap 2 paints; gaps touching D (3, 4) stay dark …
+		expect(itemGapEvents(events).map((entry) => entry.gap)).toEqual([2])
+		// … but the flanking track gap does (gap 1 = after the sole slot) …
+		expect(trackGapEvents(events).map((entry) => entry.gap)).toEqual([1])
+		// … and the containing track's stacks paint too.
+		expect(
+			stackGapEvents(events)
+				.map((entry) => entry.gap)
+				.sort()
+		).toEqual([0, 1])
+		session.end()
+	})
+
+	it('same-toolbar forward hover paints the free flanks, dragged gaps stay dark', () => {
+		// Session-level anchor for the `reorder-forward` e2e: hovering C
+		// paints the nearest free gaps flanking it (0 and 3 — gaps 1
+		// and 2 touch the dragged B); the commit then lands between, not
+		// after.
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragged = toolbar[1]
+		const anchor = toolbar[2]
+		if (!dragged || !anchor) throw new Error('expected items')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item: dragged })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'tool', toolbar, item: anchor }, sample)
+		// Nearest free gaps flanking C are 0 and 3 (gaps 1–2 touch B) —
+		// never the dragged-touching gaps.
+		expect(
+			itemGapEvents(events)
+				.map((entry) => entry.gap)
+				.sort()
+		).toEqual([0, 3])
+		session.end()
+	})
+
+	it('whole-toolbar hover paints neighbour TB edges, never neighbour track gaps', () => {
+		// Session-level anchor for the `whole-toolbar` e2e: while a whole
+		// toolbar is dragged, hovering its own tool paints the neighbour
+		// TB edges (item-gaps on the adjacent toolbars) and no track gaps.
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragged = toolbar[0]
+		if (!dragged) throw new Error('expected item')
+		// Extract one tool into a second slot so the track holds two
+		// toolbars (a whole-TB slide onto its own flank is vetoed).
+		const setup = tree.createDrag({ kind: 'tool', toolbar, item: dragged })
+		setup.over({ kind: 'track-gap', track: live.borders.top[0] ?? [], gap: 1 }, sample)
+		setup.end()
+		const track = live.borders.top[0] ?? []
+		expect(track).toHaveLength(2)
+		const second = track[1]?.toolbar ?? []
+		const secondItem = second[0]
+		if (!secondItem) throw new Error('expected item')
+		// Drag the whole fresh singleton and hover its own tool.
+		const session = tree.createDrag({ kind: 'toolbar', toolbar: second })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'tool', toolbar: second, item: secondItem }, sample)
+		// Neighbour TB edge paints (last gap of the previous toolbar) …
+		const itemGaps = itemGapEvents(events).map((entry) => entry.gap)
+		expect(itemGaps).toContain(3)
+		// … and no track gap paints.
+		expect(trackGapEvents(events)).toHaveLength(0)
+		session.end()
+	})
+
+	it('sliding flanks veto paint and commit through one shared predicate', () => {
+		// Direct hover on a flank of the sliding toolbar: dark (no paint)
+		// and no commit — the same veto gates both.
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const dragged = toolbar[0]
+		if (!dragged) throw new Error('expected item')
+		const setup = tree.createDrag({ kind: 'tool', toolbar, item: dragged })
+		setup.over({ kind: 'track-gap', track: live.borders.top[0] ?? [], gap: 1 }, sample)
+		setup.end()
+		const track = live.borders.top[0] ?? []
+		const second = track[1]?.toolbar ?? []
+		if (second.length === 0) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'toolbar', toolbar: second })
+		const { events } = collectEvents(session)
+		// Gap 1 flanks the sliding toolbar (slot 1 of a 2-slot track).
+		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
+		expect(trackGapEvents(events)).toHaveLength(0)
+		expect(events.some((event) => event.type === 'structure')).toBe(false)
 		session.end()
 	})
 })
@@ -727,12 +878,16 @@ describe('highlight diff events (Phase 2)', () => {
 		const live = tree.getLayout()
 		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
 		const item = toolbar[0]
-		if (!item) throw new Error('expected item')
+		const other = toolbar[1]
+		if (!item || !other) throw new Error('expected items')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		const { events } = collectEvents(session)
-		// Track background first: the two flanking stack gaps paint `on`.
-		session.over({ kind: 'track', border: live.borders.top, trackIndex: 0 }, sample)
-		const flanked = events.filter((event) => event.type === 'highlight')
+		// In-track hover first: the two flanking stack gaps paint `on`.
+		session.over({ kind: 'tool', toolbar, item: other }, sample)
+		const flanked = events.filter(
+			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+				event.type === 'highlight' && event.dz.kind === 'stack-gap'
+		)
 		expect(flanked.length).toBe(2)
 		expect(flanked.every((event) => event.state === 'on')).toBe(true)
 		// Step onto gap 0 directly: gap 0 flips `on` → `double`, gap 1
@@ -757,20 +912,21 @@ describe('highlight diff events (Phase 2)', () => {
 		session.end()
 	})
 
-	it('leaving the doubled gap for the track background drops back to on', () => {
+	it('leaving the doubled gap for an in-track hover drops back to on', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
 		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
 		const item = toolbar[0]
-		if (!item) throw new Error('expected item')
+		const other = toolbar[1]
+		if (!item || !other) throw new Error('expected items')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		const { events } = collectEvents(session)
 		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
 		const doubled = events.filter((event) => event.type === 'highlight')
 		expect(doubled.some((event) => event.state === 'double')).toBe(true)
-		// Back to the track background: the same gap flips `double` → `on`
+		// Back to an in-track hover: the same gap flips `double` → `on`
 		// (re-emitted with the new state), the flank repaints `on`.
-		session.over({ kind: 'track', border: live.borders.top, trackIndex: 0 }, sample)
+		session.over({ kind: 'tool', toolbar, item: other }, sample)
 		const after = events.slice(doubled.length)
 		const flipped = after.filter(
 			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
@@ -1069,6 +1225,147 @@ describe('session dwell (Phase 3)', () => {
 		const structureAt = events.findIndex((event) => event.type === 'structure')
 		expect(structureAt).toBeGreaterThan(-1)
 		expect(events.slice(structureAt + 1)).toHaveLength(0)
+		session.end()
+	})
+})
+
+/**
+ * Phase 6 creation + outside conformance at the session level: `outside`
+ * paints/dwells like `stack-gap` (one index space), and a `catalog` grab
+ * inserts on the first placement then moves like a normal drag.
+ */
+describe('outside + catalog (Phase 6)', () => {
+	it('outside paints double on direct hover, like stack-gap', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'outside', border: live.borders.top, gap: 0 }, sample)
+		const doubled = events.filter(
+			(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+				event.type === 'highlight' && event.state === 'double'
+		)
+		expect(doubled).toHaveLength(1)
+		// One index space: the beside-border pointer paints the same node
+		// as the in-border gap, so the event carries the `stack-gap` DZ.
+		expect(doubled[0]?.dz).toMatchObject({ kind: 'stack-gap', gap: 0 })
+		session.end()
+	})
+
+	it('outside → stack-gap on the same gap keeps double (one index space)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'outside', border: live.borders.top, gap: 0 }, sample)
+		const first = events.filter((event) => event.type === 'highlight').length
+		// Same gap, in-border hover: still directly hovered, still `double`
+		// — no `off`, no re-emit (the diff is unchanged).
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		const after = events.slice(first)
+		expect(after).toHaveLength(0)
+		session.end()
+	})
+
+	it('outside dwells into a new track', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		const before = live.borders.top.length
+		session.over({ kind: 'outside', border: live.borders.top, gap: 0 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
+		expect(live.borders.top).toHaveLength(before + 1)
+		expect(events.some((event) => event.type === 'structure')).toBe(true)
+		session.end()
+	})
+
+	it('catalog first placement merges into an item-gap (from absent)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const target = live.borders.top[1]?.[0]?.toolbar ?? []
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		const { events } = collectEvents(session)
+		const before = target.length
+		session.over({ kind: 'item-gap', toolbar: target, gap: 1 }, sample)
+		expect(target).toHaveLength(before + 1)
+		expect(target.includes(item)).toBe(true)
+		const structure = events.find(
+			(event): event is DragEvent & { type: 'structure' } => event.type === 'structure'
+		)
+		expect(structure).toBeDefined()
+		if (structure?.op.kind !== 'move-toolbar') throw new Error('expected move-toolbar op')
+		// Creation: no origin, so `from` is absent and `to` is the placed toolbar.
+		expect(structure.op.from).toBeUndefined()
+		expect(structure.op.to).toBeDefined()
+		session.end()
+	})
+
+	it('catalog first placement extracts a singleton into a track-gap', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const track = live.borders.top[1] ?? []
+		const before = track.length
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
+		expect(track).toHaveLength(before + 1)
+		expect(track[1]?.toolbar).toEqual([item])
+		session.end()
+	})
+
+	it('catalog dwell creates a track at a stack gap', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		const before = live.borders.top.length
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
+		expect(live.borders.top).toHaveLength(before + 1)
+		session.end()
+	})
+
+	it('catalog dwell creates a row at a parking gap', () => {
+		vi.useFakeTimers()
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		const before = live.parking.length
+		session.over({ kind: 'parking-gap', parking: live.parking, gap: 1 }, sample)
+		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
+		expect(live.parking).toHaveLength(before + 1)
+		session.end()
+	})
+
+	it('catalog second hover moves the placed toolbar (no duplicate insert)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const first = live.borders.top[0]?.[0]?.toolbar ?? []
+		const second = live.borders.top[1]?.[0]?.toolbar ?? []
+		const item = { tool: 'fresh' } as ToolbarItem
+		const session = tree.createDrag({ kind: 'catalog', item })
+		session.over({ kind: 'item-gap', toolbar: first, gap: 1 }, sample)
+		const placedLength = first.length
+		// The placed item now moves like a normal drag — merging into the
+		// second toolbar prunes nothing and inserts exactly once.
+		session.over({ kind: 'item-gap', toolbar: second, gap: 1 }, sample)
+		expect(second.includes(item)).toBe(true)
+		expect(first.includes(item)).toBe(false)
+		expect(first).toHaveLength(placedLength - 1)
 		session.end()
 	})
 })

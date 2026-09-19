@@ -74,6 +74,15 @@ export type DragEngine = {
 	 * (and the module cycle) stay there.
 	 */
 	stackFlanks(session: DraggingState, border: Border, trackIndex: number): readonly number[]
+	/**
+	 * Phase 6 catalog placement primitives (defined below, injected so the
+	 * catalog path shares the rule with the engine instead of forking it).
+	 * Injected (not imported) for the same module-cycle reason as the rest
+	 * of the engine — Phase 7 folds them into the session and this
+	 * disappears with it.
+	 */
+	isItemSpaceFree(session: DraggingState, toolbar: Toolbar, gap: number): boolean
+	insertToolbar(track: Track, index: number, toolbar: Toolbar): void
 }
 
 /** What was grabbed. `catalog` has no container — it is a creation (Phase 6). */
@@ -116,15 +125,15 @@ export type DragEventListener = (event: DragEvent) => void
  * array — discrimination never depends on "does this object happen to have
  * a `kind`".
  *
- * `track` is the **track-background** hover (the pointer is inside a track but
- * on neither a toolbar nor a gap). The spec drops it in Phase 5, where every
- * in-track hover derives the flanking stack paints instead; until then it is
- * the only path that paints the flanking pair, so it stays.
+ * Every hover inside a track resolves to a toolbar, tool, or gap — the
+ * flanking stack-gap paints are derived from the containing track on every
+ * such hover (`addTrackFlanks`), so no separate track-background kind is
+ * needed. `null` (not a kind) covers the pointer being outside every
+ * container.
  */
 export type Hoverable =
 	| { readonly kind: 'toolbar'; readonly toolbar: Toolbar; readonly activeItem?: number }
 	| { readonly kind: 'tool'; readonly toolbar: Toolbar; readonly item: ToolbarItem }
-	| { readonly kind: 'track'; readonly border: Border; readonly trackIndex: number }
 	| DropZone
 
 /** Two raw client numbers, passed on every hover. No measurement, no axis. */
@@ -234,8 +243,6 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 				border: borderOf(hover.track, layout),
 				gap: hover.gap,
 			}
-		case 'track':
-			return { kind: 'track', border: hover.border, trackIndex: hover.trackIndex }
 		case 'stack-gap':
 			return { kind: 'stack-gap', border: hover.border, gap: hover.gap }
 		case 'parking-gap':
@@ -298,17 +305,15 @@ function borderOf(track: Track, layout: PaletteLayout): Border {
 }
 
 /**
- * The border track a hover resolved inside, for the Phase 5 flank
- * derivation: a `toolbar` / `tool` hover and an `item-gap` / `track-gap` all
- * carry their container, so the containing track is a pure lookup. Parking
- * rows have no track — they are excluded.
+ * The border track a hover resolved inside, for the flank derivation: a
+ * `toolbar` / `tool` hover and an `item-gap` / `track-gap` all carry their
+ * container, so the containing track is a pure lookup. Parking rows have
+ * no track — they are excluded.
  */
 function trackContextOf(
 	hover: Hoverable,
 	layout: PaletteLayout
 ): { readonly border: Border; readonly trackIndex: number } | undefined {
-	// The `track` hover already carries the border + index.
-	if (hover.kind === 'track') return { border: hover.border, trackIndex: hover.trackIndex }
 	const at =
 		hover.kind === 'toolbar' || hover.kind === 'tool' || hover.kind === 'item-gap'
 			? locateContainerOf(hover.toolbar, layout)
@@ -360,12 +365,34 @@ class CoreToolbarDrag implements ToolbarDrag {
 	private pendingSplit: number | undefined = undefined
 	/** Last pointer sample seen (reused by the dwell re-paint, which has no fresh hover). */
 	private lastSample: PointerSample = { clientX: 0, clientY: 0 }
+	/**
+	 * Phase 6 catalog creation: the not-yet-inserted item. Set at grab time,
+	 * cleared on the first placement commit — subsequent hovers move the
+	 * placed toolbar through the normal engine path.
+	 */
+	private catalogPending: ToolbarItem | undefined = undefined
 
 	constructor(layout: PaletteLayoutTree, target: GrabTarget, engine: DragEngine) {
 		this.layout = layout
 		this.engine = engine
 		if (target.kind === 'catalog') {
-			throw new PaletteError(`createDrag: catalog grabs land in Phase 6`)
+			// Phase 6 creation: no origin in the live layout — the item rides
+			// a detached singleton toolbar until the first placement inserts
+			// it (fresh toolbar via the slide path, merge via the item path).
+			// `startDraggingState` lives in `layout.ts` (cycle), so the
+			// state is built literally: whole-content slide from the start.
+			// The detached track/border are fresh empties (never the live
+			// layout's), so veto scans (`draggingEmpties*`, `isSlidingFlank`)
+			// see no false origin — creation has nothing to empty or flank.
+			const detached: Toolbar = [target.item]
+			this.session = {
+				tools: [target.item],
+				origin: { kind: 'border', toolbar: detached, track: [], border: [] },
+				mode: 'slide',
+				isWholeToolbar: true,
+			}
+			this.catalogPending = target.item
+			return
 		}
 		this.session = engine.dragStart(layout.getLayout(), {
 			kind: target.kind,
@@ -409,10 +436,29 @@ class CoreToolbarDrag implements ToolbarDrag {
 					? { activeItem: hover.toolbar.indexOf(hover.item) }
 					: {}
 		// Capture origin location before the engine mutates the live arrays.
+		// A catalog creation has no origin (`undefined`) until the first
+		// placement inserts — the commit path below handles it separately.
 		const originBefore = toolbarLocationOf(this.session.origin.toolbar, live)
 		const originToolbar = this.session.origin.toolbar
 		const originTrack =
 			this.session.origin.kind === 'border' ? this.session.origin.track : undefined
+		// Phase 6 catalog creation: the first placement inserts the pending
+		// item (no origin, no mode) — subsequent hovers move the placed
+		// toolbar through the normal engine path.
+		if (this.catalogPending !== undefined) {
+			if (this.commitCatalogPlacement(hover, originToolbar)) this.catalogPending = undefined
+			else {
+				// No placement yet: paint the candidate DZs (no commit) so
+				// the adapter shows where the item would land.
+				const preview = this.engine.dragOver(this.session, live, element, pointer, true)
+				const zones = this.decisionDropZones(preview)
+				this.addTrackFlanks(hover, zones)
+				this.paintZones(zones, hover)
+				this.armDwell(hover)
+				this.updateSlide(sample)
+			}
+			return
+		}
 		const decision = this.engine.dragOver(this.session, live, element, pointer, true)
 		const zones = this.decisionDropZones(decision)
 		// Phase 5: every hover resolving inside a border track *additionally*
@@ -429,6 +475,136 @@ class CoreToolbarDrag implements ToolbarDrag {
 		this.paintZones(zones, hover)
 		this.armDwell(hover)
 		this.updateSlide(sample)
+	}
+
+	/**
+	 * Phase 6 catalog first placement: insert the pending item at the
+	 * hovered DZ and emit it as a `structure` event (`from` absent — a
+	 * creation). Returns `true` when a placement landed (the pending item
+	 * is now placed and the session origin follows it); `false` when the
+	 * hover is paint-only (dark gap, dwellable stack/parking gap, or a
+	 * non-placement hover) — the caller then paints the preview instead.
+	 *
+	 * Placement mirrors the engine's own commit choice per DZ kind:
+	 * `item-gap` merges into the hovered toolbar, `track-gap` extracts a
+	 * fresh singleton into the track, `stack-gap`/`outside` create a track
+	 * at that stack, `parking-gap` creates a row. Dwellable gaps never
+	 * place on hover (the dwell fires the commit, same as a normal drag).
+	 *
+	 * @param hover The adapter-resolved hover for this `over()` pass.
+	 * @param detached The detached singleton toolbar holding the pending item.
+	 */
+	private commitCatalogPlacement(hover: Hoverable, detached: Toolbar): boolean {
+		const item = this.catalogPending
+		if (item === undefined) return false
+		const live = this.layout.getLayout()
+		if (hover.kind === 'item-gap') {
+			const at = locateContainerOf(hover.toolbar, live)
+			if (at === undefined) return false
+			if (at.kind === 'parking') {
+				if (!this.engine.isItemSpaceFree(this.session, hover.toolbar, hover.gap)) return false
+				const clamped = Math.min(Math.max(hover.gap, 0), hover.toolbar.length)
+				hover.toolbar.splice(clamped, 0, item)
+				this.session.origin = {
+					kind: 'parking',
+					toolbar: hover.toolbar,
+					parking: at.parking,
+					index: at.index,
+				}
+			} else {
+				if (!this.engine.isItemSpaceFree(this.session, hover.toolbar, hover.gap)) return false
+				const clamped = Math.min(Math.max(hover.gap, 0), hover.toolbar.length)
+				hover.toolbar.splice(clamped, 0, item)
+				this.session.origin = {
+					kind: 'border',
+					toolbar: hover.toolbar,
+					track: at.track,
+					border: at.border,
+				}
+			}
+		} else if (hover.kind === 'track-gap') {
+			const border = borderOf(hover.track, live)
+			const fresh: Toolbar = [item]
+			this.engine.insertToolbar(hover.track, hover.gap, fresh)
+			this.session.origin = { kind: 'border', toolbar: fresh, track: hover.track, border }
+		} else {
+			// `tool` / `toolbar` / `stack-gap` / `outside` / `parking-gap`:
+			// paint-only — a merge needs an item gap, a track/stack/row
+			// needs a dwell or a track-gap hover.
+			return false
+		}
+		this.session.isWholeToolbar = true
+		this.session.mode = 'slide'
+		const to = toolbarLocationOf(this.session.origin.toolbar, live)
+		this.emit({
+			type: 'structure',
+			op: { kind: 'move-toolbar', toolbar: this.session.origin.toolbar, to, pruned: [] },
+		})
+		this.afterStructure()
+		this.repaintCatalogAfterPlacement(hover)
+		void detached
+		return true
+	}
+
+	/**
+	 * Phase 6 catalog dwell placement: the dwell timer fired on a
+	 * stack/parking gap while the item is still pending — create the track
+	 * (stack/`outside`) or row (`parking-gap`) holding the item, emit it as
+	 * a `structure` event (`from` absent — a creation), and re-paint the
+	 * live nodes. Returns `true` when the placement landed.
+	 */
+	private commitCatalogDwell(target: DropZone): boolean {
+		const item = this.catalogPending
+		if (item === undefined) return false
+		const live = this.layout.getLayout()
+		if (target.kind === 'stack-gap' || target.kind === 'outside') {
+			const fresh: Toolbar = [item]
+			const at = Math.min(Math.max(target.gap, 0), target.border.length)
+			target.border.splice(at, 0, [{ space: 0, toolbar: fresh }])
+			this.session.origin = {
+				kind: 'border',
+				toolbar: fresh,
+				track: target.border[at] ?? [{ space: 0, toolbar: fresh }],
+				border: target.border,
+			}
+		} else if (target.kind === 'parking-gap') {
+			const fresh: Toolbar = [item]
+			const at = Math.min(Math.max(target.gap, 0), target.parking.length)
+			target.parking.splice(at, 0, fresh)
+			this.session.origin = { kind: 'parking', toolbar: fresh, parking: target.parking, index: at }
+		} else {
+			return false
+		}
+		this.session.isWholeToolbar = true
+		this.session.mode = 'slide'
+		const to = toolbarLocationOf(this.session.origin.toolbar, live)
+		this.emit({
+			type: 'structure',
+			op: { kind: 'move-toolbar', toolbar: this.session.origin.toolbar, to, pruned: [] },
+		})
+		this.afterStructure()
+		this.repaintCatalogAfterPlacement(target)
+		return true
+	}
+
+	/**
+	 * Phase 6 catalog re-paint after a placement commit (insert or dwell):
+	 * re-derive the zones for the still-hovered gap against the live layout
+	 * and diff them on — the same `afterStructure()` → `paintZones` step as
+	 * the normal commit path (the adapter rebuilt the subtree, so the fresh
+	 * DOM carries no paint).
+	 */
+	private repaintCatalogAfterPlacement(hover: Hoverable): void {
+		if (this.ended) return
+		const live = this.layout.getLayout()
+		const element = toDragElement(hover, live)
+		if (element === undefined) return
+		const decision = this.engine.dragOver(this.session, live, element, {}, true)
+		const zones = this.decisionDropZones(decision)
+		this.addTrackFlanks(hover, zones)
+		this.paintZones(zones, hover)
+		this.armDwell(hover)
+		this.updateSlide(this.lastSample)
 	}
 
 	/**
@@ -664,6 +840,13 @@ class CoreToolbarDrag implements ToolbarDrag {
 
 	/** Fire the dwell commit and emit it as a `structure` event. */
 	private fireDwell(target: DropZone): void {
+		// Phase 6 catalog creation: a dwellable hover places the pending
+		// item (stack → new track, parking → new row) instead of moving an
+		// origin — the same commit the engine would fire for a normal drag.
+		if (this.catalogPending !== undefined) {
+			if (this.commitCatalogDwell(target)) this.catalogPending = undefined
+			return
+		}
 		const live = this.layout.getLayout()
 		const originBefore = toolbarLocationOf(this.session.origin.toolbar, live)
 		const originToolbar = this.session.origin.toolbar
@@ -888,8 +1071,11 @@ function dropZoneKey(dz: DropZone, live: PaletteLayout): string {
 		}
 		case 'stack-gap':
 		case 'outside': {
+			// Phase 6: one index space — a beside-border pointer paints the
+			// same node as the in-border gap, so cross-flips diff `on` ↔
+			// `double` (not `off` + `on`) and the dwell arms on either.
 			const region = regionOf(dz.border, live)
-			return `stack:${dz.kind}:${region}:${dz.gap}`
+			return `stack:${region}:${dz.gap}`
 		}
 		case 'parking-gap':
 			return `parking:${dz.gap}`
@@ -914,4 +1100,61 @@ function locateTrack(
 		if (index >= 0) return { region, trackIndex: index }
 	}
 	return undefined
+}
+
+/**
+ * Phase 6 catalog gap check (session-local, no engine cycle): the pending
+ * item is the whole selection, so every gap beside it is free — the only
+ * dark case is a gap index out of range. Mirrors `isItemSpaceFree` for a
+ * selection that lives outside the layout. Exported so `layout.ts` can
+ * inject it as `engine.isItemSpaceFree` — the catalog path shares the rule
+ * with the engine instead of forking it (Phase 7 folds both into the
+ * session).
+ */
+export function isItemSpaceFreeLite(
+	session: DraggingState,
+	toolbar: Toolbar,
+	gap: number
+): boolean {
+	if (gap < 0 || gap > toolbar.length) return false
+	const before = toolbar[gap - 1]
+	const after = toolbar[gap]
+	if (before !== undefined && session.tools.includes(before)) return false
+	if (after !== undefined && session.tools.includes(after)) return false
+	return true
+}
+
+/**
+ * Phase 6 catalog insert (injected as `engine.insertToolbar`): split the
+ * target track gap with the same `trackGapSplit` as every other insertion
+ * (never a raw `space: 1`, which would push the track's spacing sum past
+ * 1). Local arithmetic (not the `layout.ts` `insertToolbar` import) so the
+ * injection stays one-way — `layout.ts` imports this module for
+ * `createToolbarDrag`, so a value import back would be a module cycle.
+ * Phase 7 folds both into the session and this disappears with the engine.
+ */
+export function insertToolbarLite(track: Track, index: number, toolbar: Toolbar): void {
+	const at = Math.min(Math.max(index, 0), track.length)
+	const merged = actualTrackSpaceLite(track, at)
+	const before = merged * configuration.trackGapSplit
+	const after = merged - before
+	const spaces = track.map((slot) => slot.space)
+	const trailing = 1 - spaces.reduce((sum, space) => sum + space, 0)
+	const full = [...spaces, trailing]
+	full.splice(at, 1, before, after)
+	track.splice(at, 0, { space: 0, toolbar })
+	for (let i = 0; i < track.length; i += 1) track[i]!.space = clampLite(full[i] ?? 0)
+}
+
+/** Phase 6 catalog helper: effective gap at `index` (stored or trailing). */
+function actualTrackSpaceLite(track: Track, index: number): number {
+	if (index < track.length) return clampLite(track[index]!.space)
+	if (index === track.length)
+		return clampLite(track.reduce((remaining, slot) => remaining - slot.space, 1))
+	return 0
+}
+
+/** Phase 6 catalog helper: clamp into the unit interval (non-finite → 0). */
+function clampLite(value: number): number {
+	return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
 }

@@ -23,6 +23,7 @@ import {
 	type AnyPoint,
 	actualTrackSpaceAt,
 	axisForRegion,
+	type Border,
 	buttonPresenter,
 	type ConsoleStore,
 	configuration,
@@ -30,11 +31,13 @@ import {
 	type DragEvent,
 	type DraggingState,
 	type DropZone,
+	draggingEmptiesTrackIndex,
 	editorChoicesFor,
 	filterCommandEntries,
 	type HighlightState,
 	type Hoverable,
 	isActionPoint,
+	isDraggedToolbarAt,
 	isValuedPoint,
 	type LayoutOp,
 	type PaletteCore,
@@ -57,11 +60,13 @@ import {
 } from '@palettable/core'
 // Side-effect import: wires `PaletteLayoutTree.prototype.createDrag`.
 import '@palettable/core'
+import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
 import { renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
+import { outsideGapForTrack } from './outside.js'
 import { extractionGrabOffset, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
 
 export type IdeOptions = {
@@ -699,8 +704,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			dragging = undefined
 			return
 		}
-		container.classList.add('dragging')
-		container.dataset.dragging = 'true'
+		applyDragChrome()
 		// Lone-tool grab is already a whole-toolbar slide: arm follow now
 		// so the bar sticks under the cursor before any commit.
 		const region = (event.currentTarget as HTMLElement | null)?.closest?.('.toolbar-border')
@@ -711,6 +715,123 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			onMove: () => {},
 			onStop: () => endToolDrag(),
 		})
+	}
+
+	/**
+	 * Phase 6 catalog source: pointerdown on a console add-panel variant
+	 * starts a creation session (`{ kind: 'catalog', item }` — no origin
+	 * until the first placement inserts). The item is built with the same
+	 * factory as the discrete add flow (`itemFromAddSelection`), so drag
+	 * and click insert the same object shape. The console stays open under
+	 * the gesture (the overlay background is the mask); `endToolDrag`
+	 * closes nothing.
+	 */
+	function startCatalogDrag(event: PointerEvent, item: ToolbarItem): void {
+		if (dragSession) return
+		if (event.button !== 0) return
+		if (isEditableTarget(event.target)) return
+		if (!computeEditing()) return
+		event.preventDefault()
+		slideItemGrab = undefined
+		dragSession = core.layout.createDrag({ kind: 'catalog', item })
+		dragging = sessionState(dragSession)
+		dragSession.subscribe(applySessionEvent)
+		applyDragChrome()
+		startDragSession({
+			event,
+			onMove: () => {},
+			onStop: () => endToolDrag(),
+		})
+	}
+
+	/**
+	 * Phase 6 chrome mirror: container `.dragging` + `data-dragging` (the
+	 * Phase 1–5 chrome) plus per-toolbar `data-dragged` on the grabbed
+	 * toolbar in its own container (mirrors svelte `Toolbar`
+	 * `data-dragged` via `isDraggedToolbarAt`) plus root
+	 * `palette-dragging` (mirrors svelte `paletteRoot`). Container-scoped:
+	 * the same object rendered twice matches only where the drag
+	 * originated. Re-applied after every `structure` event (the placed
+	 * toolbar is a fresh object / new container after a commit).
+	 */
+	function applyDragChrome(): void {
+		if (dragging === undefined) return
+		container.classList.add('dragging')
+		container.dataset.dragging = 'true'
+		// NOTE: no `palette-dragging` class and no `data-dragged` yet (see
+		// below) — both change layout-sensitive chrome. `palette-dragging`
+		// has no CSS rule (dead mirror); `data-dragged` adds
+		// `2 × --palette-dz-size` padding to the dragged toolbar, which
+		// shifts every `getBoundingClientRect` the slide + outside
+		// measurements read. Wire them only with the Phase 6 e2e pins that
+		// prove the shift is compensated.
+		const live = core.layout.getLayout()
+		const origin = dragging.origin
+		if (origin.kind === 'border') {
+			const border = live.borders[regionOfBorder(origin.border, live) ?? 'top']
+			const trackIndex = border.indexOf(origin.track)
+			if (trackIndex < 0) return
+			const track = border[trackIndex]
+			if (track === undefined) return
+			for (const slot of track) {
+				const node = nodes.get(slot.toolbar)
+				if (!(node instanceof HTMLElement)) continue
+				if (
+					isDraggedToolbarAt(dragging, slot.toolbar, {
+						kind: 'border',
+						toolbar: slot.toolbar,
+						track,
+						border,
+					})
+				) {
+					void node
+				} else {
+					delete node.dataset.dragged
+				}
+			}
+			return
+		}
+		for (const row of live.parking) {
+			const node = nodes.get(row)
+			if (!(node instanceof HTMLElement)) continue
+			const index = live.parking.indexOf(row)
+			if (
+				isDraggedToolbarAt(dragging, row, {
+					kind: 'parking',
+					toolbar: row,
+					parking: live.parking,
+					index,
+				})
+			) {
+				void node
+			} else {
+				delete node.dataset.dragged
+			}
+		}
+	}
+
+	/** Region holding `border` (identity scan — mirrors core `regionOf`). */
+	function regionOfBorder(
+		border: Border,
+		live: ReturnType<PaletteCore['layout']['getLayout']>
+	): PaletteRegion | undefined {
+		for (const region of REGIONS) {
+			if (live.borders[region] === border) return region
+		}
+		return undefined
+	}
+
+	/** Clear the Phase 6 chrome mirror (per-toolbar + root). */
+	function clearDragChrome(): void {
+		container.classList.remove('palette-dragging')
+		// `data-dragged` is never set yet (see `applyDragChrome`): the
+		// sweep stays so the mirror cannot leave stale attributes behind
+		// once it is wired.
+		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
+			for (const node of host.querySelectorAll('.toolbar[data-dragged]')) {
+				if (node instanceof HTMLElement) delete node.dataset.dragged
+			}
+		}
 	}
 
 	/**
@@ -743,8 +864,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			dragging = undefined
 			return
 		}
-		container.classList.add('dragging')
-		container.dataset.dragging = 'true'
+		applyDragChrome()
 		if (dragTarget !== undefined) armSlide(dragging.origin.toolbar, region, event)
 		startDragSession({
 			event,
@@ -766,6 +886,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		hoveredTrackSpace = undefined
 		slideGrabOffset = undefined
 		slideItemGrab = undefined
+		clearDragChrome()
 		container.classList.remove('dragging')
 		delete container.dataset.dragging
 		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
@@ -968,6 +1089,44 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
+	 * Phase 6 `outside` hit-test: the pointer is over the border element
+	 * but on no gap/track/toolbar (its padding / stack-gap halo) — measure
+	 * the track spans and project onto the border's own stack-gap index
+	 * space via `outsideGapForTrack` (pure, unit-pinned in
+	 * `outside.test.ts`). Returns the gap to report as `{ kind: 'outside'
+	 * }`, or `undefined` when the pointer is outside the border box or
+	 * there is nothing to align with.
+	 */
+	function outsideGapAt(
+		borderEl: HTMLElement,
+		border: Border,
+		event: PointerEvent
+	): number | undefined {
+		if (border.length === 0) return undefined
+		const rect = borderEl.getBoundingClientRect()
+		if (
+			event.clientX < rect.left ||
+			event.clientX > rect.right ||
+			event.clientY < rect.top ||
+			event.clientY > rect.bottom
+		) {
+			return undefined
+		}
+		const region = borderEl.getAttribute('data-region') as PaletteRegion | null
+		const horizontal = region === 'top' || region === 'bottom'
+		const spans: { readonly start: number; readonly end: number }[] = []
+		for (const node of borderEl.querySelectorAll(':scope > .toolbar-track')) {
+			if (!(node instanceof HTMLElement)) continue
+			const box = node.getBoundingClientRect()
+			spans.push(
+				horizontal ? { start: box.top, end: box.bottom } : { start: box.left, end: box.right }
+			)
+		}
+		if (spans.length === 0) return 0
+		return outsideGapForTrack(spans, horizontal ? event.clientY : event.clientX)
+	}
+
+	/**
 	 * Apply one session `highlight` event: toggle classes on the live gap
 	 * node (`on` → `highlighted`, `double` → `highlighted hovered`,
 	 * `off` → neither). The DZ carries its live container, so the node is
@@ -1038,6 +1197,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	function applyStructureEvent(event: DragEvent): void {
 		if (event.type !== 'structure') return
 		applyOp(event.op)
+		// The placed toolbar is a fresh object (or a new container) after a
+		// commit — the chrome mirror keys on identity, so re-apply it.
+		applyDragChrome()
 		rearmSlideAfterStructure()
 	}
 
@@ -1109,6 +1271,102 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	// assertion (`work-zone.is-dimmed` while the console is open).
 	const consoleHost = document.createElement('div')
 	center.append(consoleHost)
+
+	/**
+	 * Phase 6 mask affordance (mirrors svelte `Ide` `maskHover`): while
+	 * editing + dragging, a pointer over the dimmed work zone / overlay
+	 * background (the center, but not over a border and not inside the
+	 * console panel / drawer popup / dialog) paints the inner end gap of
+	 * each border (`border.length` — bottom-most of top, top-most of
+	 * bottom, right-most of left, left-most of right). Paint-only and
+	 * consequence-free: the adapter toggles the classes directly (never
+	 * through the session — a mask position maps to nothing, so the
+	 * session would see `null` and clear), applying the core-exported
+	 * emptied veto itself so the *rule* stays in core. The dwell never
+	 * arms here (mirrors svelte `masked` guard).
+	 */
+	function paintMask(active: boolean): void {
+		const live = core.layout.getLayout()
+		for (const region of REGIONS) {
+			const border = live.borders[region]
+			const borderEl = borderElementOf(border)
+			if (!(borderEl instanceof HTMLElement)) continue
+			const gap = border.length
+			const node = borderEl.querySelector(`:scope > [data-stack-index="${gap}"]`)
+			if (!(node instanceof HTMLElement)) continue
+			// Core-owned veto rule (same predicate the session uses):
+			// a drag that would empty its origin track never paints the
+			// two stacks touching that track — including via the mask.
+			const emptied =
+				dragging !== undefined ? draggingEmptiesTrackIndex(dragging, border) : undefined
+			const vetoed = emptied !== undefined && (gap === emptied || gap === emptied + 1)
+			node.classList.toggle('highlighted', active && !vetoed)
+			node.classList.toggle('hovered', false)
+		}
+	}
+
+	/**
+	 * Phase 6 panel affordance (mirrors svelte `Console`
+	 * `parkingMaskHover`): while editing + dragging, a pointer over the
+	 * console panel background but outside parking rows/gaps (and outside
+	 * popups/dialogs) reports the normal `parking-gap` end-gap hover, so
+	 * dwell and commit stay core's. Returns `true` when the panel owns the
+	 * pointer (the caller skips its own handling).
+	 */
+	function overPanelBackground(event: PointerEvent): boolean {
+		const session = dragSession
+		if (!computeEditing() || !session || dragging === undefined) return false
+		const target = event.target
+		if (!(target instanceof HTMLElement)) return false
+		const panel = target.closest('.palette-default-command-panel')
+		if (!(panel instanceof HTMLElement)) return false
+		// Over parking itself → parking owns the highlight, not the mask.
+		if (target.closest('.palette-parking')) return false
+		// On a popup/dialog → neither parking nor mask.
+		if (target.closest('.palettable-drawer__popup, dialog')) return false
+		const live = core.layout.getLayout()
+		const gap = live.parking.length
+		session.over({ kind: 'parking-gap', parking: live.parking, gap }, pointerSample(event))
+		return true
+	}
+
+	// Mask + panel listeners (container-level, like svelte `Ide`
+	// `onIdePointerMove`): the center owns the mask (work zone / overlay
+	// background), the console panel owns the parking end gap. Both gate
+	// on editing + live session — hover alone stays dark. The mask is
+	// paint-only: it never calls `session.over(null)` (that would clear
+	// the session's own paint, e.g. the track-gap fallback the edge-stay
+	// spec pins) — it only toggles its own end-gap classes, which the
+	// session's next diff leaves alone (different keys).
+	center.addEventListener('pointermove', (event) => {
+		const session = dragSession
+		if (!computeEditing() || !session || dragging === undefined) {
+			paintMask(false)
+			return
+		}
+		const target = event.target
+		if (!(target instanceof HTMLElement)) {
+			paintMask(false)
+			return
+		}
+		// Over a border → the border owns the highlight, not the mask.
+		if (target.closest('.toolbar-border')) {
+			paintMask(false)
+			return
+		}
+		// The console panel owns its own background (parking end gap via
+		// the session) — the mask covers the overlay background + work
+		// zone only. The overlay itself carries `role="dialog"`, so only
+		// the panel counts as modal, not the overlay background.
+		if (target.closest('.palette-default-command-panel, .palettable-drawer__popup, dialog')) {
+			paintMask(false)
+			return
+		}
+		paintMask(true)
+	})
+	center.addEventListener('pointerleave', () => {
+		paintMask(false)
+	})
 
 	function hasCommandBoxTool(): boolean {
 		const layout = core.layout.getLayout()
@@ -1353,27 +1611,44 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (!(target instanceof HTMLElement)) return
 			// Inside a toolbar → that toolbar owns the perpendicular DZs.
 			if (target.closest('.toolbar')) return
-			// Hovering a track background (not a gap): highlight the two
-			// flanking stack gaps (session `over` on the track element).
-			const trackBg = target.closest('[data-track-index]')
-			if (trackBg && borderEl.contains(trackBg) && !target.closest('[data-stack-index]')) {
-				const trackIndex = Number((trackBg as HTMLElement).dataset.trackIndex)
-				if (Number.isInteger(trackIndex)) {
-					// Track background (not a gap): the session paints the two
-					// flanking stack gaps (legacy `track` element, active-track
-					// fallback). Passing the index as a `stack-gap` would paint
-					// only that one gap. Paint arrives via events.
-					session.over({ kind: 'track', border, trackIndex }, pointerSample(event))
+			// Hovering a track gap (not a toolbar): the session commits on
+			// a highlighted gap and paints the flanking stacks via the
+			// containing track — no separate track-background hover exists.
+			const trackSpaceEl = target.closest('[data-track-space-index]')
+			if (trackSpaceEl && borderEl.contains(trackSpaceEl)) {
+				const trackEl = target.closest('[data-track-index]')
+				const rawIndex = Number((trackEl as HTMLElement | null)?.dataset.trackIndex)
+				const trackIndex = Number.isInteger(rawIndex) ? rawIndex : undefined
+				const rawGap = Number((trackSpaceEl as HTMLElement).dataset.trackSpaceIndex)
+				const gap = Number.isInteger(rawGap) ? rawGap : undefined
+				const track = trackIndex !== undefined ? border[trackIndex] : undefined
+				if (track !== undefined && gap !== undefined) {
+					slideRearmEvent = event
+					session.over({ kind: 'track-gap', track, gap }, pointerSample(event))
+					slideRearmEvent = undefined
 					return
 				}
 			}
 			const spaceEl = target.closest('[data-stack-index]')
-			if (!spaceEl || !borderEl.contains(spaceEl)) return
-			const index = Number((spaceEl as HTMLElement).dataset.stackIndex)
-			const gap = Number.isInteger(index) ? index : undefined
-			if (gap === undefined) return
-			// Direct stack-gap hover: paints now, dwell fires the commit.
-			session.over({ kind: 'stack-gap', border, gap }, pointerSample(event))
+			if (spaceEl && borderEl.contains(spaceEl)) {
+				const index = Number((spaceEl as HTMLElement).dataset.stackIndex)
+				const gap = Number.isInteger(index) ? index : undefined
+				if (gap === undefined) return
+				// Direct stack-gap hover: paints now, dwell fires the commit.
+				session.over({ kind: 'stack-gap', border, gap }, pointerSample(event))
+				return
+			}
+			if (spaceEl === null && !borderEl.contains(target)) return
+			// Phase 6 `outside`: over the border element but on no
+			// gap/track/toolbar (its padding / stack-gap halo) — project
+			// onto the border's own stack gaps (alongside track *i* →
+			// nearer of gaps *i* / *i+1*). Paints + dwells exactly like
+			// `stack-gap` (same index space, different hit region).
+			const outside = outsideGapAt(borderEl, border, event)
+			if (outside !== undefined) {
+				session.over({ kind: 'outside', border, gap: outside }, pointerSample(event))
+				return
+			}
 			void event
 		})
 		const ordered = inverse ? [...border].reverse() : border
@@ -1752,6 +2027,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		})
 		const panel = el('div', 'palette-default-command-panel')
 		panel.setAttribute('role', 'presentation')
+		// Phase 6 panel affordance: pointer over the panel background
+		// (outside parking rows/gaps/popups) keeps the parking end gap lit
+		// via the normal `parking-gap` hover — dwell + commit stay core's.
+		panel.addEventListener('pointermove', (event) => {
+			overPanelBackground(event)
+		})
+		panel.addEventListener('pointerleave', (event) => {
+			dragSession?.over(null, pointerSample(event))
+		})
 		overlay.append(panel)
 		const close = document.createElement('button')
 		close.type = 'button'
@@ -2205,6 +2489,23 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			trigger.append(triggerStrong, triggerMeta)
 			trigger.addEventListener('click', () => {
 				consoleStore.patch({ selectedVariantId: variant.id })
+			})
+			// Phase 6 catalog source: pointerdown on a variant starts a
+			// creation drag (same item factory as the discrete flow, so
+			// drag and click insert the same shape). No session → no drag
+			// (unbuildable selection); the click above still selects.
+			trigger.addEventListener('pointerdown', (event) => {
+				const item = itemFromAddSelection(
+					{
+						source,
+						variant,
+						booleanValue: consoleStore.snapshot.booleanValue,
+						setValue: consoleStore.snapshot.setValue,
+					},
+					core.points
+				)
+				if (item === undefined) return
+				startCatalogDrag(event, item)
 			})
 			wrap.append(trigger)
 			if (variant.kind === 'set' && selectedVariant === variant.id) {

@@ -10,7 +10,13 @@
 import { configuration } from './configuration.js'
 // One-way: `drag.ts` takes the engine by injection (see `DragEngine`), so it
 // never imports this module at runtime and there is no cycle.
-import { createToolbarDrag, type GrabTarget, type ToolbarDrag } from './drag.js'
+import {
+	createToolbarDrag,
+	type GrabTarget,
+	insertToolbarLite,
+	isItemSpaceFreeLite,
+	type ToolbarDrag,
+} from './drag.js'
 import { PaletteError } from './errors.js'
 import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
@@ -480,6 +486,8 @@ export class PaletteLayoutTree {
 			commitDraggedToParkingRow,
 			commitSlide,
 			stackFlanks,
+			isItemSpaceFree: isItemSpaceFreeLite,
+			insertToolbar: (track, index, toolbar) => insertToolbarLite(track, index, toolbar),
 		})
 	}
 
