@@ -488,11 +488,15 @@ export class PaletteCore {
 		const current = this.values.require(def.id) as number
 		if (def.type === 'number') {
 			if (action === 'inc') {
-				this.values.set(def.id, (current + step) as never)
+				const next = current + step
+				const clamped = constraints?.max === undefined ? next : Math.min(next, constraints.max)
+				this.values.set(def.id, clamped as never)
 				return
 			}
 			if (action === 'dec') {
-				this.values.set(def.id, (current - step) as never)
+				const next = current - step
+				const clamped = constraints?.min === undefined ? next : Math.max(next, constraints.min)
+				this.values.set(def.id, clamped as never)
 				return
 			}
 		}
@@ -518,8 +522,15 @@ function namedActionCan(
 		if (current === undefined)
 			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
 		const value = current as number
-		if (action === 'inc') return constraints?.max === undefined || value < constraints.max
-		if (action === 'dec') return constraints?.min === undefined || value > constraints.min
+		// Step-aware: a press that would overshoot the bound is disabled,
+		// mirroring the stepper UI (`value ± step >/< bound` → disabled).
+		// A small epsilon absorbs float error (`0.1 + 0.2` style drift).
+		const step = constraints?.step ?? 1
+		const epsilon = Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(step)) * 8
+		if (action === 'inc')
+			return constraints?.max === undefined || value + step <= constraints.max + epsilon
+		if (action === 'dec')
+			return constraints?.min === undefined || value - step >= constraints.min - epsilon
 	}
 	return undefined
 }

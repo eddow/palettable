@@ -43,8 +43,31 @@ Notes:
 
 - `segmented` is the "radio-button" idiom: joined buttons where the selected one
   reads as pushed-in. `select` is the compact dropdown. Both are enum editors.
+  `config.choiceDisplay` (`'icon' | 'text' | 'both'`, default `'both'`) controls
+  whether option text is shown. In a **vertical** toolbar a segmented with icons
+  shows icons only at rest and reveals the text on hover/focus as an overlay
+  beside them — the toolbar never resizes. `config.showText: false` hides the
+  option labels on **both** axes (icon-only buttons, mirroring the slider's
+  `showValue: false`). The tool editor exposes this as a "Show text"
+  checkbox (segmented only, checked by default).
 - `stepper` is a ± button pair for integer/stepped values; `slider` is the
   continuous range. Both are number editors (they share `sliderPresenter`).
+  A slider's range is `inline` by default, running along the toolbar axis;
+  the `drawerSlider` editor variant moves it out of the flow onto the
+  perpendicular axis, revealed as an attached input-group segment on hover
+  (trigger keeps the toolbar-outer half-rounding, the range takes the
+  workspace-side half, shared edge flat).
+  `config.sliderVariant` (`'inline' | 'drawer'`) selects a layout when the
+  editor id is neither `slider` nor `drawerSlider`. The current value is
+  shown next to the icon by default; `config.showValue: false` hides the
+  number (icon-only chip) for `slider` / `drawerSlider` — steppers always
+  show it, stars never do. The tool editor exposes this as a "Display
+  number" checkbox.
+- `commandBox` adapts to the surface axis: horizontal renders the full input +
+  results popover inline; **vertical** renders an icon-only square trigger whose
+  input and popover are overlays that open over the IDE without widening the
+  toolbar. Horizontally the input is revealed on hover/focus; at rest the shell
+  shows the icon plus the current text (or a muted hint while empty).
 
 Plus `BaseConfigurator.svelte` (generic label/icon/hint/editor/tone panel via
 `configuratorPresenter`), `Icon.svelte` (`string | Component`, factory fallback to

@@ -325,19 +325,26 @@ export function drawerTriggerShellTemplate(options: {
 	hint?: string
 	tone: 'neutral' | 'accent'
 	icon?: string
+	axis?: 'horizontal' | 'vertical'
+	region?: string
 }): string {
 	const accessible = options.label !== '' ? options.label : (options.hint ?? 'More')
-	const title = options.hint ?? options.label
+	const title = options.label !== '' ? options.label : (options.hint ?? 'More')
+	const layout =
+		options.axis !== undefined ? ` palette-default-layout-${options.axis}` : ''
+	const region =
+		options.region !== undefined ? ` palette-default-region-${options.region}` : ''
 	const icon =
 		options.icon !== undefined
 			? `<span class="palette-default-icon">${escapeHtml(options.icon)}</span>`
 			: ''
-	const label = options.label !== '' ? `<span>${escapeHtml(options.label)}</span>` : ''
+	// The label is never rendered as visible text (icon-only trigger on every
+	// axis); it survives as the accessible name + tooltip instead.
 	return (
 		`<button type="button" class="palette-default-tool palette-default-tone-${options.tone}` +
-		` palettable-drawer__trigger" aria-label="${escapeHtml(accessible)}"` +
+		` palettable-drawer__trigger${layout}${region}" aria-label="${escapeHtml(accessible)}"` +
 		` aria-expanded="false" aria-haspopup="true" title="${escapeHtml(title)}">` +
-		`${icon}${label}` +
+		`${icon}` +
 		`<span class="palette-default-drawer-chevron" aria-hidden="true">▸</span></button>`
 	)
 }
@@ -352,12 +359,32 @@ export function drawerPopupShellTemplate(childAxis: 'horizontal' | 'vertical'): 
 
 // ── Command-box shell ───────────────────────────────────────────────────────
 
-export function commandBoxShellTemplate(options: { hint: string; icon: string }): string {
+/**
+ * Command-box shell. The input is revealed on hover/focus only; at rest the
+ * shell shows the point icon plus the current text while non-empty (so a
+ * populated command box stays readable while collapsed), and icon-only while
+ * empty — no redundant hint readout, the input's own placeholder covers that.
+ * Vertical boxes size to the perpendicular var and open their overlay like a
+ * drawer over the IDE (CSS-only, no portal).
+ */
+export function commandBoxShellTemplate(options: {
+	hint: string
+	icon: string
+	axis?: 'horizontal' | 'vertical'
+	region?: string
+}): string {
+	const axis = options.axis ?? 'horizontal'
+	const layout = `palette-default-layout-${axis}`
+	const region = options.region !== undefined ? ` palette-default-region-${options.region}` : ''
 	return (
-		`<div class="palette-default-command-box is-floating" data-testid="command-box-combobox">` +
+		`<div class="palette-default-command-box is-floating ${layout}${region}"` +
+		` data-has-text="false" data-testid="command-box-combobox">` +
 		`<div class="palette-default-command-shell" title="${escapeHtml(options.hint)}">` +
-		`<span class="palette-default-icon">${escapeHtml(options.icon)}</span>` +
+		`<span class="palette-default-command-icon palette-default-icon">` +
+		`${escapeHtml(options.icon)}</span>` +
 		`<div class="palette-default-command-tokens">` +
+		`<span class="palette-default-command-text is-hint" aria-hidden="true">` +
+		`${escapeHtml(options.hint)}</span>` +
 		`<input class="palette-default-command-input" data-testid="command-box-input"` +
 		` placeholder="Command…" value="">` +
 		`<button type="button" class="palette-default-command-open"` +

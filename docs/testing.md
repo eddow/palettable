@@ -1,6 +1,6 @@
 # Testing
 
-## Core unit (Vitest, node) — 264 tests, 15 files
+## Core unit (Vitest, node) — 328 tests, 16 files
 
 Run: `pnpm --filter @palettable/core test`. Config:
 `packages/core/vitest.config.ts` (`environment: 'node'`, alias
@@ -16,11 +16,11 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
 | `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, the core drag engine (`dragStart` origin resolution + whole-toolbar flag, `dragOver` paint/commit per element kind incl. dark-gap no-move + editing-off dark), inline-virtual snapshot round-trip |
 | `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, pointless items) |
-| `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked), `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
-| `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
+| `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked, step-aware) + `run` clamping at min/max, `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
+| `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog incl. bounds-aware inc/dec `can`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
 | `src/console.test.ts` | `ConsoleStore` open/close/toggle + add-state + listeners, `consolePointDescriptor` |
 | `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveEditorVariant` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from/stash display helpers |
-| `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration`, `GapDwell` |
+| `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration` |
 | `src/render.test.ts` | Node-only import (no timers), golden render model (byte-identical + JSON round-trip), values/descriptors/editors/keystrokes, virtuals (enum-from key/setter/stash pressed), drawers (recursion + depth bound), version/unknown-point rejection, hydration round-trip, action isolation, config-pinning, import-graph + determinism, value codecs |
 | `src/context.test.ts` | `ValuesBag` (frozen get, `setTree` batching, per-key notify, lock → `PaletteWriteError`, `asObject`), `NothingPoint` guards + `initialValues`/`setMany` rejection, core registry (`setContext` replace / `removeContext` / root `getBag('')` / `resolveBags` / `subscribeContext` / `evaluateCan` / `subscribeCan` flips-only / `dispose`), `dualSourceValue` + param-array accessors, `buttonPresenter` functional `can` |
 
@@ -33,7 +33,7 @@ Gotchas:
 - `defineVirtual` re-defining the same virtual id is allowed; a new virtual
   colliding with a point id throws `duplicate point id`.
 
-## Vanilla unit (Vitest, jsdom) — 22 tests, 6 files
+## Vanilla unit (Vitest, jsdom) — 51 tests, 9 files
 
 Run: `pnpm --filter @palettable/vanilla test`. Config:
 `packages/vanilla/vitest.config.ts` (jsdom, `include: ['src/**/*.test.ts']`).
@@ -41,11 +41,11 @@ Run: `pnpm --filter @palettable/vanilla test`. Config:
 | File | Covers |
 | ---- | ------ |
 | `src/adapter.test.ts` | the minimal `<ul>` renderer (barrel smoke) |
-| `src/keys.test.ts` | `normalizeKeystroke` / `keystrokeFromEvent` / `createVanillaKeys` resolution / `isEditableTarget` |
+| `src/keys.test.ts` | `normalizeKeystroke` (incl. Plus-key `+` separator collision) / `keystrokeFromEvent` (Shift-consumed symbols, Shift-letter distinct) / `createVanillaKeys` resolution / `isEditableTarget` |
 | `src/nodes.test.ts` | `NodeRegistry` identity map (toolbar / item / track / row kinds, delete, clear) |
-| `src/highlight.test.ts` | `syncGapClasses` decision diffing (only changed indices touched) + `clearGapClasses` |
+| `src/highlight.test.ts` | `clearGapClasses` (highlight arrives as per-gap `DragEvent`s) |
 | `src/value-sync.test.ts` | the fine-DOM reconciliation contract: per-tool value sync in place (same node: toggle / slider / focused-slider guard), editing chrome without rebuild (`syncEditing`/`applyEditing` — root classes, `inert`, guards, same `.toolbar` identity), `setInspecting` two-node flip, selection patch re-rendering the details panel only, `can` flips toggling `disabled` in place |
-| `src/drag.test.ts` | slide math + add-item probes: `clampSlideDelta` (shift-from-resting, both-end clamps, grab offset) + `itemFromAddSelection` (set/tool/action/item variants, family mismatch → `undefined`) |
+| `src/drag.test.ts` | slide measuring + add-item probes: `extractionGrabOffset` (intra-button offset, middle fallbacks) + `itemFromAddSelection` (set/tool/action/item variants, family mismatch → `undefined`); `clampSlideDelta` lives in core (single copy) |
 
 ## Svelte unit (Vitest, jsdom) — 179 tests, 17 files
 

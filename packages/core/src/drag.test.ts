@@ -86,7 +86,28 @@ describe('createDrag session shell', () => {
 		const item = { tool: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		expect(session.layout).toBe(tree)
+		// No live toolbar owns the chrome until the first placement inserts.
+		expect(session.draggedToolbar).toBe(undefined)
 		session.end()
+	})
+
+	it('draggedToolbar is the live origin toolbar (core-decided chrome)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		// Decided by core at grab time — the adapter only applies it.
+		expect(session.draggedToolbar).toBe(toolbar)
+		// It follows the origin across a restructure commit (extraction
+		// into a fresh singleton), and clears on `end()`.
+		const track = live.borders.top[1] ?? []
+		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
+		expect(session.draggedToolbar).not.toBe(toolbar)
+		expect(session.draggedToolbar).toBe(session.draggedToolbar)
+		session.end()
+		expect(session.draggedToolbar).toBe(undefined)
 	})
 
 	it('over(tool) paints the active-item fallback without committing', () => {
@@ -870,6 +891,43 @@ describe('highlight diff events (Phase 2)', () => {
 		const states = events.filter((event) => event.type === 'highlight').map((event) => event.state)
 		expect(states).toContain('off')
 		expect(states).toContain('double')
+		session.end()
+	})
+
+	it('emits incoming paint before departed offs (no layout collapse under cursor)', () => {
+		// Order pin for the hover-stale fix: highlighted gaps carry min-size
+		// (doubled when directly hovered), so clearing first collapses the
+		// layout out from under the pointer. Incoming `on`/`double` + flips
+		// must emit before departed `off`s — the second gap doubles before
+		// the before-one disappears.
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
+		const first = events.filter((event) => event.type === 'highlight').length
+		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 1 }, sample)
+		const after = events.slice(first)
+		const doubleAt = after.findIndex(
+			(event) =>
+				event.type === 'highlight' &&
+				event.state === 'double' &&
+				event.dz.kind === 'stack-gap' &&
+				event.dz.gap === 1
+		)
+		const offAt = after.findIndex(
+			(event) =>
+				event.type === 'highlight' &&
+				event.state === 'off' &&
+				event.dz.kind === 'stack-gap' &&
+				event.dz.gap === 0
+		)
+		expect(doubleAt).toBeGreaterThan(-1)
+		expect(offAt).toBeGreaterThan(-1)
+		expect(doubleAt).toBeLessThan(offAt)
 		session.end()
 	})
 

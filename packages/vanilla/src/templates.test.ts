@@ -205,14 +205,25 @@ describe('console overlay shell', () => {
 })
 
 describe('drawer + command-box shells', () => {
-	it('drawer trigger keeps the accessible name exact, chevron hidden', () => {
+	it('drawer trigger is icon-only: label is tooltip + accessible name, never text', () => {
 		const trigger = elementFromHtml(
-			drawerTriggerShellTemplate({ label: 'More', hint: 'More tools', tone: 'neutral', icon: '▤' })
+			drawerTriggerShellTemplate({
+				label: 'More',
+				hint: 'More tools',
+				tone: 'neutral',
+				icon: '▤',
+				axis: 'vertical',
+				region: 'left',
+			})
 		)
 		expect(trigger.getAttribute('aria-label')).toBe('More')
+		expect(trigger.getAttribute('title')).toBe('More')
+		expect(trigger.textContent).not.toContain('More')
 		expect(
 			trigger.querySelector('.palette-default-drawer-chevron')?.getAttribute('aria-hidden')
 		).toBe('true')
+		expect(trigger.classList.contains('palette-default-layout-vertical')).toBe(true)
+		expect(trigger.classList.contains('palette-default-region-left')).toBe(true)
 	})
 
 	it('drawer popup shell is overlay + dialog popup', () => {

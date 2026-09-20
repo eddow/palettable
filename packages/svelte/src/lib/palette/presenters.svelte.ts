@@ -59,6 +59,8 @@ export type HeadItemConfigBase = {
 	label?: string
 	hint?: string
 	tone?: 'neutral' | 'accent'
+	/** Segmented label opt-out (`segmented` only; default shown). */
+	showText?: boolean
 }
 
 export type HeadChoiceDisplay = 'icon' | 'text' | 'both'
@@ -161,6 +163,24 @@ function headEnumChoiceText(
 	return icon ? `${icon} ${label}` : label
 }
 
+/** Icon part of an option under a display mode (`undefined` when hidden). */
+function headChoiceIcon(
+	value: { readonly icon?: unknown },
+	display: HeadChoiceDisplay
+): string | undefined {
+	if (display === 'text') return undefined
+	return typeof value.icon === 'string' ? value.icon : undefined
+}
+
+/** Label part of an option under a display mode (`undefined` when hidden). */
+function headChoiceLabel(
+	value: { readonly value: string; readonly label?: string },
+	display: HeadChoiceDisplay
+): string | undefined {
+	if (display === 'icon') return undefined
+	return value.label ?? value.value
+}
+
 export type ButtonPresenter = {
 	readonly label: string
 	readonly icon: string | undefined
@@ -253,6 +273,10 @@ export function togglePresenter(
 export type SelectOption = {
 	readonly value: string
 	readonly text: string
+	/** Icon part, when the option declares one. */
+	readonly icon: string | undefined
+	/** Label part; `undefined` when the display mode hides text. */
+	readonly label: string | undefined
 	/** Option enablement; `false` disables selection (radio/segmented honor it). */
 	readonly can: boolean
 }
@@ -263,9 +287,18 @@ export type SelectPresenter = {
 	readonly label: string
 	readonly icon: string
 	readonly direction: 'horizontal' | 'vertical'
+	/** Segmented label visibility (`config.showText === false` hides it → icon-only). */
+	readonly showText: boolean
 	readonly value: string
 	readonly options: readonly SelectOption[]
 	select(value: string): void
+}
+
+/** Whether a segmented shows its option labels. Opt-out via
+ * `config.showText === false` (segmented only; default shown). */
+function headShowText(item: AnyItem): boolean {
+	const config = (item as { config?: unknown }).config as { showText?: unknown } | undefined
+	return config?.showText !== false
 }
 
 /** View-model for an enum tool: current icon/value + display-filtered options. */
@@ -284,6 +317,7 @@ export function selectPresenter(
 		label: meta.label,
 		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? tool.value),
 		direction: headLayoutFromSurface(context.scope, context.surface),
+		showText: headShowText(context.item),
 		get value() {
 			return tool.value
 		},
@@ -293,6 +327,8 @@ export function selectPresenter(
 				value as { readonly value: string; readonly label?: string; readonly icon?: unknown },
 				display
 			),
+			icon: headChoiceIcon(value as { readonly icon?: unknown }, display),
+			label: headChoiceLabel(value as { readonly value: string; readonly label?: string }, display),
 			can: (value as { readonly can?: boolean }).can !== false,
 		})),
 		select(value: string) {
@@ -380,11 +416,14 @@ export type ConfiguratorPresenter = {
 	readonly tone: 'neutral' | 'accent'
 	readonly editor: string | undefined
 	readonly editorChoices: readonly PaletteEditorChoice[]
+	/** Segmented label visibility (`config.showText === false` hides it). */
+	readonly showText: boolean
 	/** Item-level deletion (G2): always true — every editor is removable. */
 	readonly removable: boolean
 	setText(key: 'icon' | 'label' | 'hint', value: string): void
 	setTone(value: string): void
 	setEditor(value: string): void
+	setShowText(value: boolean): void
 	/** Remove the item from its toolbar, pruning empty toolbar/track. */
 	remove(): boolean
 }
@@ -434,6 +473,9 @@ export function configuratorPresenter(
 		tone: meta.tone,
 		editor: meta.editor,
 		editorChoices,
+		get showText() {
+			return headShowText(item)
+		},
 		setText(key, value) {
 			ensureConfig()[key] = value
 		},
@@ -443,18 +485,37 @@ export function configuratorPresenter(
 		setEditor(value) {
 			item.editor = value
 			const config = item.config as Record<string, unknown> | undefined
-			if (
-				value !== 'flip' &&
-				value !== 'radio' &&
-				value !== 'select' &&
-				value !== 'segmented' &&
-				value !== 'splitRadio' &&
-				config
+			if (value === 'slider' || value === 'drawerSlider') {
+				if (config) {
+					delete config.values
+					delete config.keywords
+					delete config.choiceDisplay
+					delete config.showText
+				}
+			} else if (value === 'segmented') {
+				if (config) delete config.showValue
+			} else if (
+				value === 'flip' ||
+				value === 'radio' ||
+				value === 'select' ||
+				value === 'splitRadio'
 			) {
+				if (config) {
+					delete config.showValue
+					delete config.showText
+				}
+			} else if (config) {
 				delete config.values
 				delete config.keywords
 				delete config.choiceDisplay
+				delete config.showValue
+				delete config.showText
 			}
+		},
+		setShowText(value) {
+			const config = ensureConfig()
+			if (value) delete config.showText
+			else config.showText = false
 		},
 		removable: true,
 		remove() {

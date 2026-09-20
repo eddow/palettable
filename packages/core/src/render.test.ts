@@ -350,10 +350,9 @@ describe('configuration pinning', () => {
 })
 
 describe('import graph (SSR §4.7)', () => {
-	it('render.ts never imports globals, gap-dwell, or umd', () => {
+	it('render.ts never imports globals or umd', () => {
 		const source = readFileSync(new URL('./render.ts', import.meta.url), 'utf8')
 		expect(source).not.toMatch(/from '\.\/globals\.js'/)
-		expect(source).not.toMatch(/from '\.\/gap-dwell\.js'/)
 		expect(source).not.toMatch(/from '\.\/umd\.js'/)
 	})
 

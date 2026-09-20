@@ -78,6 +78,86 @@ describe('per-tool value sync', () => {
 		ide.dispose()
 	})
 
+	it('slider with showValue:false renders icon-only (no text node)', () => {
+		const core = new PaletteCore(
+			[{ id: 'speed', label: 'Speed', type: 'number', constraints: { min: 0, max: 10 } }],
+			{
+				initialValues: { speed: 4 },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'speed', editor: 'slider', config: { showValue: false } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const readout = host.querySelector('.palette-default-slider-value')
+		expect(readout?.classList.contains('is-icon-only')).toBe(true)
+		const texts = [...(readout?.childNodes ?? [])].filter(
+			(child) => child.nodeType === Node.TEXT_NODE
+		)
+		expect(texts).toHaveLength(0)
+		ide.dispose()
+	})
+
+	it('segmented with showText:false renders icon-only (no label node)', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'theme', editor: 'segmented', config: { showText: false } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const group = host.querySelector('.palette-default-segmented')
+		expect(group).not.toBe(null)
+		expect(group?.querySelector('.palette-default-choice')).toBe(null)
+		expect(group?.querySelectorAll('.palette-default-choice-icon')).toHaveLength(2)
+		ide.dispose()
+	})
+
 	it('focused slider is not clobbered mid-drag', () => {
 		const { core, ide, host } = setup()
 		const input = host.querySelector('input[type="range"]') as HTMLInputElement | null
@@ -107,6 +187,24 @@ describe('editing chrome without rebuild', () => {
 		expect(host.classList.contains('editing')).toBe(false)
 		expect(host.querySelector('.toolbar-item-content')?.hasAttribute('inert')).toBe(false)
 		expect(host.querySelector('.toolbar-item-guard')).toBe(null)
+		ide.dispose()
+	})
+
+	it('guard pointerdown stamps core-decided data-dragged (vanilla applies only)', () => {
+		const { consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const bars = [...host.querySelectorAll('.toolbar')] as HTMLElement[]
+		expect(bars.length).toBeGreaterThanOrEqual(2)
+		expect(host.querySelector('.toolbar[data-dragged="true"]')).toBe(null)
+		const first = host.querySelectorAll('.toolbar-item')[0] as HTMLElement
+		first
+			.querySelector('.toolbar-item-guard')
+			?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		// Core decided the dragged toolbar at grab time; vanilla stamped
+		// exactly one node — the grabbed toolbar, not its neighbour.
+		const dragged = [...host.querySelectorAll('.toolbar[data-dragged="true"]')] as HTMLElement[]
+		expect(dragged).toHaveLength(1)
+		expect(dragged[0]).toBe(bars[0])
 		ide.dispose()
 	})
 
@@ -143,6 +241,57 @@ describe('editing chrome without rebuild', () => {
 		expect(host.querySelector('[data-testid="console-details-panel"]') instanceof HTMLElement).toBe(
 			true
 		)
+		ide.dispose()
+	})
+
+	it('add-source select clears an inspected item so the add panel shows', () => {
+		const { core, consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const first = host.querySelector('.toolbar-item') as HTMLElement
+		first
+			.querySelector('.toolbar-item-guard')
+			?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+		expect(first.dataset.inspected).toBe('true')
+		expect(host.querySelector('.palette-default-config-table')).not.toBe(null)
+		// Clicking an add source begins add: the inspector clears and the
+		// add panel for the selected entry renders instead.
+		const row = host.querySelector('.palette-default-command-result') as HTMLElement | null
+		expect(row).not.toBe(null)
+		row!.click()
+		expect(first.dataset.inspected).toBe(undefined)
+		expect(host.querySelector('[data-testid="console-add-panel"]')).not.toBe(null)
+		expect(host.querySelector('.palette-default-config-table')).toBe(null)
+		ide.dispose()
+		void core
+	})
+
+	it('inspecting follows the dragged tool object, not its old index', () => {
+		const { core, consoleStore, ide, host } = setup(true)
+		consoleStore.open('edit')
+		const live = core.layout.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar
+		const item = toolbar?.[0]
+		if (!toolbar || !item) throw new Error('expected toolbar item')
+		const first = host.querySelectorAll('.toolbar-item')[0] as HTMLElement
+		first
+			.querySelector('.toolbar-item-guard')
+			?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+		expect(first.dataset.inspected).toBe('true')
+		// Move the inspected tool into the other toolbar (same op the drag
+		// engine emits): the edition must follow the object, not the index
+		// it vacated — the details panel still configures the same tool.
+		core.layout.moveItem(
+			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 },
+			{ container: 'border', region: 'top', trackIndex: 1, toolbarIndex: 0, itemIndex: 1 }
+		)
+		const panel = host.querySelector('[data-testid="console-details-panel"]')
+		expect(panel?.textContent).toContain('Inspect')
+		// The tool now lives in the other toolbar: the emptied source
+		// track is pruned, so only one top track remains holding both tools.
+		const after = core.layout.getLayout()
+		expect(after.borders.top).toHaveLength(1)
+		expect(after.borders.top[0]?.[0]?.toolbar.length).toBe(2)
+		expect(after.borders.top[0]?.[0]?.toolbar.includes(item)).toBe(true)
 		ide.dispose()
 	})
 

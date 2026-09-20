@@ -89,6 +89,19 @@ describe('paletteCommandEntries', () => {
 		const entries = paletteCommandEntries(withUses)
 		expect(entries[0]?.uses).toEqual(['activeFile'])
 	})
+
+	it('bounds-checks inc/dec entries when values context is present', () => {
+		const atMin = paletteCommandEntries(points(), { values: { fontSize: 10 } })
+		expect(atMin.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(false)
+		expect(atMin.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(true)
+		const atMax = paletteCommandEntries(points(), { values: { fontSize: 20 } })
+		expect(atMax.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(false)
+		expect(atMax.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(true)
+		// No values context = enabled (adapters refine via `canRunAction`).
+		const noValues = paletteCommandEntries(points())
+		expect(noValues.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(true)
+		expect(noValues.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(true)
+	})
 })
 
 describe('paletteAddItemEntries / paletteDerivedVariants', () => {

@@ -1,39 +1,14 @@
 /**
- * `@palettable/vanilla` — slide math (single-copy check) + add-item builder probes.
+ * `@palettable/vanilla` — slide measuring + add-item builder probes.
  *
  * `clampSlideDelta` lives in core (the single copy of the slide arithmetic);
- * the vanilla re-export keeps the old import path compiling until the Phase 7
- * close-out deletes it. `itemFromAddSelection` builds a `ToolbarItem` from a
+ * `itemFromAddSelection` builds a `ToolbarItem` from a
  * console add-flow selection without touching layout.
  */
 
-import { clampSlideDelta as clampSlideDeltaCore } from '@palettable/core'
 import { describe, expect, it } from 'vitest'
 import { itemFromAddSelection } from './add-item.js'
-import { clampSlideDelta, extractionGrabOffset } from './slide.js'
-
-describe('clampSlideDelta', () => {
-	const bounds = { start: 100, available: 200 }
-	it('returns the shift from resting inside the span', () => {
-		// Resting at 40 inside the span; pointer 40px further along.
-		expect(clampSlideDelta(bounds, 40, 180, 0)).toBe(40)
-	})
-	it('clamps at both ends of the free span', () => {
-		expect(clampSlideDelta(bounds, 40, -1000, 0)).toBe(-40)
-		expect(clampSlideDelta(bounds, 40, 10000, 0)).toBe(160)
-	})
-	it('accounts for the grab offset', () => {
-		expect(clampSlideDelta(bounds, 40, 190, 10)).toBe(40)
-	})
-	it('matches the core single copy', () => {
-		// Same numbers through both spellings: the vanilla wrapper is the
-		// core arithmetic, not a fork.
-		const frame = { axis: 'horizontal' as const, start: 100, available: 200, resting: 40, grab: 0 }
-		expect(clampSlideDelta(bounds, 40, 180, 0)).toBe(clampSlideDeltaCore(frame, 180))
-		expect(clampSlideDelta(bounds, 40, -1000, 0)).toBe(clampSlideDeltaCore(frame, -1000))
-		expect(clampSlideDelta(bounds, 40, 10000, 0)).toBe(clampSlideDeltaCore(frame, 10000))
-	})
-})
+import { extractionGrabOffset } from './slide.js'
 
 describe('extractionGrabOffset', () => {
 	// Fresh singleton toolbar at left 200, width 60; the dragged button

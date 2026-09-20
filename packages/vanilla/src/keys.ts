@@ -43,6 +43,8 @@ function normalizeKey(value: string): string {
 			return 'Space'
 		case 'escape':
 			return 'Esc'
+		case 'plus':
+			return '+'
 		default:
 			return trimmed[0]?.toUpperCase() + trimmed.slice(1)
 	}
@@ -52,8 +54,42 @@ function normalizeKey(value: string): string {
  * Canonicalize a keystroke string so bindings compare reliably.
  * Modifiers order as `Ctrl`, `Alt`, `Shift`, `Meta`; aliases (`cmd`,
  * `command`, `escape`, …) are normalized.
+ *
+ * `+` is both the separator and a key: a lone `'+'` (or a trailing `'+'`
+ * as in `'Shift++'`) names the Plus key, not a separator. Splitting naively
+ * on `'+'` would erase it (`'+'` → `''`), silently unbinding `inc`
+ * shortcuts while `dec` (`'-'`) keeps working.
  */
 export function normalizeKeystroke(input: Keystroke): Keystroke {
+	const trimmedInput = input.trim()
+	// Lone plus: the Plus key, not a separator.
+	if (trimmedInput === '+') return '+'
+	// Trailing plus: the last `+` is the Plus key (`'Shift++'` → Shift + Plus).
+	// Everything before it is `modifier+modifier+…`.
+	if (trimmedInput.endsWith('+') && trimmedInput.length > 1) {
+		const prefix = trimmedInput.slice(0, -1)
+		const modifiers = new Set<string>()
+		for (const part of prefix.split('+')) {
+			const piece = part.trim()
+			if (piece.length === 0) continue
+			const modifier = normalizeModifier(piece)
+			if (modifier) modifiers.add(modifier)
+			else {
+				// Non-modifier prefix with a trailing `+` key is malformed
+				// (`'A+'`); fall through to the generic path.
+				return genericNormalizeKeystroke(input)
+			}
+		}
+		// Shift is consumed producing `+` (see `keystrokeFromEvent`), so an
+		// explicit `'Shift++'` names the same Plus key as `'+'`.
+		modifiers.delete('Shift')
+		const orderedModifiers = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier))
+		return [...orderedModifiers, '+'].join('+')
+	}
+	return genericNormalizeKeystroke(input)
+}
+
+function genericNormalizeKeystroke(input: Keystroke): Keystroke {
 	const parts = input
 		.split('+')
 		.map((part) => part.trim())
@@ -68,19 +104,38 @@ export function normalizeKeystroke(input: Keystroke): Keystroke {
 			continue
 		}
 		key = normalizeKey(part)
+		// Mirror `keystrokeFromEvent`: Shift is consumed producing a symbol,
+		// so `'Shift+='` (Shift+= on US layouts) is the Plus key, and any
+		// `Shift+<symbol>` binding names the symbol itself.
+		if (key === '=' && modifiers.has('Shift')) {
+			key = '+'
+		}
+		if (key.length === 1 && !(key >= 'A' && key <= 'Z')) {
+			modifiers.delete('Shift')
+		}
 	}
 	const orderedModifiers = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier))
 	return [...orderedModifiers, key].filter((part) => part.length > 0).join('+')
 }
 
-/** Derive the normalized keystroke for a DOM keyboard event. */
+/** Derive the normalized keystroke for a DOM keyboard event.
+ *
+ * Shift is consumed producing a symbol: pressing `Shift+=` yields `key: '+'`
+ * with `shiftKey: true`, and the numpad `+` yields `key: '+'` with no
+ * modifiers — both mean the Plus key. So when the key is a single
+ * non-letter character, a held Shift is dropped (`'+'` matches, not
+ * `'Shift++'`). Letter keys keep Shift (`'Shift+A'` ≠ `'A'`) so
+ * Shift-letter bindings stay distinct.
+ */
 export function keystrokeFromEvent(event: KeyboardEvent): Keystroke {
+	const key = normalizeKey(event.key)
+	const isLetter = key.length === 1 && key >= 'A' && key <= 'Z'
 	const modifiers: string[] = []
 	if (event.ctrlKey) modifiers.push('Ctrl')
 	if (event.altKey) modifiers.push('Alt')
-	if (event.shiftKey) modifiers.push('Shift')
+	if (event.shiftKey && (isLetter || key.length !== 1)) modifiers.push('Shift')
 	if (event.metaKey) modifiers.push('Meta')
-	return [...modifiers, normalizeKey(event.key)].join('+')
+	return [...modifiers, key].join('+')
 }
 
 /** Normalized keyboard binding registry for palette command specs. */

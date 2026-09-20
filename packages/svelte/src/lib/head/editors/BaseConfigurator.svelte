@@ -59,6 +59,23 @@
 			</select>
 		</div>
 	</div>
+	{#if view.editor === 'segmented'}
+		<div class="palette-default-config-row">
+			<div class="palette-default-config-key">
+				<strong>Show text</strong>
+				<span>Uncheck for icon-only segments on both axes.</span>
+			</div>
+			<div class="palette-default-config-value">
+				<input
+					type="checkbox"
+					checked={view.showText}
+					data-testid="configurator-show-text"
+					aria-label="Show text"
+					onchange={(e) => view.setShowText(e.currentTarget.checked)}
+				/>
+			</div>
+		</div>
+	{/if}
 	{#if view.removable}
 		<div class="palette-default-config-row">
 			<div class="palette-default-config-key">

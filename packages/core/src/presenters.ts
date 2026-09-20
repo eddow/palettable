@@ -46,6 +46,10 @@ export type HeadItemConfig = {
 	readonly label?: string
 	readonly hint?: string
 	readonly tone?: string
+	/** Slider readout opt-out (`slider` / `drawerSlider` only; default shown). */
+	readonly showValue?: boolean
+	/** Segmented label opt-out (`segmented` only; default shown). */
+	readonly showText?: boolean
 }
 
 /** Resolved head metadata for an item. */
@@ -250,7 +254,12 @@ export function statusPresenter(item: ToolbarItem): StatusPresenter {
 
 export type SelectOption = {
 	readonly value: string
+	/** Merged display string (`icon label` / `label` / `icon`) — used by `<select>`. */
 	readonly text: string
+	/** Icon part, when the option declares one. */
+	readonly icon: string | undefined
+	/** Label part; `undefined` when the display mode hides text. */
+	readonly label: string | undefined
 	/** Option enablement; `false` disables selection. */
 	readonly can: boolean
 }
@@ -261,6 +270,10 @@ export type SelectPresenter = {
 	readonly label: string
 	readonly icon: string
 	readonly direction: 'horizontal' | 'vertical'
+	/** Docking region, so axis-aware editors can pick the overlay side. */
+	readonly region: PaletteRegion | undefined
+	/** Segmented label visibility (`config.showText === false` hides it → icon-only). */
+	readonly showText: boolean
 	/** Current value; `undefined` = skeleton (no option selected). */
 	readonly value: string | undefined
 	readonly options: readonly SelectOption[]
@@ -276,12 +289,35 @@ function choiceDisplayOf(item: ToolbarItem): ChoiceDisplay {
 	return value === 'icon' || value === 'text' || value === 'both' ? value : 'both'
 }
 
+/** Icon part of an option under a display mode (`undefined` when hidden). */
+function choiceIcon(option: EnumOption, display: ChoiceDisplay): string | undefined {
+	if (display === 'text') return undefined
+	return typeof option.icon === 'string' ? option.icon : undefined
+}
+
+/** Label part of an option under a display mode (`undefined` when hidden). */
+function choiceLabel(option: EnumOption, display: ChoiceDisplay): string | undefined {
+	if (display === 'icon') return undefined
+	return option.label ?? option.value
+}
+
+/** Merged display string for a single-node renderer (`<select>`, `<option>`). */
 function choiceText(option: EnumOption, display: ChoiceDisplay): string {
 	const label = option.label ?? option.value
-	const icon = typeof option.icon === 'string' ? option.icon : undefined
+	const icon = choiceIcon(option, display)
 	if (display === 'icon') return icon ?? label
 	if (display === 'text') return label
 	return icon !== undefined ? `${icon} ${label}` : label
+}
+
+/**
+ * Whether a segmented shows its option labels. Opt-out via
+ * `config.showText === false` (segmented only; default shown, so existing
+ * layouts are unchanged). Mirrors `showValueOf` for sliders.
+ */
+function showTextOf(item: ToolbarItem): boolean {
+	const config = (item as { config?: unknown }).config as { showText?: unknown } | undefined
+	return config?.showText !== false
 }
 
 /** View-model for an enum point: current icon/value + display-filtered options.
@@ -309,10 +345,14 @@ export function selectPresenter(
 		label: meta.label,
 		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? value ?? ''),
 		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+		region: surface.region,
+		showText: showTextOf(item),
 		value,
 		options: optionsList.map((option) => ({
 			value: option.value,
 			text: choiceText(option, display),
+			icon: choiceIcon(option, display),
+			label: choiceLabel(option, display),
 			can: option.can !== false,
 		})),
 		select: (next: string) => `${pointId}=${next}`,
@@ -321,17 +361,65 @@ export function selectPresenter(
 
 // ── Slider (number) ─────────────────────────────────────────────────────────
 
+/**
+ * How a slider exposes its range control.
+ * - `inline`: the range is always visible in the toolbar.
+ * - `drawer`: only the icon (and the value readout) show at rest; the range
+ *   is revealed as an overlay beside the icon on hover/focus, so the toolbar
+ *   never resizes.
+ */
+export type SliderVariant = 'inline' | 'drawer'
+
 export type SliderPresenter = {
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
 	readonly icon: string
 	readonly direction: 'horizontal' | 'vertical'
 	readonly region: PaletteRegion | undefined
+	/** Range layout: `inline` in-toolbar, or `drawer` revealed on hover/focus. */
+	readonly variant: SliderVariant
+	/**
+	 * Axis the range control runs along. An `inline` slider follows the
+	 * toolbar axis (horizontal in a horizontal toolbar, vertical in a vertical
+	 * one); a `drawer` slider uses the perpendicular axis, so the two variants
+	 * never look alike.
+	 */
+	readonly rangeAxis: 'horizontal' | 'vertical'
+	/** Value readout text (formatted for display, e.g. `1.5`). */
+	readonly text: string
+	/** Whether the numeric readout renders (`config.showValue === false` hides it). */
+	readonly showValue: boolean
 	readonly min: number
 	readonly max: number
 	readonly step: number
 	/** Current value; `undefined` = skeleton (adapters render the unset state). */
 	readonly value: number | undefined
+}
+
+/**
+ * Resolve the slider range layout. An explicit slider editor variant id
+ * (`slider` → inline, `drawerSlider` → drawer) is authoritative — it is the
+ * user's choice in the configurator. Otherwise `config.sliderVariant` applies,
+ * and the default is `inline` (the range runs along the toolbar axis).
+ */
+function sliderVariantOf(item: ToolbarItem): SliderVariant {
+	const editor = (item as { editor?: unknown }).editor
+	if (editor === 'drawerSlider') return 'drawer'
+	if (editor === 'slider') return 'inline'
+	const config = (item as { config?: unknown }).config as { sliderVariant?: unknown } | undefined
+	const value = config?.sliderVariant
+	if (value === 'inline' || value === 'drawer') return value
+	return 'inline'
+}
+
+/**
+ * Whether a slider shows its numeric readout. Opt-out via
+ * `config.showValue === false` (slider / drawerSlider only; steppers always
+ * show, stars never do). Default is shown, so existing layouts are unchanged.
+ */
+function showValueOf(item: ToolbarItem): boolean {
+	const config = (item as { config?: unknown }).config as { showValue?: unknown } | undefined
+	return config?.showValue !== false
 }
 
 /** View-model for a number point: bounds + value (adapter writes via `values.set`).
@@ -351,12 +439,19 @@ export function sliderPresenter(
 					| undefined) ?? {})
 			: {}
 	const value = typeof bound.value === 'number' ? bound.value : undefined
+	const direction = surface.axis === 'vertical' ? 'vertical' : 'horizontal'
+	const variant = sliderVariantOf(item)
 	return {
 		title: headTooltip(item, `${meta.label} ${value}`),
 		tone: meta.tone,
 		icon: meta.icon ?? 'A',
-		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+		direction,
 		region: surface.region,
+		variant,
+		rangeAxis:
+			variant === 'inline' ? direction : direction === 'vertical' ? 'horizontal' : 'vertical',
+		text: value === undefined ? '' : String(value),
+		showValue: showValueOf(item),
 		min: constraints.min ?? 0,
 		max: constraints.max ?? 100,
 		step: constraints.step ?? 1,
@@ -402,21 +497,26 @@ export function configuratorTonePatch(value: string): Record<string, string> {
 }
 
 /**
- * Prune enum-subset config keys when switching away from enum editors
- * (mirrors the svelte `setEditor` cleanup for `values`/`keywords`/`choiceDisplay`).
+ * Prune config keys when switching editors (mirrors the svelte `setEditor`
+ * cleanup for `values`/`keywords`/`choiceDisplay`).
+ * - slider / drawerSlider keep `showValue`, prune the enum-subset keys + `showText`.
+ * - segmented keeps `showText` + the enum-subset keys, prunes `showValue`.
+ * - other enum editors keep the enum-subset keys, prune `showValue` + `showText`.
+ * - everything else prunes both.
  * Returns the keys to delete (adapter deletes them from `item.config`).
  */
 export function configuratorEditorCleanup(nextEditor: string): readonly string[] {
-	if (
+	const isSlider = nextEditor === 'slider' || nextEditor === 'drawerSlider'
+	const isEnum =
 		nextEditor === 'flip' ||
 		nextEditor === 'radio' ||
 		nextEditor === 'select' ||
 		nextEditor === 'segmented' ||
 		nextEditor === 'splitRadio'
-	) {
-		return []
-	}
-	return ['values', 'keywords', 'choiceDisplay']
+	if (isSlider) return ['values', 'keywords', 'choiceDisplay', 'showText']
+	if (nextEditor === 'segmented') return ['showValue']
+	if (isEnum) return ['showValue', 'showText']
+	return ['values', 'keywords', 'choiceDisplay', 'showValue', 'showText']
 }
 
 // ── Enum-from / stash display helpers ───────────────────────────────────────

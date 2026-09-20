@@ -18,6 +18,77 @@ never injected at runtime, never duplicated per instance:
   `#disposeStyle`) was deleted; `Palette.dispose()` is a no-op for API parity.
 - Drawer popup classes use the `palettable-` prefix, not `sursaut-`.
 
+## Sizing variables
+
+`palette.css` declares two custom properties on `.palette-ide`:
+
+| Variable | Value | Meaning |
+| -------- | ----- | ------- |
+| `--palette-dz-size` | `0.5em` | Drop-zone highlight unit; the edit-mode handle is `2 ×` this. |
+| `--palette-toolbar-perpendicular` | `2.5rem` | Standardized perpendicular toolbar size — height for horizontal toolbars, width for vertical ones. Identical on both axes. |
+
+Rules:
+
+- Every toolbar (border **or** parking, either axis) is exactly
+  `--palette-toolbar-perpendicular` at rest, and items fill it. The resting
+  size therefore never depends on whether a handle is shown.
+- Handles are added **outside** that size on hover (they are perpendicular
+  borders of `2 × --palette-dz-size`), so hovering grows the toolbar rather
+  than reflowing its items.
+- Parking toolbars are **excluded** from the handle rules: they are not in a
+  stack, so a handle there only reads as a double border.
+
+## Axis-aware items
+
+Editors receive the surface axis via `context.surface` (vanilla) /
+`surfaceContextFromScope` (svelte) and stamp `palette-default-layout-${direction}`
+on their root. Several editors use it to avoid widening a vertical toolbar:
+
+- **`segmented`** — at rest a vertical segmented shows icons only. The option
+  text is an absolutely positioned overlay revealed on `:hover`/`:focus-visible`
+  beside the icons (`pointer-events: none`, so the icons stay the only hit
+  targets). Text-only display (`choiceDisplay: 'text'`, no icon) keeps its label
+  in flow. The overlay side follows `palette-default-region-${region}`.
+- **`commandBox`** — in a vertical toolbar the box is an icon-only square whose
+  shell grows sideways on hover/focus while the toolbar width stays fixed.
+  Horizontally the shell shows the point icon plus a rest-state readout of the
+  current text while non-empty (icon-only while empty — no redundant hint);
+  the input is revealed on hover/focus only, replacing the readout. The
+  readout is driven by `data-has-text` on the box.
+- **`slider`** — two variants, both carrying the numeric value in the
+  presenter (`text`):
+  - **`inline`** (default) keeps the range in the toolbar and runs it *along*
+    the toolbar axis — horizontal in a horizontal toolbar, vertical in a
+    vertical one (`writing-mode: vertical-lr` + `direction: rtl`). In a
+    vertical toolbar it may grow along the axis, but its perpendicular width
+    stays at `--palette-toolbar-perpendicular`.
+  - **`drawer`** (the `drawerSlider` editor id) keeps the range out of the
+    flow, running it along the *perpendicular* axis — the opposite of inline.
+    The icon and value form the always-visible trigger segment; the range is a
+    second segment revealed on hover/focus, sharing one border so the pair
+    reads as a button group with only the outer corners rounded.
+  - `config.sliderVariant` selects a variant when the editor id is not one of
+    the two slider ids; the editor id always wins.
+
+  Both variants render `.palette-default-slider-value` — the icon nests inside
+  the chip (icon + text), sharing every declaration with
+  `.palette-default-stepper-value` so the two read as the same control. The
+  range always sits inside a visible `.palette-default-slider-track` pill
+  half: the readout (or drawer trigger) is the first half, the track the
+  second — shared border, outer corners rounded, input filling 100% of it.
+  Note that
+  `writing-mode: vertical-lr` swaps an element's own logical axes, so the
+  rotated ranges size themselves with physical `width`/`height`.
+
+## Vertical stacking order
+
+Vertical groups (`segmented`, `split`, `stepper`, `stars`) use
+`flex-direction: column-reverse`, so **DOM order is visually inverted**: the
+first child renders at the *bottom*. Radius and margin rules must therefore
+follow the *visual* ends — `:first-child` (DOM) rounds the bottom corners and
+`:last-child` rounds the top ones. Writing them the other way around leaves the
+rounded ends inverted.
+
 ## Base (dark) theme
 
 `head-default.css` base rules are dark: slate gradients on tools/chips/results

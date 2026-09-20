@@ -30,6 +30,13 @@
 	cursor: pointer;
 }
 
+/* Items fill the toolbar's standardized perpendicular size, so a toolbar at
+ * rest is exactly `--palette-toolbar-perpendicular` on both axes. */
+.palette-default-tool {
+	block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+}
+
 .palette-default-tool-compact {
 	min-width: 2.35rem;
 	padding-inline: 8px;
@@ -153,6 +160,54 @@
 	min-inline-size: 0;
 }
 
+/* Rest-state readout: the current command text while non-empty. Hidden when
+ * empty (no redundant hint — the input's own placeholder covers that) and
+ * hidden once the input is revealed so the two never render side by side. */
+.palette-default-command-text {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 1 auto;
+	min-inline-size: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.palette-default-command-text.is-hint {
+	color: #94a3b8;
+}
+
+.palette-default-command-box.is-floating[data-has-text='false']
+	.palette-default-command-text {
+	display: none;
+}
+
+/* A toolbar command box stays on one line (the console's chips may wrap). */
+.palette-default-command-box.is-floating .palette-default-command-tokens {
+	flex-wrap: nowrap;
+}
+
+/* The input is revealed on hover/focus only: at rest the shell shows the
+ * icon + text while non-empty (icon-only while empty). Its flex sizing is
+ * left intact so the box keeps a stable width and never collapses inside a
+ * crowded toolbar. */
+.palette-default-command-box.is-floating .palette-default-command-input {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease;
+}
+
+.palette-default-command-box.is-floating:hover .palette-default-command-input,
+.palette-default-command-box.is-floating:focus-within .palette-default-command-input {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.palette-default-command-box.is-floating:hover .palette-default-command-text,
+.palette-default-command-box.is-floating:focus-within .palette-default-command-text {
+	display: none;
+}
+
 .palette-default-command-chip,
 .palette-default-command-suggestion,
 .palette-default-command-result {
@@ -251,6 +306,93 @@
 	inset-inline: 0;
 	top: calc(100% + 6px);
 	inline-size: max(18rem, 100%);
+}
+
+/* ── Axis-Aware Vertical: Command Box ── */
+/* In a vertical toolbar the command box is an icon-only square trigger. The
+ * shell grows sideways on hover/focus, revealing the rest-state text and the
+ * input (hover-only, see the `.is-floating` rules above); the toolbar's width
+ * never changes because the shell is absolutely positioned. */
+
+.palette-default-command-box.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	max-inline-size: none;
+	block-size: var(--palette-toolbar-perpendicular);
+	position: relative;
+	overflow: visible;
+}
+
+.palette-default-command-box.palette-default-layout-vertical .palette-default-command-shell {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 0;
+	inline-size: var(--palette-toolbar-perpendicular);
+	padding: 0;
+	justify-content: center;
+	overflow: hidden;
+	z-index: 1;
+	transition:
+		inline-size 140ms ease,
+		box-shadow 120ms ease;
+}
+
+/* The shell must be wide enough for the revealed input, so it grows further
+ * than the text-only width when the pointer is over it. */
+.palette-default-command-box.palette-default-layout-vertical:hover
+	.palette-default-command-shell,
+.palette-default-command-box.palette-default-layout-vertical:focus-within
+	.palette-default-command-shell {
+	inline-size: 14rem;
+	/* Opaque while expanded: the shell overlays IDE content, so a
+	 * translucent fill would let it read through the field. */
+	background: rgba(2, 6, 23, 0.98);
+	border-color: rgba(96, 165, 250, 0.9);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	justify-content: flex-start;
+	padding-inline: 0.6rem;
+}
+
+.palette-default-command-box.palette-default-layout-vertical
+	.palette-default-command-tokens {
+	flex-wrap: nowrap;
+	overflow: hidden;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+.palette-default-command-box.palette-default-layout-vertical:hover
+	.palette-default-command-tokens,
+.palette-default-command-box.palette-default-layout-vertical:focus-within
+	.palette-default-command-tokens {
+	opacity: 1;
+}
+
+/* Right-docked toolbars grow towards the IDE (to the left). */
+.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
+	.palette-default-command-shell {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
+}
+
+.palette-default-command-box.palette-default-layout-vertical
+	.palette-default-command-popover {
+	position: absolute;
+	inset-inline-start: 0;
+	top: calc(100% + 6px);
+	inline-size: 18rem;
+	z-index: 6;
+}
+
+.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
+	.palette-default-command-popover {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
+}
+
+.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
+	.palette-default-command-popover {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
 }
 
 .palette-default-command-suggestions,
@@ -423,6 +565,8 @@
 .palette-default-select,
 .palette-default-radio-group,
 .palette-default-slider,
+.palette-default-slider-inline,
+.palette-default-slider-drawer,
 .palette-default-stepper,
 .palette-default-stars,
 .palette-default-segmented,
@@ -435,7 +579,6 @@
 
 .palette-default-select,
 .palette-default-radio-group,
-.palette-default-slider,
 .palette-default-stepper,
 .palette-default-stars {
 	padding: 3px;
@@ -471,6 +614,378 @@
 
 .palette-default-slider input[type='range'] {
 	inline-size: clamp(64px, 9vw, 110px);
+}
+
+/* Value readout: identical to the stepper readout — a bordered chip (icon +
+ * text) sharing the group's chrome, never a bare floating number. Both share
+ * every declaration so the two read as the same control. */
+.palette-default-slider-value,
+.palette-default-stepper-value {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-inline-size: 3.2rem;
+	min-block-size: 2rem;
+	padding-inline: 0.72rem;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: rgba(15, 23, 42, 0.88);
+	font-weight: 600;
+}
+
+.palette-default-slider-value > .palette-default-icon,
+.palette-default-stepper-value > .palette-default-icon {
+	min-inline-size: 0;
+	padding-inline: 0;
+}
+
+/* Icon-only slider chip (`showValue: false`): the number is hidden, so the
+ * chip shrinks to the icon instead of keeping the readout's min width. */
+.palette-default-slider-value.is-icon-only {
+	min-inline-size: 0;
+}
+
+/* ── Slider chrome, by variant ── */
+/* An `inline` slider is a plain group: one readout chip (icon + value nested
+ * inside, exactly like the stepper readout) beside the range. A `drawer`
+ * slider is an *input group* — the trigger wraps the same chip and the range
+ * is a second segment attached across one shared border (only the outer
+ * corners rounded, at the extremes of the pair). The drawer only reveals
+ * that second segment on hover/focus, and the range's axis is the
+ * perpendicular one, so a drawer never looks like an inline slider. */
+
+.palette-default-slider-inline {
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+/* The readout is the first half of the pill (icon + text nested inside,
+ * exactly like the stepper readout). The track is the visible second half
+ * around the range — shared border (-1px), outer corners rounded, input
+ * filling 100% of it. */
+.palette-default-slider-inline > .palette-default-slider-value {
+	border-radius: 9px 0 0 9px;
+	margin-inline-start: 0;
+}
+
+.palette-default-slider-inline > .palette-default-slider-track {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-block-size: 2rem;
+	padding-inline: 0.72rem;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: rgba(15, 23, 42, 0.88);
+	border-radius: 0 9px 9px 0;
+	margin-inline-start: -1px;
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	min-inline-size: 0;
+}
+
+.palette-default-slider-inline > .palette-default-slider-track > input[type='range'] {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	inline-size: 100%;
+	block-size: 100%;
+	min-inline-size: 0;
+}
+
+/* In a vertical toolbar the inline slider grows *along* the toolbar: the
+ * perpendicular width stays standardized, the block size follows the content
+ * (readout chip, then the range running vertically). */
+.palette-default-slider-inline.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+	padding: 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-value {
+	min-inline-size: 100%;
+	min-block-size: 1.6rem;
+	padding: 0.35rem 0;
+	margin-inline-start: 0;
+	margin-block-start: 0;
+	border-radius: 9px 9px 0 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1;
+}
+
+/* The range runs below the chip as the second half of the pill. */
+.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-track {
+	width: 100%;
+	height: 3.5rem;
+	margin: 0;
+	margin-block-start: -1px;
+	padding: 0.35rem 0;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: rgba(15, 23, 42, 0.88);
+	border-radius: 0 0 9px 9px;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+}
+
+.palette-default-slider-inline.palette-default-layout-vertical
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	max-width: 100%;
+	margin: 0;
+	padding: 0;
+	flex: 0 0 auto;
+	border: 0;
+	background: transparent;
+	border-radius: 0;
+}
+
+.palette-default-slider-drawer {
+	position: relative;
+	overflow: visible;
+	border: 0;
+	background: transparent;
+	padding: 0;
+}
+
+/* The trigger is the always-visible segment of the group: it wraps the value
+ * chip and matches its metrics (gap, padding, weight) so the two read as
+ * the same control. */
+.palette-default-slider-drawer > .palette-default-slider-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 0.72rem;
+	min-block-size: 2rem;
+	position: relative;
+	z-index: 1;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	background: rgba(15, 23, 42, 0.88);
+	font-weight: 600;
+}
+
+/* Inside the trigger the value is bare text: the segment provides the chrome.
+ * Its size is inherited so it matches the stepper readout exactly. */
+.palette-default-slider-drawer
+	> .palette-default-slider-trigger
+	> .palette-default-slider-value {
+	min-inline-size: 0;
+	min-block-size: 0;
+	padding-inline: 0;
+	border: 0;
+	background: transparent;
+}
+
+/* The range is the revealed segment: attached to the trigger across a
+ * visible shared border, its outer corners rounded to match the group.
+ * `border-color` is re-asserted here (not inherited from the shorthand
+ * above) so the panel edge stays painted over the toolbar behind it.
+ * The input fills a `slider-track` pill half; the track carries the panel
+ * chrome, the input stays a bare control inside it. */
+.palette-default-slider-drawer > .palette-default-slider-track {
+	position: absolute;
+	z-index: 2;
+	margin: 0;
+	border-width: 1px;
+	border-style: solid;
+	border-color: rgba(71, 85, 105, 0.95);
+	border-radius: 12px;
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		transform 140ms ease,
+		opacity 120ms ease;
+}
+
+.palette-default-slider-drawer > .palette-default-slider-track > input[type='range'] {
+	inline-size: 100%;
+	block-size: 100%;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-slider-drawer:hover > .palette-default-slider-track,
+.palette-default-slider-drawer:focus-within > .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translate(0);
+}
+
+/* ── Drawer slider: horizontal toolbar ── */
+/* The group runs *perpendicular* to the toolbar — that is what makes a drawer
+ * the opposite of an inline slider. Trigger above, range below, attached as
+ * one input group: the range overlaps the trigger's border (-1px) so the two
+ * share a single edge — trigger rounded outward (top), range rounded outward
+ * (bottom), flat where they meet. */
+
+.palette-default-slider-drawer.palette-default-layout-horizontal {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal
+	> .palette-default-slider-trigger {
+	border-radius: 12px 12px 0 0;
+	justify-content: center;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal > .palette-default-slider-track {
+	top: 100%;
+	left: 0;
+	right: 0;
+	border-radius: 0 0 12px 12px;
+	/* `writing-mode` swaps the element's logical axes, so physical sizes are
+	 * used to keep the panel full-width and 6.5rem tall. */
+	width: 100%;
+	height: 6.5rem;
+	padding: 0.72rem 0;
+	box-sizing: border-box;
+	transform: translateY(-0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: vertical-lr;
+	direction: rtl;
+}
+
+/* ── Drawer slider: vertical toolbar ─ */
+/* Same rule the other way round: trigger at the inline-start, range beside it
+ * as a horizontally-oriented track, attached across one shared border —
+ * trigger rounded outward (inline-start), range rounded outward (inline-end).
+ * On a left bar that reads half-rounded-left trigger + bordered rounded-right
+ * range: one input group opening into the workspace. */
+
+.palette-default-slider-drawer.palette-default-layout-vertical {
+	flex-direction: row;
+	block-size: var(--palette-toolbar-perpendicular);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-trigger {
+	border-radius: 12px 0 0 12px;
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 1px;
+	padding: 0.3rem 0;
+	justify-content: center;
+}
+
+/* In a square vertical trigger the chip stacks icon above value, mirroring
+ * the vertical stepper readout — side-by-side would overflow 2.5rem. */
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-trigger
+	> .palette-default-slider-value {
+	flex-direction: column;
+	gap: 1px;
+	line-height: 1;
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical > .palette-default-slider-track {
+	inset-block: 0;
+	inset-inline-start: 100%;
+	inline-size: 6.5rem;
+	block-size: 100%;
+	border-radius: 0 12px 12px 0;
+	padding: 0 0.72rem 0 0.9rem;
+	box-sizing: border-box;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: horizontal-tb;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal:hover > .palette-default-slider-track,
+.palette-default-slider-drawer.palette-default-layout-horizontal:focus-within
+	> .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateY(0);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical:hover > .palette-default-slider-track,
+.palette-default-slider-drawer.palette-default-layout-vertical:focus-within
+	> .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateX(0);
+}
+
+/* Region decides which way the group opens: the range mirrors the trigger
+ * across the toolbar edge, so it always lands inside the workspace. The
+ * rounding mirrors with it — the trigger keeps the toolbar-outer half, the
+ * range takes the workspace-side half, shared edge always flat. */
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-slider-trigger {
+	border-radius: 0 0 12px 12px;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-slider-track {
+	top: auto;
+	bottom: 100%;
+	border-radius: 12px 12px 0 0;
+	transform: translateY(0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:hover
+	> .palette-default-slider-track,
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:focus-within
+	> .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateY(0);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-slider-trigger {
+	border-radius: 0 12px 12px 0;
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-slider-track {
+	inset-inline-start: auto;
+	inset-inline-end: 100%;
+	border-radius: 12px 0 0 12px;
+	padding: 0 0.9rem 0 0.72rem;
+	transform: translateX(0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:hover
+	> .palette-default-slider-track,
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:focus-within
+	> .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translateX(0);
 }
 
 .palette-default-radio-group {
@@ -551,17 +1066,18 @@
 }
 
 .palette-default-stepper-value {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-inline-size: 3.2rem;
-	min-block-size: 2rem;
-	padding-inline: 0.72rem;
-	border: 1px solid rgba(71, 85, 105, 0.95);
 	border-radius: 0;
-	background: rgba(15, 23, 42, 0.88);
-	font-weight: 600;
+}
+
+/* Horizontal stepper: the readout stretches to the buttons' block size so
+ * minus/value/plus share one top and bottom edge at the 2.5rem rest height.
+ * Drawer popups are horizontal tracks too (`.is-horizontal`), even when the
+ * host toolbar is vertical — the child axis, not the host axis, decides. */
+.palette-default-stepper:not(.palette-default-layout-vertical)
+	> .palette-default-stepper-value,
+.palettable-drawer__popup.is-horizontal .palette-default-stepper-value {
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
 }
 
 /* ── Menu Popover ── */
@@ -624,8 +1140,8 @@
 
 .palette-default-split.palette-default-layout-vertical > .palette-default-tool,
 .palette-default-split.palette-default-layout-vertical > .palette-default-trigger {
-	width: 2.375rem;
-	height: 2.375rem;
+	width: var(--palette-toolbar-perpendicular);
+	height: var(--palette-toolbar-perpendicular);
 	padding: 0;
 }
 
@@ -638,120 +1154,30 @@
 	font-size: 0.98rem;
 }
 
-/* ── Axis-Aware Vertical: Slider ── */
+/* ── Axis-Aware Vertical: Stars ── */
+/* The stars row stacks vertically; constrain it to the perpendicular size so
+ * a vertical toolbar is never widened by the rating row's natural width. */
 
-.palette-default-slider.palette-default-layout-vertical {
-	inline-size: 2.375rem;
-	block-size: 2.375rem;
+.palette-default-stars.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
 	padding: 0;
-	position: relative;
-	overflow: visible;
-	border-top-left-radius: 0;
-	border-bottom-left-radius: 0;
-	border-top-right-radius: 12px;
-	border-bottom-right-radius: 12px;
-	transition:
-		box-shadow 120ms ease;
-}
-
-.palette-default-slider.palette-default-layout-vertical.palette-default-region-left {
-	border-top-left-radius: 12px;
-	border-bottom-left-radius: 12px;
-	border-top-right-radius: 0;
-	border-bottom-right-radius: 0;
-}
-
-.palette-default-slider.palette-default-layout-vertical::before {
-	content: '';
-	position: absolute;
-	inset-block: 0;
-	inset-inline-end: calc(100% - 1px);
-	inline-size: 5.875rem;
-	border: 1px solid rgba(71, 85, 105, 0.9);
-	border-radius: 12px 0 0 12px;
-	background: rgba(2, 6, 23, 0.98);
-	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
-	opacity: 0;
-	pointer-events: none;
-	transform: translateX(0.4rem);
-	transition:
-		transform 140ms ease,
-		opacity 120ms ease;
-}
-
-.palette-default-slider.palette-default-layout-vertical.palette-default-region-left::before {
-	inset-inline-end: auto;
-	inset-inline-start: calc(100% - 1px);
-	border-radius: 0 12px 12px 0;
-	transform: translateX(-0.4rem);
-}
-
-.palette-default-slider.palette-default-layout-vertical:hover::before,
-.palette-default-slider.palette-default-layout-vertical:has(> input[type='range']:hover)::before,
-.palette-default-slider.palette-default-layout-vertical:focus-within::before {
-	opacity: 1;
-	transform: translateX(0);
-}
-
-.palette-default-slider.palette-default-layout-vertical > .palette-default-icon {
-	min-inline-size: 2.375rem;
-	block-size: 2.375rem;
-	padding-inline: 0;
-	position: relative;
-	z-index: 1;
-	border-top-left-radius: 0;
-	border-bottom-left-radius: 0;
-	border-top-right-radius: 12px;
-	border-bottom-right-radius: 12px;
-}
-
-.palette-default-slider.palette-default-layout-vertical.palette-default-region-left > .palette-default-icon {
-	border-top-left-radius: 12px;
-	border-bottom-left-radius: 12px;
-	border-top-right-radius: 0;
-	border-bottom-right-radius: 0;
-}
-
-.palette-default-slider.palette-default-layout-vertical > input[type='range'] {
-	position: absolute;
-	inset-block: 0;
-	inset-inline-end: calc(100% - 1px);
-	inline-size: 5.875rem;
-	margin: 0;
-	padding: 0 0.72rem 0 0.9rem;
 	box-sizing: border-box;
-	z-index: 2;
-	background: transparent;
-	border: 0;
-	border-radius: 0;
-	opacity: 0;
-	pointer-events: none;
-	transform: translateX(0.4rem);
-	transition:
-		transform 140ms ease,
-		opacity 120ms ease;
 }
 
-.palette-default-slider.palette-default-layout-vertical.palette-default-region-left > input[type='range'] {
-	inset-inline-end: auto;
-	inset-inline-start: calc(100% - 1px);
-	padding: 0 0.9rem 0 0.72rem;
-	transform: translateX(-0.4rem);
-}
-
-.palette-default-slider.palette-default-layout-vertical:hover > input[type='range'],
-.palette-default-slider.palette-default-layout-vertical:has(> input[type='range']:hover) > input[type='range'],
-.palette-default-slider.palette-default-layout-vertical:focus-within > input[type='range'] {
-	opacity: 1;
-	pointer-events: auto;
-	transform: translateX(0);
+.palette-default-stars.palette-default-layout-vertical > .palette-default-stars-row {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	flex-direction: column-reverse;
+	align-items: center;
+	justify-content: center;
 }
 
 /* ── Axis-Aware Vertical: Stepper ── */
 
 .palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value {
-	inline-size: 2.375rem;
-	min-inline-size: 2.375rem;
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
 	padding: 0.35rem 0;
 	box-sizing: border-box;
 	flex-direction: column;
@@ -778,6 +1204,84 @@
 	flex-direction: column-reverse;
 }
 
+/* In a vertical toolbar the perpendicular axis is the inline axis: tools are
+ * square, exactly `--palette-toolbar-perpendicular` wide, so the toolbar's
+ * resting width is standardized (no handle needed to reach it). */
+.palette-vertical .palette-default-tool {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	padding-inline: 0;
+}
+
+/* ── Drawer ("More") trigger: always icon-only ── */
+/* The drawer label is never rendered as visible text (even in a horizontal
+ * toolbar); it survives as the accessible name + tooltip instead. The
+ * trigger is icon + chevron only, so no axis-scoped hiding is needed. */
+.palette-default-tool.palettable-drawer__trigger {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	block-size: var(--palette-toolbar-perpendicular);
+	padding: 0;
+	justify-content: center;
+}
+
+/* ── Axis-Aware Vertical: Segmented (radio-button group) ── */
+/* At rest a vertical segmented shows icons only. The text is revealed on
+ * group hover/focus as overlays *beside* the icons: each label is absolutely
+ * positioned and `pointer-events: none`, so the toolbar never resizes and
+ * the icons stay the only hit targets. Hovering anywhere over the group
+ * reveals ALL labels together (not one by one). Mirrors the vertical
+ * slider overlay. */
+
+.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon) {
+	position: relative;
+	overflow: visible;
+}
+
+.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-end: calc(100% - 1px);
+	display: inline-flex;
+	align-items: center;
+	inline-size: max-content;
+	padding-inline: 0.72rem;
+	border: 1px solid rgba(71, 85, 105, 0.9);
+	border-radius: 12px 0 0 12px;
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	white-space: nowrap;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(0.4rem);
+	transition:
+		transform 140ms ease,
+		opacity 120ms ease;
+}
+
+/* Left-docked toolbars open the overlay towards the IDE (to the right). */
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	inset-inline-end: auto;
+	inset-inline-start: calc(100% - 1px);
+	border-radius: 0 12px 12px 0;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-segmented.palette-default-layout-vertical:hover
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice,
+.palette-default-segmented.palette-default-layout-vertical:focus-within
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	opacity: 1;
+	transform: translateX(0);
+}
+
 /* ── Margin & Radius Collapsing (Horizontal) ── */
 
 .palette-default-toolbar > * + * {
@@ -797,8 +1301,6 @@
 .palette-default-stepper-value,
 .palette-default-select > .palette-default-icon,
 .palette-default-select > select,
-.palette-default-slider > .palette-default-icon,
-.palette-default-slider > input,
 .palette-default-stars > .palette-default-icon,
 .palette-default-stars > .palette-default-stars-row,
 .palette-default-radio-group > .palette-default-radio-item {
@@ -809,7 +1311,6 @@
 .palette-default-segmented > :first-child,
 .palette-default-stepper > :first-child,
 .palette-default-select > :first-child,
-.palette-default-slider > :first-child,
 .palette-default-stars > :first-child,
 .palette-default-radio-group > .palette-default-radio-item:first-of-type {
 	margin-inline-start: 0;
@@ -818,7 +1319,6 @@
 .palette-default-split > :first-child,
 .palette-default-stepper > :first-child,
 .palette-default-select > :first-child,
-.palette-default-slider > :first-child,
 .palette-default-stars > :first-child {
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
@@ -827,7 +1327,6 @@
 .palette-default-split > :last-child,
 .palette-default-stepper > :last-child,
 .palette-default-select > :last-child,
-.palette-default-slider > :last-child,
 .palette-default-stars > :last-child {
 	border-top-left-radius: 0;
 	border-bottom-left-radius: 0;
@@ -835,7 +1334,6 @@
 
 .palette-default-stepper > :not(:first-child):not(:last-child),
 .palette-default-select > :not(:first-child):not(:last-child),
-.palette-default-slider > :not(:first-child):not(:last-child),
 .palette-default-stars > :not(:first-child):not(:last-child) {
 	border-radius: 0;
 }
@@ -863,6 +1361,13 @@
 	margin-block-start: -1px;
 }
 
+/* Vertical groups use `column-reverse` (see "Axis-Aware Vertical: Common"),
+ * so DOM order is visually INVERTED: the first child renders at the BOTTOM
+ * and the last child at the TOP. Radius and margin rules must follow the
+ * visual ends, not the DOM order — hence `:first-child` rounds the *bottom*
+ * corners and `:last-child` the *top* ones. */
+
+/* Visual bottom (DOM first): rounded bottom, flat top, no leading gap. */
 .palette-default-split.palette-default-layout-vertical > :first-child,
 .palette-default-segmented.palette-default-layout-vertical > :first-child,
 .palette-default-stepper.palette-default-layout-vertical > :first-child,
@@ -870,15 +1375,19 @@
 	margin-block-start: 0;
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
+	border-bottom-left-radius: 9px;
 	border-bottom-right-radius: 9px;
 }
 
+/* Visual top (DOM last): rounded top, flat bottom. */
 .palette-default-split.palette-default-layout-vertical > :last-child,
+.palette-default-segmented.palette-default-layout-vertical > :last-child,
 .palette-default-stepper.palette-default-layout-vertical > :last-child,
 .palette-default-stars.palette-default-layout-vertical > :last-child {
+	border-top-left-radius: 9px;
+	border-top-right-radius: 9px;
 	border-bottom-left-radius: 0;
 	border-bottom-right-radius: 0;
-	border-top-left-radius: 9px;
 }
 
 .palette-default-stepper.palette-default-layout-vertical > :not(:first-child):not(:last-child),
@@ -886,12 +1395,15 @@
 	border-radius: 0;
 }
 
-.palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
+/* Interior segmented buttons stay flat: the ends round themselves above.
+ * `:not(:last-child)` = everything but the visual top → flatten top;
+ * `:not(:first-child)` = everything but the visual bottom → flatten bottom. */
+.palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 }
 
-.palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
+.palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
 	border-bottom-left-radius: 0;
 	border-bottom-right-radius: 0;
 }
@@ -1106,6 +1618,7 @@
 .palette-default-theme-light .palette-default-command-popover,
 .palette-default-theme-light .palette-default-command-parking,
 .palette-default-theme-light .palette-default-stepper-value,
+.palette-default-theme-light .palette-default-slider-value,
 .palette-default-theme-light .palette-default-config-value input,
 .palette-default-theme-light .palette-default-config-value select,
 .palette-default-theme-light .palette-default-add-variant,
@@ -1132,6 +1645,23 @@
 
 .palette-default-theme-light .palette-default-icon {
 	color: #475569;
+}
+
+/* The inline track is the visible second half of the pill in light mode too. */
+.palette-default-theme-light .palette-default-slider-inline > .palette-default-slider-track {
+	border-color: rgba(148, 163, 184, 0.9);
+	background: #ffffff;
+}
+
+/* The drawer slider's trigger + range panel are dark overlays in the base theme. */
+.palette-default-theme-light .palette-default-slider-drawer > .palette-default-slider-track,
+.palette-default-theme-light .palette-default-slider-drawer > .palette-default-slider-trigger,
+.palette-default-theme-light
+	.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	border-color: rgba(148, 163, 184, 0.9);
+	background: #ffffff;
 }
 
 .palette-default-theme-light .palette-default-command-input::placeholder,

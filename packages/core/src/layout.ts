@@ -8,15 +8,11 @@
  */
 
 import { configuration } from './configuration.js'
-// One-way: `drag.ts` takes the engine by injection (see `DragEngine`), so it
-// never imports this module at runtime and there is no cycle.
-import {
-	createToolbarDrag,
-	type GrabTarget,
-	insertToolbarLite,
-	isItemSpaceFreeLite,
-	type ToolbarDrag,
-} from './drag.js'
+// `drag.ts` owns the session implementation (`CoreToolbarDrag`); this module
+// owns the engine rules it delegates to (`dragStart` / `dragOver` / commits)
+// and passes them by injection, so neither module value-imports the other
+// back at runtime — no cycle.
+import { createToolbarDrag, type DragEngine, type GrabTarget, type ToolbarDrag } from './drag.js'
 import { PaletteError } from './errors.js'
 import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
@@ -479,16 +475,18 @@ export class PaletteLayoutTree {
 	 * parameter.
 	 */
 	createDrag(target: GrabTarget): ToolbarDrag {
-		return createToolbarDrag(this, target, {
+		const engine: DragEngine = {
 			dragStart,
 			dragOver,
 			commitDraggedToStackSpace,
 			commitDraggedToParkingRow,
 			commitSlide,
 			stackFlanks,
-			isItemSpaceFree: isItemSpaceFreeLite,
-			insertToolbar: (track, index, toolbar) => insertToolbarLite(track, index, toolbar),
-		})
+			isItemSpaceFree,
+			insertToolbar: (track, index, toolbar) =>
+				insertToolbar(track, index, toolbar, configuration.trackGapSplit),
+		}
+		return createToolbarDrag(this, target, engine)
 	}
 
 	/** Remove all layout listeners (adapter teardown). Layout is kept. */
@@ -1543,9 +1541,9 @@ export function draggingEmptiesParkingRow(
 }
 
 // ── Drop-zone highlight (pure, no DOM) ────────────────────────────────────
-// Decides which gaps paint, given a `GapDwellState` plus the session. The
-// adapter diffs the returned set against the previous one and toggles
-// `highlighted` / `hovered` classes on the existing gap nodes.
+// Decides which gaps paint, given the session. The session diffs the
+// returned set against its baseline and raises per-gap `highlight` events;
+// the adapter only toggles `highlighted` / `hovered` classes.
 
 /** Highlight decision for one gap container (border stack / parking / toolbar). */
 export type GapHighlight = {

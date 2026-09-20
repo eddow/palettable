@@ -8,7 +8,7 @@
  *
  * Guarantees: no subscriptions, no timers, no `run()`, no `set()`, no DOM;
  * same input → `JSON.stringify`-identical output. The render path imports
- * only pure modules — never `globals.ts`, `gap-dwell.ts`, or `umd.ts`
+ * only pure modules — never `globals.ts` or `umd.ts`
  * (enforced by `render.test.ts` import-graph test).
  *
  * Context: the input shape is bag-extensible (optional `bags`, threaded

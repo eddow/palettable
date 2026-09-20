@@ -31,7 +31,7 @@
 import type { IconToken } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
 import { findKeystrokesFor } from './keys.js'
-import type { AnyPoint } from './points.js'
+import type { AnyPoint, NumberPoint } from './points.js'
 import { isActionPoint, isValuedPoint } from './points.js'
 import type { EnumOption } from './type.js'
 
@@ -191,6 +191,29 @@ function actionEnabled(context: CommandBoxContext, id: string): boolean {
 }
 
 /**
+ * Bounds `can` for a number `inc` / `dec` entry from plain-data context.
+ * Step-aware (`value + step <= max`, `value - step >= min`, epsilon for
+ * float drift), mirroring `namedActionCan` in `core.ts` — but lenient:
+ * no values context (or a non-number current) = enabled, so adapters
+ * without live values keep the old default. Adapters with live values
+ * refine via `PaletteCore.canRunAction` at render time.
+ */
+function numberActionEnabled(
+	context: CommandBoxContext,
+	point: AnyPoint,
+	action: 'inc' | 'dec'
+): boolean {
+	const current = currentValue(context, point.id)
+	if (typeof current !== 'number' || !Number.isFinite(current)) return true
+	const constraints = (point as NumberPoint).constraints ?? {}
+	const step = constraints.step ?? 1
+	const epsilon = Number.EPSILON * Math.max(1, Math.abs(current), Math.abs(step)) * 8
+	if (action === 'inc')
+		return constraints.max === undefined || current + step <= constraints.max + epsilon
+	return constraints.min === undefined || current - step >= constraints.min - epsilon
+}
+
+/**
  * Build the executable command entries for a point list.
  *
  * In `catalog` mode, entries stay enabled for search and catalogue display;
@@ -307,9 +330,10 @@ export function paletteCommandEntries(
 					icon: point.icon,
 					keywords: collectKeywords(point.id, label, point.keywords, actionKeywords),
 					categories: entryCategories(point),
-					// `can` for inc/dec needs live bounds state — adapters refine
-					// via `PaletteCore.canRunAction`; default enabled here.
-					can: catalog ? undefined : true,
+					// Bounds-aware when values context is present; enabled
+					// by default so adapters without live values keep the
+					// old behaviour (they refine via `canRunAction`).
+					can: catalog ? undefined : numberActionEnabled(context, point, action),
 					run: spec,
 					uses: point.uses,
 				})

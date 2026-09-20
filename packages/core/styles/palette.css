@@ -57,6 +57,10 @@
 	height: 100%;
 	/* Base drop-zone highlight size; doubled when directly hovered. */
 	--palette-dz-size: 0.5em;
+	/* Standardized perpendicular toolbar size (height for horizontal
+	 * toolbars, width for vertical ones). Identical on both axes; the
+	 * resting toolbar is exactly this size, and items fill it. */
+	--palette-toolbar-perpendicular: 2.5rem;
 	overflow: hidden;
 }
 
@@ -254,46 +258,45 @@
 	position: relative;
 	/* 1px border always (transparent at rest) so hover never shifts layout.
 	 * Handles are real padding — everything colored is clickable. */
-	border: 1px solid transparent;
+	border: 0px solid black;
 	transition:
 		opacity 120ms ease,
 		box-shadow 120ms ease,
-		padding 120ms ease,
-		border-color 120ms ease,
+		border 120ms ease,
 		background-color 120ms ease;
 }
 
 .palette-ide.editing .toolbar {
-	border-color: rgba(71, 85, 105, 0.55);
+	border-color: #e2e8f0;
 	border-radius: 14px;
 	background: rgba(96, 165, 250, 0.08);
 }
 
-/* Axis-aware handles on hover only, and only when NOT dragging: no padding
+/* Axis-aware handles on hover only, and only when NOT dragging: no border
  * at rest, so nothing shifts until the mouse is over. Horizontal toolbars
- * keep top/bottom at 0, vertical keep left/right at 0. */
-.palette-ide.editing:not(.dragging) .toolbar-border.palette-horizontal .toolbar,
-.palette-ide.editing:not(.dragging) .palette-parking.palette-horizontal .toolbar {
-	padding: 0;
+ * keep top/bottom at 0, vertical keep left/right at 0.
+ * Parking toolbars are excluded: they are not in a stack, so a handle there
+ * would only read as a double border. */
+.palette-ide.editing:not(.dragging) .toolbar-border.palette-horizontal .toolbar {
+	border: 0px solid black;
 }
 
-.palette-ide.editing:not(.dragging) .toolbar-border.palette-vertical .toolbar,
-.palette-ide.editing:not(.dragging) .palette-parking.palette-vertical .toolbar {
-	padding: 0;
+.palette-ide.editing:not(.dragging) .toolbar-border.palette-vertical .toolbar {
+	border: 0px solid black;
 }
 
 .palette-ide.editing:not(.dragging) .toolbar-border.palette-horizontal .toolbar:hover,
-.palette-ide.editing:not(.dragging) .palette-parking.palette-horizontal .toolbar:hover,
-.palette-ide.editing.dragging .toolbar-border.palette-horizontal .toolbar[data-dragged='true'],
-.palette-ide.editing.dragging .palette-parking.palette-horizontal .toolbar[data-dragged='true'] {
-	padding: 0 calc(var(--palette-dz-size) * 2);
+.palette-ide.editing.dragging .toolbar-border.palette-horizontal .toolbar[data-dragged='true'] {
+	border-radius: 4px;
+	border-left: calc(var(--palette-dz-size) * 2) double;
+	border-right: calc(var(--palette-dz-size) * 2) double;
 }
 
 .palette-ide.editing:not(.dragging) .toolbar-border.palette-vertical .toolbar:hover,
-.palette-ide.editing:not(.dragging) .palette-parking.palette-vertical .toolbar:hover,
-.palette-ide.editing.dragging .toolbar-border.palette-vertical .toolbar[data-dragged='true'],
-.palette-ide.editing.dragging .palette-parking.palette-vertical .toolbar[data-dragged='true'] {
-	padding: calc(var(--palette-dz-size) * 2) 0;
+.palette-ide.editing.dragging .toolbar-border.palette-vertical .toolbar[data-dragged='true'] {
+	border-radius: 4px;
+	border-top: calc(var(--palette-dz-size) * 2) double;
+	border-bottom: calc(var(--palette-dz-size) * 2) double;
 }
 
 .palette-ide.editing .toolbar:hover {
@@ -432,13 +435,19 @@
 }
 
 /* ── Axis-Aware Orthogonal Toolbar Sizing ── */
+/* The perpendicular dimension is standardized: every toolbar (border or
+ * parking, either axis) is exactly `--palette-toolbar-perpendicular` at
+ * rest. Handles are added *outside* this size on hover, so the resting
+ * size never depends on whether a handle is shown. */
 
-.toolbar-border.palette-horizontal > .toolbar-track > .toolbar-track-slot > .toolbar {
-	min-height: 2.5rem;
+.toolbar-border.palette-horizontal > .toolbar-track > .toolbar-track-slot > .toolbar,
+.palette-parking.palette-horizontal > .toolbar {
+	min-height: var(--palette-toolbar-perpendicular);
 }
 
-.toolbar-border.palette-vertical > .toolbar-track > .toolbar-track-slot > .toolbar {
-	min-width: 2.5rem;
+.toolbar-border.palette-vertical > .toolbar-track > .toolbar-track-slot > .toolbar,
+.palette-parking.palette-vertical > .toolbar {
+	min-width: var(--palette-toolbar-perpendicular);
 }
 
 /* ── Drawer Popup ── */
@@ -470,6 +479,10 @@
 	max-height: min(70vh, 24rem);
 	overflow-y: auto;
 	overflow-x: hidden;
+	/* Body-portaled: outside `.palette-ide`, so re-declare the sizing var
+	 * here — drawer children size themselves off it (stepper value stretch,
+	 * square vertical triggers). */
+	--palette-toolbar-perpendicular: 2.5rem;
 }
 
 /* Suppress toolbar ::before overflow inside popups (avoids phantom scrollbar) */
@@ -484,6 +497,7 @@
 
 .palettable-drawer__popup.is-horizontal .toolbar {
 	flex-direction: row;
+	align-items: center;
 }
 
 .palettable-drawer__popup .toolbar-item-space {

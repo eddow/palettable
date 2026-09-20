@@ -17,7 +17,9 @@ async function openConsole(page: import('@playwright/test').Page) {
 test('command-box combobox runs commands inline', async ({ page }) => {
 	// The toolbar command box is a real combobox (text input + results popup),
 	// not a launcher button: it runs commands inline on the toolbar.
-	await expect(page.getByTestId('command-box-combobox')).toBeVisible()
+	// The demo now hosts two command boxes (horizontal top + vertical right),
+	// so scope to the first.
+	await expect(page.getByTestId('command-box-combobox').first()).toBeVisible()
 	await expect(page.getByTestId('console-overlay')).toHaveCount(0)
 })
 

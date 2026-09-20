@@ -637,12 +637,16 @@ here cannot block Phase 12.
 
 Landed 2026-09-19: core `outside` + `catalog` session support (329 tests),
 vanilla `outside` hit-test + mask/panel + catalog source (54 tests), full
-vanilla e2e 31 green, svelte fail set unchanged (4 Phase-0). Deferred:
-`data-dragged` / `palette-dragging` chrome mirror — setting `data-dragged`
-adds `2 × --palette-dz-size` padding to the dragged toolbar (CSS already
-has the rules), which shifts every `getBoundingClientRect` the slide +
-outside measurements read; wire it only with e2e pins proving the shift is
-compensated. `editing`-flip `end()` already landed in Phase 4.
+vanilla e2e 31 green, svelte fail set unchanged (4 Phase-0). Landed
+2026-09-20: `data-dragged` chrome mirror, core-decided — the session
+exposes `draggedToolbar` (live `origin.toolbar`, `undefined` while a
+catalog creation is pending or after `end()`); vanilla applies it verbatim
+(`nodes.get` → `dataset.dragged`, stale cleared first) and never computes
+it (no `isDraggedToolbarAt`, no container scan). `palette-dragging` stays
+a dead mirror (no CSS rule). Unit-pinned: core `draggedToolbar` follows
+the origin across a restructure commit + clears on `end()`; vanilla guard
+`pointerdown` stamps exactly the grabbed toolbar. `editing`-flip `end()`
+already landed in Phase 4.
 
 - [x] `outside`: adapter projects beside-border pointers onto the border's stack
   axis (alongside track *i* → nearer of gaps *i* / *i+1*; pure
@@ -662,19 +666,33 @@ compensated. `editing`-flip `end()` already landed in Phase 4.
   dwell and commit stay core's, the border mask toggles its own end-gap
   classes directly (never through the session — a mask position maps to
   nothing, so `over(null)` would clear the session's own paint).
-- [ ] Chrome: mirror `.dragging` / `data-dragged` from the grab target
-  (deferred — see above); an `editing` flip false mid-gesture calls `end()`
-  (already landed Phase 4).
+- [x] Chrome: core-decided `data-dragged` (`session.draggedToolbar`,
+  vanilla applies verbatim) + `.dragging` container chrome; an `editing`
+  flip false mid-gesture calls `end()` (already landed Phase 4).
 - [x] Verify: full vanilla e2e green (31/31); console add/delete flows unaffected.
 
 ### Phase 7 — close-out (AGENTS.md protocol)
 
-- [ ] Delete the legacy surface: `dragStart` / `dragOver` → `DragOverDecision`,
-  `DragElement`, `DragPointer`, `startDraggingState` / `refreshDragMode` /
-  `resolveDragMode` (now session internals), the `wholeToolbarNeighbourEdges`
-  return-value form, the `vanilla/slide.ts` leftovers, the Phase-2 dual-run shim.
-- [ ] `isWholeToolbar` / `mode` internal to the session — wire vocabulary is
-  `Hoverable` in, `DragEvent` out.
+- [x] Delete the dead shims: `gap-dwell.ts` + barrel export + `phase2.test.ts`
+  `GapDwell` pins (session owns the dwell inline since Phase 3), the
+  `vanilla/slide.ts` `clampSlideDelta` wrapper + its `drag.test.ts` pins
+  (core owns the single copy), `vanilla/highlight.ts` `syncGapClasses`
+  (highlight arrives as per-gap `DragEvent`s; `clearGapClasses` stays).
+- [x] Fold the catalog placement fork into the engine: `layout.createDrag`
+  injects the real `isItemSpaceFree` / `insertToolbar` (with
+  `configuration.trackGapSplit`) instead of the session-local
+  `isItemSpaceFreeLite` / `insertToolbarLite` — deleted with the fork.
+- [ ] What remains (deliberate, not leftover): `dragStart` / `dragOver` →
+  `DragOverDecision`, `DragElement`, `DragPointer`, `DraggingState` /
+  `DragOrigin` / `DragMode`, `startDraggingState` / `refreshDragMode` /
+  `resolveDragMode`, `wholeToolbarNeighbourEdges`, the Phase-2 dual-run
+  oracle pin in `drag.test.ts`, and the `draggingState` / `sessionState`
+  escape hatch in `drag.ts` / `vanilla/ide.ts`. These are the engine the
+  session delegates to (via the injected `DragEngine` — no module cycle),
+  pinned by `layout.test.ts` engine tests; `isWholeToolbar` / `mode` stay
+  session-internal (wire vocabulary is `Hoverable` in, `DragEvent` out).
+  Deleting them means inlining the engine into the session — a behaviour
+  risk with no API gain, so Phase 7 documents instead of deleting.
 - [ ] Migrate the permanent rules to `docs/` per `AGENTS.md`: session contract +
   adapter hit-test/measure/apply duties → `layout-and-drag.md`; event stream +
   single-writer decisions → `architecture.md` §21; then delete this file.

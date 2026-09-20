@@ -3,7 +3,7 @@
 		type PaletteEditorContext,
 		type PaletteSchema,
 		type PaletteToolbarItem,
-		type PaletteToolEnum, 
+		type PaletteToolEnum,
 		selectPresenter
 	} from '$lib/palette/core.svelte'
 
@@ -39,7 +39,14 @@
 				onChange?.(option.value)
 			}}
 		>
-			<span class="palette-default-choice">{option.text}</span>
+			{#if option.icon !== undefined}
+				<span class="palette-default-choice-icon">{option.icon}</span>
+			{/if}
+			{#if view.showText && option.label !== undefined}
+				<span class="palette-default-choice">{option.label}</span>
+			{:else if !view.showText && option.icon === undefined}
+				<span class="palette-default-choice">{option.label ?? option.value}</span>
+			{/if}
 		</button>
 	{/each}
 </div>

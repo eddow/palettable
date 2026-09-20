@@ -7,7 +7,7 @@
 		type PaletteBorder,
 		type PaletteDerivedVariant,
 		type PaletteEditorContext,
-		type PaletteParking, 
+		type PaletteParking,
 		type Palette as PaletteRuntime,
 		Parking,
 		paletteAddItemEntries,
@@ -269,6 +269,11 @@
 							onEnter={(entryId) => {
 								if (!isEditing) close()
 								else if (entryId) {
+									// Selecting an add source starts the add flow:
+									// clear any inspected toolbar item so the
+									// details panel shows the add panel.
+									if (palettes.inspecting?.palette === (palette as never))
+										delete palettes.inspecting
 									consoleState.selectedEntryId = entryId
 									consoleState.selectedVariantId = undefined
 								}
@@ -276,6 +281,8 @@
 							onActivate={(entryId) => {
 								if (isEditing) {
 									activeBox.select(entryId)
+									if (palettes.inspecting?.palette === (palette as never))
+										delete palettes.inspecting
 									consoleState.selectedEntryId = entryId
 									consoleState.selectedVariantId = undefined
 								} else {

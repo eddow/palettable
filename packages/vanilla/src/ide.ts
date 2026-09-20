@@ -11,10 +11,8 @@
  *
  * Presentation only: all reads go through core builders/presenters, all
  * writes through `core.run` / `core.values` / `core.layout` / `ConsoleStore`.
- * Drop-zone highlight is paint-only: `pointerdown` on a guard opens a
- * single-tool drag session, `pointermove` asks core `itemSpaceHighlight`
- * which gaps paint and applies it via `syncGapClasses`; no session means
- * core returns empty, so hover alone never paints. Guards also inspect
+ * Drop-zone highlight arrives as per-gap `DragEvent`s from the core session;
+ * no session means no paint, so hover alone never paints. Guards also inspect
  * (`pointerdown` selects for the configurator).
  */
 
@@ -37,7 +35,6 @@ import {
 	type HighlightState,
 	type Hoverable,
 	isActionPoint,
-	isDraggedToolbarAt,
 	isValuedPoint,
 	type LayoutOp,
 	type PaletteCore,
@@ -165,8 +162,11 @@ function updateToolNode(
 			const view = selectPresenter(item, { point, value, bags }, surface)
 			const buttons = node.querySelectorAll('button')
 			buttons.forEach((button) => {
-				const text = button.querySelector('.palette-default-choice')?.textContent ?? ''
-				const spec = view.options.find((entry) => entry.text === text)
+				// Match on `data-value` (stable identity), not rendered text:
+				// the label node is split and may be hidden per axis.
+				const spec = view.options.find(
+					(entry) => entry.value === (button as HTMLElement).dataset.value
+				)
 				if (!spec) return
 				button.classList.toggle('is-selected', view.value === spec.value)
 				button.disabled = !spec.can || view.value === spec.value
@@ -185,16 +185,41 @@ function updateToolNode(
 			})
 			return
 		}
-		case 'slider': {
+		case 'slider':
+		case 'drawerSlider': {
 			const view = sliderPresenter(item, { point, value, bags }, surface)
+			// The readout always follows the model — including mid-drag, which
+			// is when it matters most: the pointer focuses the range, so a
+			// guard placed before this would leave the number stale while the
+			// user drags.
+			const readout = node.querySelector('.palette-default-slider-value')
+			// The icon nests inside the readout (mirroring the stepper chip),
+			// so only the text node carries the value — rewriting textContent
+			// would destroy the icon. With `showValue: false` the chip is
+			// icon-only: drop any text nodes instead of updating them.
+			if (readout) {
+				if (!view.showValue) {
+					for (const child of [...readout.childNodes]) {
+						if (child.nodeType === Node.TEXT_NODE) child.remove()
+					}
+				} else {
+					let updated = false
+					readout.childNodes.forEach((child) => {
+						if (child.nodeType === Node.TEXT_NODE) {
+							child.textContent = view.text
+							updated = true
+						}
+					})
+					if (!updated) readout.append(document.createTextNode(view.text))
+				}
+			}
 			const input = node.querySelector('input[type="range"]')
 			if (!(input instanceof HTMLInputElement)) return
-			// Guard: keep a dragged thumb alive — never rewrite while focused.
+			// Guard: keep a dragged thumb alive — never rewrite the *value*
+			// while focused, or the thumb fights the pointer.
 			if (document.activeElement === input) return
 			const next = String(view.value ?? view.min)
 			if (input.value !== next) input.value = next
-			const badge = node.querySelector('.palette-default-slider-badge')
-			if (badge) badge.textContent = next
 			return
 		}
 		case 'stepper': {
@@ -231,22 +256,6 @@ function updateToolNode(
 			return
 	}
 }
-
-type BorderPath = {
-	readonly container: 'border'
-	readonly region: PaletteRegion
-	readonly trackIndex: number
-	readonly slotIndex: number
-	readonly itemIndex: number
-}
-
-type ParkingPath = {
-	readonly container: 'parking'
-	readonly toolbarIndex: number
-	readonly itemIndex: number
-}
-
-type InspectingPath = BorderPath | ParkingPath
 
 const REGIONS: readonly PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 
@@ -311,6 +320,7 @@ const VANILLA_EDITOR_REGISTRY = {
 	},
 	number: {
 		slider: { id: 'slider', label: 'Slider', families: ['number'] as const },
+		drawerSlider: { id: 'drawerSlider', label: 'Drawer slider', families: ['number'] as const },
 		stepper: { id: 'stepper', label: 'Stepper', families: ['number'] as const },
 		stars: { id: 'stars', label: 'Stars', families: ['number'] as const },
 	},
@@ -338,23 +348,6 @@ function defaultEditorFor(point: AnyPoint | undefined): string | undefined {
 	if (point.type === 'boolean') return 'toggle'
 	if (point.type === 'enum') return 'select'
 	return 'slider'
-}
-
-function samePath(left: InspectingPath | undefined, right: InspectingPath): boolean {
-	if (left === undefined) return false
-	if (left.container !== right.container) return false
-	if (left.container === 'parking' && right.container === 'parking') {
-		return left.toolbarIndex === right.toolbarIndex && left.itemIndex === right.itemIndex
-	}
-	if (left.container === 'border' && right.container === 'border') {
-		return (
-			left.region === right.region &&
-			left.trackIndex === right.trackIndex &&
-			left.slotIndex === right.slotIndex &&
-			left.itemIndex === right.itemIndex
-		)
-	}
-	return false
 }
 
 /** Case-insensitive substring filter for add-item sources (no core helper). */
@@ -447,7 +440,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (unsubs.length > 0) toolBindings.set(content, unsubs)
 	}
 
-	let inspecting: InspectingPath | undefined
+	let inspecting: ToolbarItem | undefined
 	let consoleQuery = ''
 	let disposed = false
 	/** Last applied editing flag — drives the no-rebuild chrome pass. */
@@ -658,6 +651,53 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
+	 * Live item location for an item object (identity scan — position is
+	 * never trusted across renders). Used by the configurator delete path
+	 * so it removes the inspected tool wherever a drag has moved it.
+	 */
+	function locationOfItem(item: ToolbarItem): import('@palettable/core').ItemLocation | undefined {
+		const live = core.layout.getLayout()
+		for (const region of REGIONS) {
+			const border = live.borders[region]
+			for (let trackIndex = 0; trackIndex < border.length; trackIndex += 1) {
+				const track = border[trackIndex]!
+				for (let slotIndex = 0; slotIndex < track.length; slotIndex += 1) {
+					const toolbar = track[slotIndex]?.toolbar
+					if (toolbar === undefined) continue
+					const itemIndex = toolbar.indexOf(item)
+					if (itemIndex >= 0)
+						return {
+							container: 'border',
+							region,
+							trackIndex,
+							toolbarIndex: slotIndex,
+							itemIndex,
+						}
+				}
+			}
+		}
+		for (let toolbarIndex = 0; toolbarIndex < live.parking.length; toolbarIndex += 1) {
+			const toolbar = live.parking[toolbarIndex]!
+			const itemIndex = toolbar.indexOf(item)
+			if (itemIndex >= 0) return { container: 'parking', toolbarIndex, itemIndex }
+		}
+		return undefined
+	}
+
+	/** Live border region holding an item (for the configurator surface). */
+	function regionOfItem(item: ToolbarItem): PaletteRegion | undefined {
+		const live = core.layout.getLayout()
+		for (const region of REGIONS) {
+			for (const track of live.borders[region]) {
+				for (const slot of track) {
+					if (slot.toolbar.includes(item)) return region
+				}
+			}
+		}
+		return undefined
+	}
+
+	/**
 	 * Open a drag session for one tool. The core decides whole-toolbar vs
 	 * subset at `createDrag` (grab target in, session out) — this adapter
 	 * only hit-tests, measures, and applies session events. A lone tool in
@@ -746,87 +786,43 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 
 	/**
 	 * Phase 6 chrome mirror: container `.dragging` + `data-dragging` (the
-	 * Phase 1–5 chrome) plus per-toolbar `data-dragged` on the grabbed
-	 * toolbar in its own container (mirrors svelte `Toolbar`
-	 * `data-dragged` via `isDraggedToolbarAt`) plus root
-	 * `palette-dragging` (mirrors svelte `paletteRoot`). Container-scoped:
-	 * the same object rendered twice matches only where the drag
-	 * originated. Re-applied after every `structure` event (the placed
-	 * toolbar is a fresh object / new container after a commit).
+	 * Phase 1–5 chrome) plus per-toolbar `data-dragged` on the core-decided
+	 * dragged toolbar (`dragSession.draggedToolbar` — vanilla applies it
+	 * verbatim via `nodes.get`, never computes it) plus root
+	 * `palette-dragging` (mirrors svelte `paletteRoot`). Re-applied after
+	 * every `structure` event (the placed toolbar is a fresh object / new
+	 * container after a commit).
 	 */
 	function applyDragChrome(): void {
-		if (dragging === undefined) return
+		if (dragSession === undefined) return
 		container.classList.add('dragging')
 		container.dataset.dragging = 'true'
-		// NOTE: no `palette-dragging` class and no `data-dragged` yet (see
-		// below) — both change layout-sensitive chrome. `palette-dragging`
-		// has no CSS rule (dead mirror); `data-dragged` adds
-		// `2 × --palette-dz-size` padding to the dragged toolbar, which
-		// shifts every `getBoundingClientRect` the slide + outside
-		// measurements read. Wire them only with the Phase 6 e2e pins that
-		// prove the shift is compensated.
-		const live = core.layout.getLayout()
-		const origin = dragging.origin
-		if (origin.kind === 'border') {
-			const border = live.borders[regionOfBorder(origin.border, live) ?? 'top']
-			const trackIndex = border.indexOf(origin.track)
-			if (trackIndex < 0) return
-			const track = border[trackIndex]
-			if (track === undefined) return
-			for (const slot of track) {
-				const node = nodes.get(slot.toolbar)
-				if (!(node instanceof HTMLElement)) continue
-				if (
-					isDraggedToolbarAt(dragging, slot.toolbar, {
-						kind: 'border',
-						toolbar: slot.toolbar,
-						track,
-						border,
-					})
-				) {
-					void node
-				} else {
-					delete node.dataset.dragged
-				}
-			}
-			return
-		}
-		for (const row of live.parking) {
-			const node = nodes.get(row)
-			if (!(node instanceof HTMLElement)) continue
-			const index = live.parking.indexOf(row)
-			if (
-				isDraggedToolbarAt(dragging, row, {
-					kind: 'parking',
-					toolbar: row,
-					parking: live.parking,
-					index,
-				})
-			) {
-				void node
-			} else {
-				delete node.dataset.dragged
+		// `palette-dragging` has no CSS rule (dead mirror, kept cleared in
+		// `clearDragChrome`); `data-dragged` keeps the dragged toolbar's
+		// handles exposed for the whole gesture (mirrors svelte `Toolbar`
+		// `data-dragged`). It changes the
+		// toolbar's border width, so slide/outside measurements must run
+		// against the post-chrome DOM — arm/re-arm order is grab →
+		// `applyDragChrome` → `armSlide`, and `structure` → `applyOp` →
+		// `applyDragChrome` → re-arm.
+		// Core decides, vanilla applies: clear any stale attribute, then
+		// stamp the single live node (if any — catalog creation has no
+		// live toolbar until the first placement inserts).
+		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
+			for (const node of host.querySelectorAll('.toolbar[data-dragged]')) {
+				if (node instanceof HTMLElement) delete node.dataset.dragged
 			}
 		}
+		const dragged = dragSession.draggedToolbar
+		if (dragged === undefined) return
+		const node = nodes.get(dragged)
+		if (node instanceof HTMLElement) node.dataset.dragged = 'true'
 	}
 
-	/** Region holding `border` (identity scan — mirrors core `regionOf`). */
-	function regionOfBorder(
-		border: Border,
-		live: ReturnType<PaletteCore['layout']['getLayout']>
-	): PaletteRegion | undefined {
-		for (const region of REGIONS) {
-			if (live.borders[region] === border) return region
-		}
-		return undefined
-	}
-
-	/** Clear the Phase 6 chrome mirror (per-toolbar + root). */
+	/** Clear the drag chrome mirror (per-toolbar `data-dragged`). */
 	function clearDragChrome(): void {
 		container.classList.remove('palette-dragging')
-		// `data-dragged` is never set yet (see `applyDragChrome`): the
-		// sweep stays so the mirror cannot leave stale attributes behind
-		// once it is wired.
+		// Sweep stays so the mirror cannot leave stale attributes behind.
 		for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
 			for (const node of host.querySelectorAll('.toolbar[data-dragged]')) {
 				if (node instanceof HTMLElement) delete node.dataset.dragged
@@ -1408,7 +1404,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		region: PaletteRegion,
 		editing: boolean,
 		containerKind: 'border' | 'parking',
-		basePath:
+		_basePath:
 			| {
 					readonly container: 'border'
 					readonly region: PaletteRegion
@@ -1497,16 +1493,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 		appendSpace(0)
 		toolbar.forEach((item, itemIndex) => {
-			const path: InspectingPath =
-				basePath.container === 'border'
-					? {
-							container: 'border',
-							region: basePath.region,
-							trackIndex: basePath.trackIndex,
-							slotIndex: basePath.slotIndex,
-							itemIndex,
-						}
-					: { container: 'parking', toolbarIndex: basePath.toolbarIndex, itemIndex }
 			const wrapper = el('div', 'toolbar-item')
 			wrapper.dataset.itemIndex = String(itemIndex)
 			nodes.setItem(item, wrapper)
@@ -1514,7 +1500,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (typeof tool === 'string') wrapper.dataset.tool = tool
 			const editor = (item as { editor?: unknown }).editor
 			if (typeof editor === 'string') wrapper.dataset.editor = editor
-			if (samePath(inspecting, path)) wrapper.dataset.inspected = 'true'
+			if (inspecting === item) wrapper.dataset.inspected = 'true'
 			const content = el('div', 'toolbar-item-content')
 			if (editing) {
 				;(content as HTMLElement & { inert?: boolean }).inert = true
@@ -1527,7 +1513,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				surface,
 				region,
 				onOpenConsole: (mode) => consoleStore.open(mode),
-				onInspect: () => setInspecting(path),
+				onInspect: () => setInspecting(item),
 				renderToolbar: (childTrack: Track, childAxis, childRegion) =>
 					renderDrawerTrack(childTrack, childAxis, childRegion, editing),
 			})
@@ -1539,7 +1525,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				guard.dataset.paletteId = paletteId
 				guard.setAttribute('aria-hidden', 'true')
 				guard.addEventListener('pointerdown', (event) => {
-					setInspecting(path)
+					setInspecting(item)
 					startToolDrag(event, toolbar, item)
 				})
 				wrapper.append(guard)
@@ -1864,21 +1850,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				const node = el('div', 'toolbar-item-guard')
 				node.dataset.paletteId = paletteId
 				node.setAttribute('aria-hidden', 'true')
-				const path = inspectingPathOf(wrapper)
 				node.addEventListener('pointerdown', (event) => {
-					if (path) {
-						setInspecting(path)
+					const item = itemOfWrapper(wrapper)
+					if (item) {
+						setInspecting(item)
 						const live = core.layout.getLayout()
-						const item =
-							path.container === 'parking'
-								? live.parking[path.toolbarIndex]?.[path.itemIndex]
-								: live.borders[path.region][path.trackIndex]?.[path.slotIndex]?.toolbar[
-										path.itemIndex
-									]
-						if (item) {
-							const toolbar = findToolbarOf(live, item)
-							if (toolbar) startToolDrag(event, toolbar, item)
-						}
+						const toolbar = findToolbarOf(live, item)
+						if (toolbar) startToolDrag(event, toolbar, item)
 					}
 				})
 				wrapper.append(node)
@@ -1916,44 +1894,38 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	/**
 	 * Inspecting as a two-node flip (no rebuild): clear `data-inspected`
 	 * on the old wrapper, set it on the new one, then refresh the console
-	 * details panel (which reads `inspecting` at render time).
+	 * details panel (which reads `inspecting` at render time). The
+	 * selection is the live item object (`===`), never a path — a drag
+	 * commit moves the same object to a new container, so the edition
+	 * follows the tool instead of pointing at whatever slid into its
+	 * old index.
 	 */
-	function setInspecting(next: InspectingPath | undefined): void {
-		if (next !== undefined && inspecting !== undefined && samePath(inspecting, next)) return
-		const oldNode = inspecting !== undefined ? inspectingNodeOf(inspecting) : undefined
-		if (oldNode) delete oldNode.dataset.inspected
+	function setInspecting(next: ToolbarItem | undefined): void {
+		if (next !== undefined && inspecting === next) return
+		const oldNode = inspecting !== undefined ? nodes.get(inspecting) : undefined
+		if (oldNode instanceof HTMLElement) delete oldNode.dataset.inspected
 		inspecting = next
 		if (next !== undefined) {
-			const node = inspectingNodeOf(next)
-			if (node) node.dataset.inspected = 'true'
+			const node = nodes.get(next)
+			if (node instanceof HTMLElement) node.dataset.inspected = 'true'
 		}
 		renderConsoleDetails()
 	}
 
-	/** Resolve the live `.toolbar-item` wrapper for an inspecting path. */
-	function inspectingNodeOf(path: InspectingPath): HTMLElement | undefined {
+	/** Resolve the live item object behind a rendered wrapper (identity scan). */
+	function itemOfWrapper(wrapper: HTMLElement): ToolbarItem | undefined {
 		const live = core.layout.getLayout()
-		const item =
-			path.container === 'parking'
-				? live.parking[path.toolbarIndex]?.[path.itemIndex]
-				: live.borders[path.region][path.trackIndex]?.[path.slotIndex]?.toolbar[path.itemIndex]
-		if (!item) return undefined
-		const node = nodes.get(item)
-		return node instanceof HTMLElement ? node : undefined
-	}
-
-	/** Rebuild an inspecting path from a rendered wrapper's datasets. */
-	function inspectingPathOf(wrapper: HTMLElement): InspectingPath | undefined {
+		const itemIndex = Number(wrapper.dataset.itemIndex ?? '-1')
+		if (!Number.isInteger(itemIndex) || itemIndex < 0) return undefined
 		const bar = wrapper.closest('.toolbar')
 		if (!(bar instanceof HTMLElement)) return undefined
-		const itemIndex = Number(wrapper.dataset.itemIndex ?? '-1')
 		if (bar.dataset.container === 'parking') {
 			const row = wrapper.closest('.palette-parking-row')
 			const toolbarIndex = Number(
 				row instanceof HTMLElement ? (row.dataset.parkingRowIndex ?? '-1') : '-1'
 			)
-			if (toolbarIndex < 0 || itemIndex < 0) return undefined
-			return { container: 'parking', toolbarIndex, itemIndex }
+			if (!Number.isInteger(toolbarIndex) || toolbarIndex < 0) return undefined
+			return live.parking[toolbarIndex]?.[itemIndex]
 		}
 		const trackEl = wrapper.closest('.toolbar-track')
 		const borderEl = wrapper.closest('.toolbar-border')
@@ -1968,10 +1940,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const slotIndex = Number(
 			slotEl instanceof HTMLElement ? (slotEl.dataset.toolbarSlotIndex ?? '-1') : '-1'
 		)
-		if (region === undefined || trackIndex < 0 || slotIndex < 0 || itemIndex < 0) {
-			return undefined
-		}
-		return { container: 'border', region, trackIndex, slotIndex, itemIndex }
+		if (region === undefined || trackIndex < 0 || slotIndex < 0) return undefined
+		return live.borders[region][trackIndex]?.[slotIndex]?.toolbar[itemIndex]
 	}
 
 	/**
@@ -1991,8 +1961,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (!editing) {
 			if (dragSession !== undefined) endToolDrag()
 			if (inspecting !== undefined) {
-				const oldNode = inspectingNodeOf(inspecting)
-				if (oldNode) delete oldNode.dataset.inspected
+				const oldNode = nodes.get(inspecting)
+				if (oldNode instanceof HTMLElement) delete oldNode.dataset.inspected
 				inspecting = undefined
 			}
 			for (const host of [topHost, leftHost, rightHost, bottomHost, consoleHost]) {
@@ -2119,6 +2089,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					row.className = 'palette-default-command-result'
 					row.addEventListener('mousedown', (event) => event.preventDefault())
 					row.addEventListener('click', () => {
+						// Selecting an add source starts the add flow: clear
+						// any inspected toolbar item so the details panel
+						// shows the add panel, not the stale inspector.
+						setInspecting(undefined)
 						consoleStore.patch({ selectedEntryId: source.id, selectedVariantId: undefined })
 					})
 					const copy = el('span', 'palette-default-command-result-copy')
@@ -2183,7 +2157,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 						{ excludeTools: ['console'] }
 					)
 					const first = filterAddSources(sources, input.value)[0]
-					if (first) consoleStore.patch({ selectedEntryId: first.id, selectedVariantId: undefined })
+					if (first) {
+						setInspecting(undefined)
+						consoleStore.patch({ selectedEntryId: first.id, selectedVariantId: undefined })
+					}
 				} else {
 					const all = paletteCommandEntries(
 						core.points,
@@ -2231,7 +2208,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const details = el('div', 'palette-default-panel palette-default-details-panel')
 		details.dataset.testid = 'console-details-panel'
 		bottom.append(details)
-		const inspectingItem = inspecting !== undefined ? itemAtPath(inspecting) : undefined
+		const inspectingItem = inspecting !== undefined ? liveItemOf(inspecting) : undefined
 		if (inspectingItem) {
 			const title = el('div', 'palette-default-panel-title')
 			title.textContent = 'Inspect'
@@ -2260,19 +2237,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 	}
 
-	function itemAtPath(
-		path: InspectingPath
+	/**
+	 * Resolve a live item still present in the layout (identity scan —
+	 * the item object survives drag commits, so a stale reference simply
+	 * resolves to `undefined` instead of pointing at a stranger).
+	 */
+	function liveItemOf(
+		item: import('@palettable/core').ToolbarItem
 	): { item: import('@palettable/core').ToolbarItem; point: AnyPoint | undefined } | undefined {
-		const live = core.layout.getLayout()
-		if (path.container === 'parking') {
-			const toolbar = live.parking[path.toolbarIndex]
-			const item = toolbar?.[path.itemIndex]
-			if (!item) return undefined
-			return { item, point: pointFor(item) }
-		}
-		const item =
-			live.borders[path.region][path.trackIndex]?.[path.slotIndex]?.toolbar[path.itemIndex]
-		if (!item) return undefined
+		if (findToolbarOf(core.layout.getLayout(), item) === undefined) return undefined
 		return { item, point: pointFor(item) }
 	}
 
@@ -2289,20 +2262,21 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * created together — no core call), then re-render the borders so the
 	 * tool rebuilds with its new presentation. Editor-type swaps rebuild
 	 * the whole tool element with initial values (see renderToolbarElement).
+	 * The item is the identity — its container is resolved live, so a
+	 * drag that moved it since selection still edits the same tool.
 	 */
 	function patchLive(
-		path: InspectingPath,
+		item: import('@palettable/core').ToolbarItem,
 		patch: (item: import('@palettable/core').ToolbarItem) => void
 	): void {
-		const found = itemAtPath(path)
-		if (!found) return
-		patch(found.item)
+		if (findToolbarOf(core.layout.getLayout(), item) === undefined) return
+		patch(item)
 		syncStructure()
 	}
 
 	function renderConfigurator(
 		item: import('@palettable/core').ToolbarItem,
-		path: InspectingPath
+		inspectingItem: import('@palettable/core').ToolbarItem
 	): HTMLElement {
 		const table = el('div', 'palette-default-config-table')
 		const point = pointFor(item)
@@ -2310,9 +2284,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			string,
 			unknown
 		>
-		const surface = surfaceForRegion(
-			path.container === 'border' ? path.region : ('top' as PaletteRegion)
-		)
+		const region = regionOfItem(inspectingItem) ?? 'top'
+		const surface = surfaceForRegion(region)
 		const currentEditor =
 			(item as { editor?: string }).editor ?? defaultEditorFor(point) ?? 'button'
 		const choices = editorChoicesFor(
@@ -2348,7 +2321,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		row(
 			'Label',
 			textInput(labelValue, (next) =>
-				patchLive(path, (target) => {
+				patchLive(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
 					record.config = { ...(record.config ?? {}), label: next }
 				})
@@ -2357,7 +2330,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		row(
 			'Icon',
 			textInput(typeof config.icon === 'string' ? config.icon : '', (next) =>
-				patchLive(path, (target) => {
+				patchLive(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
 					record.config = { ...(record.config ?? {}), icon: next }
 				})
@@ -2366,7 +2339,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		row(
 			'Hint',
 			textInput(typeof config.hint === 'string' ? config.hint : '', (next) =>
-				patchLive(path, (target) => {
+				patchLive(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
 					record.config = { ...(record.config ?? {}), hint: next }
 				})
@@ -2391,7 +2364,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		editorSelect.value = currentEditor
 		editorSelect.addEventListener('change', () => {
 			const next = editorSelect.value
-			patchLive(path, (target) => {
+			patchLive(item, (target) => {
 				const record = target as {
 					editor?: string
 					config?: Record<string, unknown>
@@ -2413,7 +2386,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 		toneSelect.value = config.tone === 'accent' ? 'accent' : 'neutral'
 		toneSelect.addEventListener('change', () => {
-			patchLive(path, (target) => {
+			patchLive(item, (target) => {
 				const record = target as { config?: Record<string, unknown> }
 				record.config = {
 					...(record.config ?? {}),
@@ -2422,6 +2395,40 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			})
 		})
 		row('Tone', toneSelect)
+		if (currentEditor === 'slider' || currentEditor === 'drawerSlider') {
+			const showInput = document.createElement('input')
+			showInput.type = 'checkbox'
+			showInput.checked = config.showValue !== false
+			showInput.dataset.testid = 'configurator-show-value'
+			showInput.setAttribute('aria-label', 'Display number')
+			showInput.addEventListener('change', () => {
+				patchLive(item, (target) => {
+					const record = target as { config?: Record<string, unknown> }
+					const next = { ...(record.config ?? {}) }
+					if (showInput.checked) delete next.showValue
+					else next.showValue = false
+					record.config = next
+				})
+			})
+			row('Display number', showInput)
+		}
+		if (currentEditor === 'segmented') {
+			const showInput = document.createElement('input')
+			showInput.type = 'checkbox'
+			showInput.checked = config.showText !== false
+			showInput.dataset.testid = 'configurator-show-text'
+			showInput.setAttribute('aria-label', 'Show text')
+			showInput.addEventListener('change', () => {
+				patchLive(item, (target) => {
+					const record = target as { config?: Record<string, unknown> }
+					const next = { ...(record.config ?? {}) }
+					if (showInput.checked) delete next.showText
+					else next.showText = false
+					record.config = next
+				})
+			})
+			row('Show text', showInput)
+		}
 		const deleteLine = el('div', 'palette-default-config-row')
 		const deleteKey = el('div', 'palette-default-config-key')
 		const deleteStrong = document.createElement('strong')
@@ -2434,20 +2441,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		deleteButton.dataset.testid = 'configurator-delete'
 		deleteButton.textContent = 'Delete editor'
 		deleteButton.addEventListener('click', () => {
-			const from =
-				path.container === 'parking'
-					? {
-							container: 'parking' as const,
-							toolbarIndex: path.toolbarIndex,
-							itemIndex: path.itemIndex,
-						}
-					: {
-							container: 'border' as const,
-							region: path.region,
-							trackIndex: path.trackIndex,
-							toolbarIndex: path.slotIndex,
-							itemIndex: path.itemIndex,
-						}
+			const from = locationOfItem(item)
+			if (from === undefined) return
 			core.layout.moveItem(from, undefined)
 			inspecting = undefined
 		})
@@ -2809,6 +2804,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	function onKeyDown(event: KeyboardEvent): void {
+		if (disposed) return
 		if (event.defaultPrevented) return
 		if (isEditableTarget(event.target)) return
 		if (event.key === 'Escape') {
@@ -2821,8 +2817,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (computeEditing()) return
 		const spec = keys.resolve(event)
 		if (!spec) return
-		event.preventDefault()
-		event.stopPropagation()
 		try {
 			const parsed = parsePointSpec(spec)
 			const def = core.getDefinition(parsed.pointId)
@@ -2832,17 +2826,39 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				isValuedPoint(def) &&
 				def.type === 'boolean'
 			) {
+				event.preventDefault()
+				event.stopPropagation()
 				const current = core.values.get(def.id) as boolean | undefined
 				core.values.set(def.id as never, !current as never)
 				return
 			}
+			// Named actions (`id:inc` / `id:dec`) are bounds-gated: a press
+			// at the bound is a no-op (no preventDefault — the keystroke
+			// stays free for the host), mirroring the disabled stepper
+			// button. `core.run` still clamps as a backstop.
+			if (parsed.kind === 'action') {
+				let can = true
+				try {
+					can = core.canRunAction(parsed.pointId, parsed.action)
+				} catch {
+					return
+				}
+				if (!can) return
+			}
+			event.preventDefault()
+			event.stopPropagation()
 			core.run(spec)
 		} catch {
 			// Unresolvable bindings never break typing.
 		}
 	}
 
-	container.addEventListener('keydown', onKeyDown)
+	// Global shortcuts: listen on the window so bindings fire even when
+	// focus is outside the IDE (body, demo chrome, …). Typing still wins
+	// via `isEditableTarget`, and `defaultPrevented` keeps us from
+	// double-handling events a child already consumed.
+	const keyWindow = container.ownerDocument.defaultView ?? window
+	keyWindow.addEventListener('keydown', onKeyDown)
 	// Structural changes arrive as layout ops (per-border sync). Value
 	// changes are handled per-tool in Phase E — never a global refresh.
 	// Context identity changes (set/removeContext emit `[]`) re-render the
@@ -2891,7 +2907,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			contextUnsub()
 			consoleUnsub()
 			dropAllBindings()
-			container.removeEventListener('keydown', onKeyDown)
+			keyWindow.removeEventListener('keydown', onKeyDown)
 			consoleHost.textContent = ''
 			for (const overlay of document.querySelectorAll('.palettable-drawer__overlay')) {
 				overlay.remove()

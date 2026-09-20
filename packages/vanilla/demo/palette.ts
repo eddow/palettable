@@ -356,7 +356,6 @@ const rwComboboxLayout: Borders = {
 							icon: '⏱️',
 							label: 'Sim speed',
 							hint: 'Demo slider override',
-							demoSlider: true,
 						},
 					},
 					{
@@ -400,19 +399,31 @@ const rwComboboxLayout: Borders = {
 				space: 0,
 				toolbar: [
 					{
+						editor: 'commandBox',
+						config: {
+							icon: '⌘',
+							label: 'Command',
+							hint: 'Vertical command box (icon-only, drawer overlay)',
+						},
+					},
+					{
 						tool: 'taxRate',
 						editor: 'slider',
 						config: {
 							icon: '🪙',
 							label: 'Tax rate',
 							hint: 'Demo slider override',
-							demoSlider: true,
 						},
 					},
 					{
 						tool: 'solarEfficiency',
 						editor: 'stepper',
 						config: { icon: '☀️', label: 'Solar', hint: 'Head stepper (number)' },
+					},
+					{
+						tool: 'gameSpeed',
+						editor: 'drawerSlider',
+						config: { icon: '⏩', label: 'Sim speed drawer', hint: 'Drawer slider (vertical)' },
 					},
 					{
 						tool: 'satisfaction',
@@ -452,6 +463,11 @@ const rwComboboxLayout: Borders = {
 						editor: 'status',
 						config: { icon: '⏱️', label: 'Mission time', hint: 'Pointless status readout' },
 					},
+					{
+						tool: 'taxRate',
+						editor: 'drawerSlider',
+						config: { icon: '📉', label: 'Tax drawer', hint: 'Drawer slider (horizontal)' },
+					},
 				],
 			},
 		],
@@ -459,12 +475,18 @@ const rwComboboxLayout: Borders = {
 }
 
 const commandFirstLayout: Borders = structuredClone(rwComboboxLayout)
-commandFirstLayout.top = commandFirstLayout.top.map((track) =>
-	track.map((slot) => ({
-		...slot,
-		toolbar: slot.toolbar.filter((item) => (item as { editor?: unknown }).editor !== 'commandBox'),
-	}))
-) as Borders['top']
+// Command-first means *no* combobox anywhere: strip every region, not just
+// the top one (the right border hosts a vertical command box too).
+for (const region of ['top', 'right', 'bottom', 'left'] as const) {
+	commandFirstLayout[region] = commandFirstLayout[region].map((track) =>
+		track.map((slot) => ({
+			...slot,
+			toolbar: slot.toolbar.filter(
+				(item) => (item as { editor?: unknown }).editor !== 'commandBox'
+			),
+		}))
+	) as Borders[typeof region]
+}
 
 export const demoConfigs: readonly DemoConfig[] = [
 	{

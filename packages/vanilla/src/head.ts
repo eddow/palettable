@@ -180,14 +180,17 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	return label
 }
 
-/** Render a `segmented` (enum joined-buttons) item. */
+/** Render a `segmented` (enum joined-buttons) item.
+ * The option labels are optional (`config.showText === false` hides them,
+ * leaving icon-only buttons on both axes), so a segmented stays readable
+ * without widening the toolbar when shown. */
 export function renderSegmented(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
 	const group = el(
 		'div',
-		`palette-default-segmented ${toneClass(view.tone)} palette-default-layout-${view.direction}`
+		`palette-default-segmented ${toneClass(view.tone)} palette-default-layout-${view.direction} palette-default-region-${view.region ?? 'top'}`
 	)
 	group.title = view.title
 	for (const option of view.options) {
@@ -196,48 +199,86 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 		button.className = `palette-default-tool palette-default-tool-compact${view.value === option.value ? ' is-selected' : ''}`
 		button.disabled = !option.can || view.value === option.value
 		button.title = option.text
-		const text = el('span', 'palette-default-choice')
-		text.textContent = option.text
-		button.append(text)
+		// `data-value` is the stable identity for in-place updates: the label
+		// node is split (icon + text) and may be hidden per axis, so matching
+		// on rendered text is no longer reliable.
+		button.dataset.value = option.value
+		if (option.icon !== undefined) {
+			const icon = el('span', 'palette-default-choice-icon')
+			icon.textContent = option.icon
+			button.append(icon)
+		}
+		// `showText: false` hides the label (icon-only on both axes); an
+		// option with no icon keeps its label as a fallback so the button
+		// is never empty.
+		if (view.showText && option.label !== undefined) {
+			const text = el('span', 'palette-default-choice')
+			text.textContent = option.label
+			button.append(text)
+		} else if (!view.showText && option.icon === undefined) {
+			const text = el('span', 'palette-default-choice')
+			text.textContent = option.label ?? option.value
+			button.append(text)
+		}
 		button.addEventListener('click', () => core.run(view.select(option.value)))
 		group.append(button)
 	}
 	return group
 }
 
-/** Render a `slider` (number range) item. `showValue` forces the demo value badge. */
-export function renderSlider(context: HeadContext, showValue = false): HTMLElement {
+/** Render a `slider` (number range) item.
+ * The view-model picks the range layout (`inline` vs `drawer`); the value
+ * readout next to the icon is optional (`config.showValue === false` hides
+ * the number, leaving an icon-only chip), so a drawer slider stays readable
+ * without opening the range when shown. */
+export function renderSlider(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const label = document.createElement('label')
 	label.className = [
 		'palette-default-slider',
-		showValue ? 'palette-default-slider-badged' : '',
+		`palette-default-slider-${view.variant}`,
 		toneClass(view.tone),
 		`palette-default-layout-${view.direction}`,
 		`palette-default-region-${view.region}`,
+		`palette-default-range-${view.rangeAxis}`,
 	]
 		.filter(Boolean)
 		.join(' ')
 	label.title = view.title
+	// The readout mirrors the stepper readout exactly: the icon nests inside
+	// the value chip (icon + text), so both read as one bordered chip. A
+	// drawer trigger wraps that chip so the two read as one rounded button,
+	// with the revealed range as the second segment of the group. With
+	// `showValue: false` the chip keeps the icon only (no text node). The
+	// range itself always sits inside a `slider-track` pill half: the readout
+	// (or trigger) is the first half, the track the second — visible chrome,
+	// outer corners rounded, input filling 100% of it.
 	const icon = iconSpan(view.icon)
-	if (icon) label.append(icon)
+	const readout = el('span', `palette-default-slider-value${view.showValue ? '' : ' is-icon-only'}`)
+	if (icon) readout.append(icon)
+	if (view.showValue) readout.append(document.createTextNode(view.text))
+	if (view.variant === 'drawer') {
+		const trigger = el('span', 'palette-default-slider-trigger')
+		trigger.append(readout)
+		label.append(trigger)
+	} else {
+		label.append(readout)
+	}
+	const track = el('span', 'palette-default-slider-track')
 	const input = document.createElement('input')
 	input.type = 'range'
 	input.min = String(view.min)
 	input.max = String(view.max)
 	input.step = String(view.step)
 	input.value = String(view.value ?? view.min)
+	input.setAttribute('aria-label', view.title)
 	input.addEventListener('input', () => {
 		core.values.set((point?.id ?? '') as never, Number(input.value) as never)
 	})
-	label.append(input)
-	if (showValue) {
-		const badge = el('span', 'palette-default-slider-badge')
-		badge.textContent = String(view.value)
-		label.append(badge)
-	}
+	track.append(input)
+	label.append(track)
 	return label
 }
 
@@ -321,27 +362,44 @@ export function renderStatus(context: HeadContext): HTMLElement {
 	return span
 }
 
-/** Render a `commandBox` (toolbar combobox) item. Runs commands inline. */
+/** Render a `commandBox` (toolbar combobox) item. Runs commands inline.
+ * Horizontal: full input + popover inline. Vertical: icon-only trigger whose
+ * shell/popover are CSS overlays (no portal), so the toolbar width is fixed. */
 export function renderCommandBox(context: HeadContext): HTMLElement {
-	const { core, item } = context
+	const { core, item, surface } = context
 	const meta = (item as { config?: Record<string, unknown> }).config ?? {}
-	const [box, input, popover, results, openButton] = subElementFromHtml(
+	const [box, input, popover, results, openButton, text] = subElementFromHtml(
 		commandBoxShellTemplate({
 			hint: typeof meta.hint === 'string' ? meta.hint : 'Search and run a command',
 			icon: typeof meta.icon === 'string' ? meta.icon : '⌘',
+			axis: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+			region: surface.region,
 		}),
 		'.palette-default-command-input',
 		'.palette-default-command-popover',
 		'.palette-default-command-results',
-		'.palette-default-command-open'
+		'.palette-default-command-open',
+		'.palette-default-command-text'
 	)
 	if (
 		!(input instanceof HTMLInputElement) ||
 		!(popover instanceof HTMLElement) ||
 		!(results instanceof HTMLElement) ||
-		!(openButton instanceof HTMLButtonElement)
+		!(openButton instanceof HTMLButtonElement) ||
+		!(text instanceof HTMLElement)
 	) {
 		throw new Error('commandBox shell missing nodes')
+	}
+	// Reflected on the box so CSS can drive the `:hover`-only input. The
+	// rest-state readout mirrors the input's current text while non-empty
+	// (icon-only while empty — no redundant hint, the input's own
+	// placeholder covers that), so a populated box stays readable closed.
+	const hasText = () => input.value.trim().length > 0
+	const syncRest = () => {
+		const filled = hasText()
+		box.dataset.hasText = filled ? 'true' : 'false'
+		text.textContent = filled ? input.value : input.placeholder
+		text.classList.toggle('is-hint', !filled)
 	}
 	openButton.addEventListener('mousedown', (event) => event.preventDefault())
 	openButton.addEventListener('click', () => {
@@ -351,6 +409,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 
 	const refresh = () => {
 		const query = input.value
+		syncRest()
 		const all = paletteCommandEntries(core.points, {
 			keys: core.keys,
 			values: core.values.asObject(),
@@ -405,6 +464,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 			input.blur()
 		}
 	})
+	syncRest()
 	return box
 }
 
@@ -418,7 +478,9 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 	const label = typeof config.label === 'string' ? config.label : ''
 	const hint = typeof config.hint === 'string' ? config.hint : undefined
 	const tone = config.tone === 'accent' ? 'accent' : 'neutral'
-	// Static trigger shell (templates.ts): label/icon/chevron + a11y attrs.
+	// Static trigger shell (templates.ts): icon + chevron + a11y attrs.
+	// The label is never rendered as visible text (icon-only trigger on
+	// every axis); it survives as the accessible name + tooltip instead.
 	// The e2e drawer test clicks `getByRole('button', { name: 'More' })` —
 	// the accessible name must be exactly the label, chevron hidden from it.
 	const trigger = elementFromHtml(
@@ -427,6 +489,8 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 			hint,
 			tone,
 			icon: typeof config.icon === 'string' ? config.icon : undefined,
+			axis: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+			region: surface.region,
 		})
 	)
 	if (!(trigger instanceof HTMLButtonElement)) throw new Error('drawer trigger shell missing node')
@@ -497,10 +561,8 @@ export function renderHeadItem(context: HeadContext): HTMLElement | null {
 		case 'segmented':
 			return renderSegmented(context)
 		case 'slider':
-			return renderSlider(
-				context,
-				(context.item as { config?: Record<string, unknown> }).config?.demoSlider === true
-			)
+		case 'drawerSlider':
+			return renderSlider(context)
 		case 'stepper':
 			return renderStepper(context)
 		case 'stars':

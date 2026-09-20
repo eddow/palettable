@@ -79,17 +79,21 @@ returned as an update parameter (`{ moved, isWholeToolbar }`) from every
 commit so adapters update without re-deriving. `isSlidingFlank` and the
 commits read the stored flag — never `resolveDragMode` per pointer move.
 
-### Core/adapter drag interface
+### Core/adapter drag interface (session + events)
 
-The core/adapter drag interface splits responsibilities along the pure/DOM line: the adapter owns all events and positioning geometry — `pointerdown` on a tool guard or the toolbar background reports the grabbed element to core `dragStart`, `pointermove` hit-tests the element under the cursor (tool / toolbar / TB-gap / track gap / track background / stack gap / parking gap, by live object reference plus abstract `activeItem`/`gap` indices and the `client` pixel for slide-follow) and forwards it to core `dragOver`, while `pointerup`/`pointercancel`/`blur`, the stack-gap dwell timer, and the slide-follow `transform` loop stay adapter-local; the core owns all decisions — `dragOver` returns a single `DragOverDecision` (per-toolbar `itemHighlights`, per-track `trackHighlights`, per-border `stackHighlights`, `parkingHighlights`, whole-toolbar `neighbourEdges`, plus `moved` and the refreshed `isWholeToolbar`) that the adapter applies verbatim as classes via `syncGapClasses` (re-applied onto fresh nodes after the re-render that a `moved` commit requires), and every structural change itself (prune/extract/relocate, gap-space split via `trackGapSplit`, mode refresh) happens inside core commits mutating the live layout arrays — so paint and behaviour can never disagree: restructuring happens only on a highlighted DZ.
+The core/adapter drag interface splits responsibilities along the pure/DOM line. The wire vocabulary is `Hoverable` in, `DragEvent` out:
 
-### Core drag engine: `dragStart` / `dragOver`
+- The adapter hit-tests the element under the cursor and reports a tagged `Hoverable` (a tool or toolbar, an `item-gap` on a toolbar, a `track-gap` on a track, a `stack-gap` / `outside` on a border, a `parking-gap` on the parking stack — by live object reference plus abstract `gap` / `activeItem` indices), plus two raw client numbers per hover (`PointerSample`) and a measured slide frame on (re)arm (`SlideFrame` via `measure()`).
+- The session (`layout.createDrag(target)` → `ToolbarDrag`: `over` / `measure` / `end`, all `void`) computes paint + optional structure + slide delta in one atomic step and emits events in apply order: **`structure` first, then `highlight` flips, then `slide` / `clearSlide`** — structure first is what lets the adapter create/remove nodes and paint them in the same pass. Dark gaps emit no structure event and no `on` (restructure happens only on highlighted DZs).
+- `highlight` events are diffs (`off` / `on` / `double` — `double` is the directly-hovered stack/parking gap); a `structure` event drops the paint baseline (the adapter rebuilt those nodes) and the same pass re-emits `on` for what is still live. `slide` / `clearSlide` drive the adapter's rAF `transform` loop; `resize` carries the `{ track, index, split }` core already wrote via `commitSlide`, so the gaps take over exactly where the transform left the toolbar.
+- Time is core's: the stack/parking dwell (`configuration.stackDzHoverMs`) lives in the session — arms on a directly-hovered gap, cancels on gap change / `null` hover / `end()`, fires the commit itself as a `structure` event. The adapter's `pointerup` / `pointercancel` / `blur` / `visibilitychange` listeners only call `end()`.
+- The adapter holds painted and measured state only — never a decision, never a return value. `isWholeToolbar` / `mode` stay session-internal.
 
-`drag-start` and `drag-over` are called in core, giving the element (tool /
-toolbar / DZ gap) as well as the pointer position — the core decides the
-action (restructure into a highlighted DZ, translate the sliding toolbar),
-adapters only apply the returned paint sets as classes and re-render on
-`moved`:
+Under the session, the engine rules live in `layout.ts` (`dragStart` / `dragOver` → `DragOverDecision`, `DragElement`, `DragPointer`, `DraggingState` / `DragOrigin` / `DragMode`, `startDraggingState` / `refreshDragMode` / `resolveDragMode`, `wholeToolbarNeighbourEdges`, the veto predicates, the commits, the pure gap-highlight decisions) and reach the session via the injected `DragEngine` (no module cycle). They are pinned by `layout.test.ts` engine tests plus the Phase-2 dual-run oracle pin in `drag.test.ts`.
+
+### Core drag engine: `dragStart` / `dragOver` (session internals)
+
+`drag-start` and `drag-over` run inside the session (via the injected `DragEngine`), taking the hover translated from `Hoverable` (`DragElement`) plus the pointer position — the core decides the action (restructure into a highlighted DZ, translate the sliding toolbar), the adapter only applies the raised `DragEvent`s:
 
 - `dragStart(layout, element)` — the grabbed element (`{ kind: 'tool' |
   'toolbar', toolbar, item? }`); the core locates the origin (track +
@@ -108,10 +112,11 @@ adapters only apply the returned paint sets as classes and re-render on
   highlighted DZ: hovering a dark gap returns `moved: false` with no paint
   for that gap. Hovering a tool paints the active-item fallback (no
   commit); hovering a track background paints the two flanking stack gaps
-  (no commit); hovering a stack gap paints only (the dwell commit stays
-  adapter-owned). The adapter applies the decision via `syncGapClasses`
-  and re-renders the affected border on `moved` — then re-applies the
-  paint onto the fresh nodes (the old bar was rebuilt).
+  commit); hovering a stack gap paints only (the session's dwell timer fires
+  the commit as a `structure` event). The session diffs the decision against
+  its paint baseline and raises per-gap `highlight` events; a `structure`
+  event drops the baseline (the adapter rebuilt those nodes) and the same
+  pass re-emits `on` for what is still live.
 
 ### Commits
 

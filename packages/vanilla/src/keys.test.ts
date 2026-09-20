@@ -24,6 +24,16 @@ describe('normalizeKeystroke', () => {
 		expect(normalizeKeystroke(' space ')).toBe('Space')
 		expect(normalizeKeystroke('`')).toBe('`')
 	})
+
+	it('keeps the Plus key through normalization (separator collision)', () => {
+		// A naive `split('+')` erases `'+'` → `''`, silently unbinding `inc`
+		// shortcuts while `dec` (`'-'`) keeps working.
+		expect(normalizeKeystroke('+')).toBe('+')
+		expect(normalizeKeystroke('plus')).toBe('+')
+		expect(normalizeKeystroke('Shift++')).toBe('+')
+		expect(normalizeKeystroke('Shift+=')).toBe('+')
+		expect(normalizeKeystroke('-')).toBe('-')
+	})
 })
 
 describe('keystrokeFromEvent / createVanillaKeys', () => {
@@ -33,6 +43,19 @@ describe('keystrokeFromEvent / createVanillaKeys', () => {
 		expect(keys.resolve(event({ key: 's', ctrlKey: true }))).toBe('saveGame')
 		expect(keys.findByTool('console')).toEqual(['`'])
 		expect(keystrokeFromEvent(event({ key: 'n' }))).toBe('N')
+	})
+
+	it('resolves Plus bindings from both Shift+= and numpad presses', () => {
+		const keys = createVanillaKeys({ '+': 'gameSpeed:inc', '-': 'gameSpeed:dec' })
+		// US layout: `+` is `Shift+=` → `key: '+'` with `shiftKey: true`.
+		expect(keys.resolve(event({ key: '+', shiftKey: true }))).toBe('gameSpeed:inc')
+		// Numpad `+`: `key: '+'` with no modifiers.
+		expect(keys.resolve(event({ key: '+' }))).toBe('gameSpeed:inc')
+		expect(keys.resolve(event({ key: '-' }))).toBe('gameSpeed:dec')
+		// Shift-letter bindings stay distinct.
+		const letters = createVanillaKeys({ A: 'x', 'Shift+A': 'y' })
+		expect(letters.resolve(event({ key: 'a' }))).toBe('x')
+		expect(letters.resolve(event({ key: 'A', shiftKey: true }))).toBe('y')
 	})
 })
 

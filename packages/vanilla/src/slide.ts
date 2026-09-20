@@ -7,8 +7,6 @@
  * the adapter owns measuring + the per-frame `transform` write.
  */
 
-import { clampSlideDelta as clampSlideDeltaCore } from '@palettable/core'
-
 export type SlideDirection = 'horizontal' | 'vertical'
 
 export type SlideBounds = {
@@ -41,37 +39,6 @@ export function toolbarSlideBounds(
 	const rect = toolbarElement.getBoundingClientRect()
 	const available = end - start - (horizontal ? rect.width : rect.height)
 	return available > 0 ? { start, available } : undefined
-}
-
-/**
- * Clamp the pointer to the slide's free span and return the shift to apply
- * (relative to the toolbar's resting position). `bounds.start` is the
- * *leading gap's* edge; `offset0` is the toolbar's resting offset inside
- * that span, so the result is a `transform`-ready shift from resting.
- *
- * Single-copy rule (Phase 4): this is the core arithmetic
- * (`clampSlideDelta` in `@palettable/core`), not a fork — both the rAF
- * `transform` write and the release commit derive from it, so the visual
- * position and the committed `space` can never disagree.
- *
- * @deprecated Phase 7 — import `clampSlideDelta` from `@palettable/core`; do not add new callers.
- */
-export function clampSlideDelta(
-	bounds: SlideBounds,
-	offset0: number,
-	pointer: number,
-	grabOffset: number
-): number {
-	return clampSlideDeltaCore(
-		{
-			axis: 'horizontal',
-			start: bounds.start,
-			available: bounds.available,
-			resting: offset0,
-			grab: grabOffset,
-		},
-		pointer
-	)
 }
 
 /**

@@ -415,6 +415,53 @@ describe('canRunAction', () => {
 		expect(core.canRunAction('n', 'dec')).toBe(true)
 	})
 
+	it('disables inc/dec one step before the bound (step-aware)', () => {
+		const core = new PaletteCore(
+			[{ id: 'n', label: 'N', type: 'number', constraints: { min: 0, max: 10, step: 4 } }],
+			{
+				initialValues: { n: 8 },
+			}
+		)
+		// 8 + 4 would overshoot 10 → inc disabled even though 8 < 10.
+		expect(core.canRunAction('n', 'inc')).toBe(false)
+		expect(core.canRunAction('n', 'dec')).toBe(true)
+	})
+
+	it('clamps run at the bounds instead of overshooting', () => {
+		const core = new PaletteCore(
+			[{ id: 'n', label: 'N', type: 'number', constraints: { min: 0, max: 10, step: 4 } }],
+			{
+				initialValues: { n: 8 },
+			}
+		)
+		core.run('n:inc') // 8 + 4 → clamped to 10, not 12
+		expect(core.values.get('n')).toBe(10)
+		core.run('n:dec')
+		expect(core.values.get('n')).toBe(6)
+		core.setMany({ n: 1 })
+		core.run('n:dec') // 1 - 4 → clamped to 0, not -3
+		expect(core.values.get('n')).toBe(0)
+	})
+
+	it('never drives gameSpeed-style fractional bounds negative', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'gameSpeed',
+					label: 'Speed',
+					type: 'number',
+					constraints: { min: 0.5, max: 5, step: 0.5 },
+				},
+			],
+			{
+				initialValues: { gameSpeed: 0.5 },
+			}
+		)
+		expect(core.canRunAction('gameSpeed', 'dec')).toBe(false)
+		core.run('gameSpeed:dec') // clamped backstop: stays at min
+		expect(core.values.get('gameSpeed')).toBe(0.5)
+	})
+
 	it('throws on unknown points/actions and absent values', () => {
 		const core = hydrated()
 		expect(() => core.canRunAction('missing', 'inc')).toThrow('Unknown palette point "missing"')

@@ -1,11 +1,11 @@
 /**
- * `@palettable/core` — drag session (Phases 1–3 of the drag-interface plan).
+ * `@palettable/core` — drag session (the drag-interface plan).
  *
  * `GrabTarget` / `Hoverable` / `PointerSample` are the wire vocabulary for the
  * session interface (`PaletteLayoutTree.createDrag`): `Hoverable` in,
- * `DragEvent` out. `DragElement` / `DragPointer` stay as deprecated aliases
- * until the Phase 7 close-out so existing call sites (`layout.test.ts`) keep
- * compiling while the session is mounted.
+ * `DragEvent` out. The engine rules live in `layout.ts` (`dragStart` /
+ * `dragOver` / commits) and arrive here by injection (`DragEngine`), so
+ * neither module value-imports the other back at runtime — no cycle.
  */
 
 import { configuration } from './configuration.js'
@@ -28,14 +28,14 @@ import type {
 } from './layout.js'
 
 /**
- * The legacy drag engine the session delegates to.
+ * The drag engine the session delegates to: the decision + commit rules in
+ * `layout.ts` (`dragStart` / `dragOver` / `commitDraggedTo*` / `commitSlide` /
+ * `stackFlanks` / `isItemSpaceFree` / `insertToolbar`).
  *
- * @deprecated Phase 7 — folds into the session; do not add new callers.
- *
- * Injected by `layout.ts` rather than imported: `layout.ts` owns the engine
- * (`dragStart` / `dragOver` / `commitDraggedTo*`) and imports this module for
- * `createDrag`, so a value import back would be a module cycle. Phase 7 folds
- * the engine into the session and this parameter disappears.
+ * Injected by `PaletteLayoutTree.createDrag` rather than imported, so neither
+ * module value-imports the other back at runtime — no cycle. `isWholeToolbar`
+ * / `mode` stay session-internal: the wire vocabulary is `Hoverable` in,
+ * `DragEvent` out.
  */
 export type DragEngine = {
 	dragStart(layout: PaletteLayout, element: DragElement): DraggingState
@@ -57,7 +57,7 @@ export type DragEngine = {
 		gapIndex: number
 	): { readonly moved: boolean; readonly isWholeToolbar: boolean }
 	/**
-	 * Phase 4 slide release: write the two flanking `space` values around
+	 * Slide release: write the two flanking `space` values around
 	 * the dragged toolbar in its live track (`resizeToolbar`) and report
 	 * the `{ track, index, split }` the `resize` event carries. Returns
 	 * `undefined` when there is nothing to commit (not a whole-toolbar
@@ -68,36 +68,36 @@ export type DragEngine = {
 		split: number
 	): { readonly track: Track; readonly index: number; readonly split: number } | undefined
 	/**
-	 * Phase 5 flank derivation: the stack gaps flanking `trackIndex` in
+	 * Flank derivation: the stack gaps flanking `trackIndex` in
 	 * `border` (emptied veto applied) — what every in-track hover paints in
 	 * addition to its own DZs. Implemented in `layout.ts` so the veto rule
 	 * (and the module cycle) stay there.
 	 */
 	stackFlanks(session: DraggingState, border: Border, trackIndex: number): readonly number[]
 	/**
-	 * Phase 6 catalog placement primitives (defined below, injected so the
-	 * catalog path shares the rule with the engine instead of forking it).
-	 * Injected (not imported) for the same module-cycle reason as the rest
-	 * of the engine — Phase 7 folds them into the session and this
-	 * disappears with it.
+	 * Catalog placement primitives: the gap check mirrors `isItemSpaceFree`
+	 * for a selection that lives outside the layout, and the insert splits
+	 * the target track gap by `configuration.trackGapSplit` like every
+	 * other insertion. Injected (not imported) for the same module-cycle
+	 * reason as the rest of the engine.
 	 */
 	isItemSpaceFree(session: DraggingState, toolbar: Toolbar, gap: number): boolean
 	insertToolbar(track: Track, index: number, toolbar: Toolbar): void
 }
 
-/** What was grabbed. `catalog` has no container — it is a creation (Phase 6). */
+/** What was grabbed. `catalog` has no container — it is a creation. */
 export type GrabTarget =
 	| { readonly kind: 'tool'; readonly toolbar: Toolbar; readonly item: ToolbarItem }
 	| { readonly kind: 'toolbar'; readonly toolbar: Toolbar }
 	| { readonly kind: 'catalog'; readonly item: ToolbarItem }
 
-/** A gap that can paint: the `highlight` event payload (Phase 2). */
+/** A gap that can paint: the `highlight` event payload. */
 export type DropZone =
 	| { readonly kind: 'item-gap'; readonly toolbar: Toolbar; readonly gap: number }
 	| { readonly kind: 'track-gap'; readonly track: Track; readonly gap: number }
 	| { readonly kind: 'stack-gap'; readonly border: Border; readonly gap: number }
 	| { readonly kind: 'parking-gap'; readonly parking: Parking; readonly gap: number }
-	/** Beside `border`, aligned with its stack gap `gap` (same index space; Phase 6). */
+	/** Beside `border`, aligned with its stack gap `gap` (same index space). */
 	| { readonly kind: 'outside'; readonly border: Border; readonly gap: number }
 
 /** `off` clears the gap; `double` is the directly-hovered parallel stack DZ. */
@@ -145,7 +145,7 @@ export type PointerSample = { readonly clientX: number; readonly clientY: number
  * *leading gap's* edge; `frame.resting` is the toolbar's resting offset
  * inside that span, so the result is a `transform`-ready shift from resting.
  *
- * Single copy of the slide arithmetic (Phase 4): both the per-move `slide`
+ * Single copy of the slide arithmetic: both the per-move `slide`
  * delta and the release `resize` split derive from it, so the visual
  * position and the committed `space` can never disagree.
  */
@@ -177,11 +177,10 @@ export type SlideFrame = {
  * One gesture. Created by `PaletteLayoutTree.createDrag(target)`;
  * `layout` is the live tree, so no method ever takes a layout parameter.
  *
- * Phase 2: `over` delegates to the legacy `dragOver` internally, diffs the
+ * `over` delegates to the engine `dragOver` internally, diffs the
  * returned paint against its baseline, and emits `highlight` events for
- * changed gaps (structure resets the baseline — full behaviour in Phase 3).
- * `measure` is accepted (slide geometry lands in Phase 4); `end` clears
- * paint + cancels dwell.
+ * changed gaps (a `structure` event resets the baseline); `measure` carries
+ * the slide frame; `end` finalises geometry-free and clears paint + dwell.
  */
 export interface ToolbarDrag {
 	readonly layout: PaletteLayoutTree
@@ -192,10 +191,19 @@ export interface ToolbarDrag {
 	end(): void
 	/** Subscribe to drag events (highlight diffs + structure + slide). */
 	subscribe(listener: DragEventListener): () => void
+	/**
+	 * Core-decided dragged toolbar: the live `origin.toolbar` the
+	 * `data-dragged` chrome mirrors, or `undefined` when no toolbar owns
+	 * the chrome (catalog creation before the first placement inserts, or
+	 * after `end()`). Adapters apply it verbatim (`nodes.get(toolbar)` →
+	 * `dataset.dragged`) and never compute it themselves — no
+	 * `isDraggedToolbarAt`, no container scan.
+	 */
+	readonly draggedToolbar: Toolbar | undefined
 }
 
 /**
- * Translate the session vocabulary (`Hoverable`) to the legacy engine
+ * Translate the session vocabulary (`Hoverable`) to the engine
  * vocabulary (`DragElement`). Container references (`track` / `border` /
  * `parking`) are resolved by `===` scan against the live layout — the
  * adapter never re-resolves positions, it only passes live objects.
@@ -205,11 +213,11 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 		case 'tool':
 			return { kind: 'tool', toolbar: hover.toolbar, item: hover.item }
 		case 'toolbar': {
-			// The legacy engine has no toolbar-background element that paints the
+			// The engine has no toolbar-background element that paints the
 			// active-item fallback (its `toolbar` branch returns neighbour edges /
 			// track flanks only), so an anchored background hover is expressed as
 			// the item under the pointer. Without an anchor there is nothing to
-			// paint — the legacy `toolbar` element returns empty.
+			// paint — the `toolbar` element returns empty.
 			const item = hover.activeItem !== undefined ? hover.toolbar[hover.activeItem] : undefined
 			if (item === undefined) return { kind: 'toolbar', toolbar: hover.toolbar }
 			return { kind: 'tool', toolbar: hover.toolbar, item }
@@ -218,7 +226,7 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 			const at = locateContainerOf(hover.toolbar, layout)
 			if (at === undefined) return undefined
 			// The container decides the commit: a border toolbar merges, a parking
-			// row transfers ownership. Same hover kind, two legacy elements.
+			// row transfers ownership. Same hover kind, two engine elements.
 			if (at.kind === 'parking') {
 				return {
 					kind: 'parking-row-gap',
@@ -248,7 +256,7 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 		case 'parking-gap':
 			return { kind: 'parking-gap', parking: hover.parking, gap: hover.gap }
 		case 'outside':
-			// Phase 6: paints + dwells exactly like `stack-gap`.
+			// Paints + dwells exactly like `stack-gap`.
 			return { kind: 'stack-gap', border: hover.border, gap: hover.gap }
 	}
 }
@@ -326,7 +334,7 @@ function trackContextOf(
 	return { border: at.border, trackIndex }
 }
 
-/** Session implementation: owns the legacy `DraggingState`, delegates `over`. */
+/** Session implementation: owns the `DraggingState`, delegates `over` to the engine. */
 class CoreToolbarDrag implements ToolbarDrag {
 	readonly layout: PaletteLayoutTree
 	private readonly engine: DragEngine
@@ -347,13 +355,13 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * whatever is still hovered.
 	 */
 	private readonly painted = new Map<string, { dz: DropZone; state: 'on' | 'double' }>()
-	/** Dwell timer for directly-hovered stack/parking gaps (Phase 3). */
+	/** Dwell timer for directly-hovered stack/parking gaps. */
 	private dwellTimer: unknown | undefined = undefined
 	/** The directly-hovered gap the dwell is armed on (gap change cancels). */
 	private dwellGap: string | undefined = undefined
 	/** One-shot latch: the gap that already fired (re-arm needs a leave). */
 	private dwellCommitted: string | undefined = undefined
-	// ── Slide (Phase 4) ─────────────────────────────────────────────
+	// ── Slide ─────────────────────────────────────────────────────
 	// `measure()` pushes the adapter-measured frame (one per arm, never per
 	// move); `over()` derives the `slide` delta from it + the sample and
 	// caches the `resize` split, so `end()` is geometry-free.
@@ -366,7 +374,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	/** Last pointer sample seen (reused by the dwell re-paint, which has no fresh hover). */
 	private lastSample: PointerSample = { clientX: 0, clientY: 0 }
 	/**
-	 * Phase 6 catalog creation: the not-yet-inserted item. Set at grab time,
+	 * Catalog creation: the not-yet-inserted item. Set at grab time,
 	 * cleared on the first placement commit — subsequent hovers move the
 	 * placed toolbar through the normal engine path.
 	 */
@@ -376,7 +384,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		this.layout = layout
 		this.engine = engine
 		if (target.kind === 'catalog') {
-			// Phase 6 creation: no origin in the live layout — the item rides
+			// Creation: no origin in the live layout — the item rides
 			// a detached singleton toolbar until the first placement inserts
 			// it (fresh toolbar via the slide path, merge via the item path).
 			// `startDraggingState` lives in `layout.ts` (cycle), so the
@@ -405,7 +413,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		if (this.ended) return
 		this.lastSample = sample
 		// A hover that resolves to nothing (pointer left every container, or a
-		// hover the legacy engine cannot express) clears the paint baseline —
+		// hover the engine cannot express) clears the paint baseline —
 		// otherwise the adapter re-applies stale paint.
 		if (hover === null) {
 			this.cancelDwell()
@@ -442,7 +450,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		const originToolbar = this.session.origin.toolbar
 		const originTrack =
 			this.session.origin.kind === 'border' ? this.session.origin.track : undefined
-		// Phase 6 catalog creation: the first placement inserts the pending
+		// Catalog creation: the first placement inserts the pending
 		// item (no origin, no mode) — subsequent hovers move the placed
 		// toolbar through the normal engine path.
 		if (this.catalogPending !== undefined) {
@@ -461,7 +469,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		}
 		const decision = this.engine.dragOver(this.session, live, element, pointer, true)
 		const zones = this.decisionDropZones(decision)
-		// Phase 5: every hover resolving inside a border track *additionally*
+		// Every hover resolving inside a border track *additionally*
 		// paints that track's two flanking stack gaps (emptied veto applies).
 		this.addTrackFlanks(hover, zones)
 		// Structure first — it is what lets the adapter create/remove nodes and
@@ -478,7 +486,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Phase 6 catalog first placement: insert the pending item at the
+	 * Catalog first placement: insert the pending item at the
 	 * hovered DZ and emit it as a `structure` event (`from` absent — a
 	 * creation). Returns `true` when a placement landed (the pending item
 	 * is now placed and the session origin follows it); `false` when the
@@ -547,7 +555,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Phase 6 catalog dwell placement: the dwell timer fired on a
+	 * Catalog dwell placement: the dwell timer fired on a
 	 * stack/parking gap while the item is still pending — create the track
 	 * (stack/`outside`) or row (`parking-gap`) holding the item, emit it as
 	 * a `structure` event (`from` absent — a creation), and re-paint the
@@ -588,7 +596,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Phase 6 catalog re-paint after a placement commit (insert or dwell):
+	 * Catalog re-paint after a placement commit (insert or dwell):
 	 * re-derive the zones for the still-hovered gap against the live layout
 	 * and diff them on — the same `afterStructure()` → `paintZones` step as
 	 * the normal commit path (the adapter rebuilt the subtree, so the fresh
@@ -657,7 +665,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		// came from). For a slide that's the toolbar's own old spot; for a
 		// restructure it tells the adapter which region lost items, so both
 		// source and target regions re-sync from one event. Absent only when
-		// there was no origin (catalog creation, Phase 6).
+		// there was no origin (catalog creation).
 		const from = originBefore
 
 		return {
@@ -670,7 +678,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Phase 5 in-track flanks: resolve the border track the hover landed in
+	 * In-track flanks: resolve the border track the hover landed in
 	 * and merge its two flanking stack gaps into `zones` (no commit). Uses the
 	 * engine's `stackFlanks` so the emptied veto (and the `layout.ts`
 	 * ownership of it) stays in one place.
@@ -687,7 +695,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Flatten a legacy decision into the live DZ set: every painted gap as
+	 * Flatten an engine decision into the live DZ set: every painted gap as
 	 * a `DropZone`. Keys are structural (container index + gap), not
 	 * identity: tracks/borders are re-created across commits, but the
 	 * toolbar object survives — so item-gaps key on the toolbar's live
@@ -734,6 +742,15 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * timer counts; every other lit gap paints `on`. A state flip on an
 	 * already-lit gap (`on` ↔ `double`) re-emits with the new state so the
 	 * adapter toggles `hovered` without dropping `highlighted`.
+	 *
+	 * Emission order is incoming-first: fresh `on`/`double` paints and
+	 * state flips emit before departed gaps flip `off`. Highlighted gaps
+	 * carry `min-width`/`min-height` (doubled when directly hovered), so
+	 * clearing the old gap first collapses the layout out from under the
+	 * pointer — the incoming gap then never lands under the cursor and its
+	 * paint is lost until the next mouse move. Painting the incoming gap
+	 * first keeps it expanded under the cursor while the departed one
+	 * collapses.
 	 */
 	private paintZones(fresh: Map<string, DropZone>, hover: Hoverable): void {
 		const doubleTarget = this.dwellTargetOf(hover)
@@ -741,24 +758,26 @@ class CoreToolbarDrag implements ToolbarDrag {
 		const doubleKey = doubleTarget === undefined ? undefined : dropZoneKey(doubleTarget, live)
 		const stateOf = (key: string): 'on' | 'double' =>
 			doubleKey !== undefined && key === doubleKey ? 'double' : 'on'
+		for (const [key, dz] of fresh) {
+			if (!this.painted.has(key)) {
+				const state = stateOf(key)
+				this.painted.set(key, { dz, state })
+				this.emit({ type: 'highlight', dz, state })
+			}
+		}
 		for (const [key, record] of [...this.painted]) {
 			const next = fresh.get(key)
-			if (next === undefined) {
-				this.painted.delete(key)
-				this.emit({ type: 'highlight', dz: record.dz, state: 'off' })
-				continue
-			}
+			if (next === undefined) continue
 			const state = stateOf(key)
 			if (record.state !== state) {
 				this.painted.set(key, { dz: next, state })
 				this.emit({ type: 'highlight', dz: next, state })
 			}
 		}
-		for (const [key, dz] of fresh) {
-			if (!this.painted.has(key)) {
-				const state = stateOf(key)
-				this.painted.set(key, { dz, state })
-				this.emit({ type: 'highlight', dz, state })
+		for (const [key, record] of [...this.painted]) {
+			if (!fresh.has(key)) {
+				this.painted.delete(key)
+				this.emit({ type: 'highlight', dz: record.dz, state: 'off' })
 			}
 		}
 	}
@@ -784,7 +803,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		}
 	}
 
-	// ── Dwell (Phase 3) ─────────────────────────────────────────────
+	// ── Dwell ─────────────────────────────────────────────────────
 	// Arms on a directly-hovered `stack-gap` / `outside` / `parking-gap`,
 	// cancels on gap change / `null` hover / `end()`, and fires the
 	// stack/parking commit itself as a `structure` event.
@@ -840,7 +859,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 
 	/** Fire the dwell commit and emit it as a `structure` event. */
 	private fireDwell(target: DropZone): void {
-		// Phase 6 catalog creation: a dwellable hover places the pending
+		// Catalog creation: a dwellable hover places the pending
 		// item (stack → new track, parking → new row) instead of moving an
 		// origin — the same commit the engine would fire for a normal drag.
 		if (this.catalogPending !== undefined) {
@@ -905,7 +924,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 		this.painted.clear()
 	}
 
-	// ── Slide (Phase 4) ─────────────────────────────────────────────
+	// ── Slide ─────────────────────────────────────────────────────
 	// The frame is pushed by `measure()` (one per arm, never per move); the
 	// pointer component comes from the `over()` sample (axis off the frame).
 	// `updateSlide` runs at the end of every `over()` (after paint + dwell)
@@ -1022,9 +1041,21 @@ class CoreToolbarDrag implements ToolbarDrag {
 	}
 
 	/**
-	 * Internal exposure for the Phase 2 vanilla migration.
-	 *
-	 * @deprecated Phase 7 — mode/origin go session-internal; do not add new readers.
+	 * Core-decided dragged toolbar (see the `ToolbarDrag` contract):
+	 * the live `origin.toolbar`, or `undefined` while a catalog creation
+	 * is still pending (detached singleton, no live container) or after
+	 * `end()`. The session origin follows every commit, so this stays
+	 * current across restructures without the adapter re-resolving.
+	 */
+	get draggedToolbar(): Toolbar | undefined {
+		if (this.ended) return undefined
+		if (this.catalogPending !== undefined) return undefined
+		return this.session.origin.toolbar
+	}
+
+	/**
+	 * Session-internal exposure: the vanilla adapter mirrors `.dragging` /
+	 * `data-dragged` chrome from the grab target it passed to `createDrag()`.
 	 */
 	get draggingState(): DraggingState {
 		return this.session
@@ -1071,7 +1102,7 @@ function dropZoneKey(dz: DropZone, live: PaletteLayout): string {
 		}
 		case 'stack-gap':
 		case 'outside': {
-			// Phase 6: one index space — a beside-border pointer paints the
+			// One index space — a beside-border pointer paints the
 			// same node as the in-border gap, so cross-flips diff `on` ↔
 			// `double` (not `off` + `on`) and the dwell arms on either.
 			const region = regionOf(dz.border, live)
@@ -1100,61 +1131,4 @@ function locateTrack(
 		if (index >= 0) return { region, trackIndex: index }
 	}
 	return undefined
-}
-
-/**
- * Phase 6 catalog gap check (session-local, no engine cycle): the pending
- * item is the whole selection, so every gap beside it is free — the only
- * dark case is a gap index out of range. Mirrors `isItemSpaceFree` for a
- * selection that lives outside the layout. Exported so `layout.ts` can
- * inject it as `engine.isItemSpaceFree` — the catalog path shares the rule
- * with the engine instead of forking it (Phase 7 folds both into the
- * session).
- */
-export function isItemSpaceFreeLite(
-	session: DraggingState,
-	toolbar: Toolbar,
-	gap: number
-): boolean {
-	if (gap < 0 || gap > toolbar.length) return false
-	const before = toolbar[gap - 1]
-	const after = toolbar[gap]
-	if (before !== undefined && session.tools.includes(before)) return false
-	if (after !== undefined && session.tools.includes(after)) return false
-	return true
-}
-
-/**
- * Phase 6 catalog insert (injected as `engine.insertToolbar`): split the
- * target track gap with the same `trackGapSplit` as every other insertion
- * (never a raw `space: 1`, which would push the track's spacing sum past
- * 1). Local arithmetic (not the `layout.ts` `insertToolbar` import) so the
- * injection stays one-way — `layout.ts` imports this module for
- * `createToolbarDrag`, so a value import back would be a module cycle.
- * Phase 7 folds both into the session and this disappears with the engine.
- */
-export function insertToolbarLite(track: Track, index: number, toolbar: Toolbar): void {
-	const at = Math.min(Math.max(index, 0), track.length)
-	const merged = actualTrackSpaceLite(track, at)
-	const before = merged * configuration.trackGapSplit
-	const after = merged - before
-	const spaces = track.map((slot) => slot.space)
-	const trailing = 1 - spaces.reduce((sum, space) => sum + space, 0)
-	const full = [...spaces, trailing]
-	full.splice(at, 1, before, after)
-	track.splice(at, 0, { space: 0, toolbar })
-	for (let i = 0; i < track.length; i += 1) track[i]!.space = clampLite(full[i] ?? 0)
-}
-
-/** Phase 6 catalog helper: effective gap at `index` (stored or trailing). */
-function actualTrackSpaceLite(track: Track, index: number): number {
-	if (index < track.length) return clampLite(track[index]!.space)
-	if (index === track.length)
-		return clampLite(track.reduce((remaining, slot) => remaining - slot.space, 1))
-	return 0
-}
-
-/** Phase 6 catalog helper: clamp into the unit interval (non-finite → 0). */
-function clampLite(value: number): number {
-	return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
 }

@@ -609,18 +609,18 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `store.ts` | `PaletteStateStore` (single source of truth, starts empty — no hydration from definitions, no defaults; `has`/`require` strict helpers, `get` lenient skeleton probe) + `setTree` batching (all writes land before any listener runs, returns changed keys). Phase 9 removed the dead `getOr` / `update` helpers (tests-only, zero production callers). Data-owning removed `reset`/`resetAll` (consumer resets via `setMany`). |
 | `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `isDraggedToolbarAt`, `draggingEmptiesTrackIndex/ParkingRow`, `resolveDragMode`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `moveToolbarToTrack/Stack`), and the pure gap-highlight decisions (`borderStackHighlight`, `parkingGapHighlight`, `itemSpaceHighlight` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
-| `gap-dwell.ts` | `GapDwell` hover-dwell state machine + `GapDwellState` (Phase 2; timers via `globals.ts` so `lib` stays `ES2022`-only) |
+| `drag.ts` | drag session (`GrabTarget` / `Hoverable` / `DropZone` / `PointerSample` / `SlideFrame` / `ToolbarDrag` + `createToolbarDrag`): `Hoverable` in, `DragEvent` out (`highlight` diffs + `slide` / `clearSlide` / `resize` + `structure` ops, emission order structure → highlight → slide); owns the paint baseline, the dwell timer (`configuration.stackDzHoverMs`), the slide frame + pending split, and the catalog `catalogPending` creation — delegates decisions + commits to the `layout.ts` engine via the injected `DragEngine` (no module cycle); `isWholeToolbar` / `mode` stay session-internal |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
 | `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
 | `virtual.ts` | `enum-from` / `stash` derived points (`StashDefinition.fallbackValue?` — third-branch restore target, `undefined` = stay skeleton; `computeStashTransition(current, stashedValue, aside, fallbackValue)`) |
 | `errors.ts` | `PaletteError` + `PaletteWriteError` (thrown by locked-bag `set`/`setTree`; adapters catch for UI feedback) |
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` one-shot SSR/hydration fill, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (bounds-checked named-action `can`, strict on skeleton), sync `run` (strict setter/named-action on skeleton) / `runStash` (strict source read, `fallbackValue` third branch), context registry (`setContext`/`removeContext` replace-never-append via forward map, root name throws, `getBag`/`resolveBags` accept `ROOT_CONTEXT`/`'root'` alias, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners). No `resetAll` (consumer `setMany` round-trip). |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` one-shot SSR/hydration fill, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (step-aware bounds-checked named-action `can`, strict on skeleton), sync `run` (strict setter/named-action on skeleton; number `inc`/`dec` clamped to min/max) / `runStash` (strict source read, `fallbackValue` third branch), context registry (`setContext`/`removeContext` replace-never-append via forward map, root name throws, `getBag`/`resolveBags` accept `ROOT_CONTEXT`/`'root'` alias, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners). No `resetAll` (consumer `setMany` round-trip). |
 | `palette.ts` | `ServerPointDescriptor` (action/valued/nothing — no `run`, no functional `can`) + `to/fromServerDescriptor` (action rebuild by name via `runners`; nothing-points round-trip), `validateInitialValues` (rejects actions + nothing-points), `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
-| `command-box.ts` | `paletteCommandEntries` / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
+| `command-box.ts` | `paletteCommandEntries` (inc/dec `can` bounds-aware from values context, lenient without) / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
 | `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
 | `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config; skeleton-propagating: `toggle.pressed`, `select.value`, `slider.value` are `undefined` when absent — no `false`/`0`/`''` coercion), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
-| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`gap-dwell`/`umd`). Drawer children resolve to `ResolvedDrawerSlot[]` (one track, recursive, depth-bounded as `children`) |
+| `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`umd`). Drawer children resolve to `ResolvedDrawerSlot[]` (one track, recursive, depth-bounded as `children`) |
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`ROOT_CONTEXT` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
 | `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
 | `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
@@ -646,8 +646,8 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
   back-compat; pinned input ignores later singleton mutations (test).
 - `ValueCodec` registry (SSR §4.6): built-ins use identity; custom types
   are SSR-unsafe-by-default (loud `PaletteError`, never silent mismatch).
-- Hygiene (SSR §4.7–§4.8): the render path never imports `globals.ts`,
-  `gap-dwell.ts`, or `umd.ts` (import-graph test reads `render.ts` source);
+- Hygiene (SSR §4.7–§4.8): the render path never imports `globals.ts`
+  or `umd.ts` (import-graph test reads `render.ts` source);
   determinism (no `Math.random`/`Date.now`, `version: 1` rejection) tested.
 - Render-model tests (SSR §6, node, no jsdom): Node-only import (no
   `setTimeout`/`queueMicrotask` during build + resolve), golden snapshot,
@@ -735,14 +735,18 @@ untouched. Net: +4 files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`,
 retired, 33 e2e green (16 + 16 + 1 smoke):
 
 - `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (mitosis
-  Phase 2 split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases),
-  `keystrokeFromEvent`, `createVanillaKeys` (normalized map + `findByTool` +
-  `resolve`), `isEditableTarget`. Covered in `keys.test.ts` (3 tests).
+  Phase 2 split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases;
+  Plus-key aware — lone `'+'` / trailing `'+'` (`'Shift++'`) name the Plus
+  key, not a separator, and `'Shift+='` folds to `'+'`), `keystrokeFromEvent`
+  (Shift consumed producing a symbol: `Shift+=` / numpad `+` both resolve to
+  `'+'`; Shift-letter stays distinct), `createVanillaKeys` (normalized map +
+  `findByTool` + `resolve`), `isEditableTarget`. Covered in `keys.test.ts`
+  (5 tests).
 - `vanilla/src/head.ts` — plain-DOM head editors mirroring the svelte head +
   demo overrides: `renderButton/Toggle/Select/Segmented/Slider(showValue
   badge)/Stepper/Stars(radiogroup)/Status/CommandBox/Drawer` + `renderHeadItem`
-  dispatch + `surfaceForRegion`. Drawer: trigger `aria-label = label || hint`,
-  chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}` +
+  dispatch + `surfaceForRegion`. Drawer: icon-only trigger (label never
+  rendered as text — accessible name + tooltip only), chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}` +
   `data-placement=center` + role dialog, body-portaled overlay, Escape closes
   + focus trigger. CommandBox: `command-box-combobox/input/results` testids,
   ✎ open-editor button → console edit mode, Enter runs first filtered entry.
@@ -757,7 +761,12 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   testids, `is-dimmed` work-zone, edit-only vs command-first vs read-only,
   click-to-select add flow, presentation-only configurator + delete). Keydown:
   `isEditableTarget` guard, Escape closes, editing suppresses bindings, else
-  boolean-toggle or `core.run(spec)`. Subscribes values/layout/console.
+  boolean-toggle or bounds-gated `core.run(spec)` (`canRunAction` no-op at the
+  bound — no `preventDefault`, so the keystroke stays free for the host;
+  `run` still clamps as a backstop) — listened on the owner window (not the
+  container) so shortcuts fire even when focus is outside the IDE (body, demo
+  chrome); typing still wins via `isEditableTarget`, consumed events via
+  `defaultPrevented`, teardown on `dispose()`. Subscribes values/layout/console.
 - `vanilla/demo/palette.ts` — plain-data port of the svelte demo: same 15
   points (incl. `console` toggle point), same `demoKeys`, same 3 configs
   (`rw-combobox` / `rw-command-first` / `ro-combobox`) + layouts, `demoState`
@@ -799,16 +808,15 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   `drag-highlight` tool-drag DZ spec on both demos).
 
 ### Phase 2 status (landed 2026-09-14)
-`configuration.ts`, `gap-dwell.ts`, and the pure track-space math in
-`layout.svelte.ts` now live in core (`configuration.ts`, `gap-dwell.ts`,
+`configuration.ts` and the pure track-space math in
+`layout.svelte.ts` now live in core (`configuration.ts`,
 `layout.ts` additions). Notes:
 
-- `gap-dwell.ts` is **not** a byte-verbatim move: the svelte source calls
-  `setTimeout` / `clearTimeout` directly, which do not exist under
-  `lib: ["ES2022"]`. Core routes timers through the `globals.ts` escape hatch
-  (`scheduleHostTimeout` / `clearHostTimeout`, opaque `unknown` handle) so the
-  DOM-free rule stays compiler-enforced. Behaviour (dwell, one-shot latch,
-  retarget, reset) is unchanged and covered by `phase2.test.ts` (node).
+- The hover dwell lives in the drag session (`drag.ts`, timers via the
+  `globals.ts` escape hatch so the DOM-free rule stays compiler-enforced):
+  arms on a directly-hovered stack/parking gap, cancels on gap change /
+  `null` hover / `end()`, one-shot latch, retarget, reset — covered by
+  `drag.test.ts` session-dwell tests (node, fake timers).
 - `findOwnershipViolations` stays a **core export** (not a test helper):
   adapters and e2e parity checks reuse the single-ownership invariant at
   runtime, so one implementation in core beats a copy in each test dir.
