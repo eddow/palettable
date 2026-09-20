@@ -83,8 +83,9 @@ test('vertical groups round their visual ends, not their DOM ends', async ({ pag
 	// Vertical groups use `column-reverse`: the first DOM child renders at the
 	// BOTTOM. The corner radii must follow the visual ends, so the first child
 	// is rounded at the bottom and flat at the top (and vice versa). The
-	// workspace-side corners are always square (joined-box joint with the
-	// hover overlay), so this asserts the toolbar-outer (left) corners.
+	// joint-side corners are always square (joined-box joint with the hover
+	// overlay), so this asserts the EXTERIOR (toolbar-outer, left on this
+	// left-docked bar) corners.
 	const buttons = page.locator(
 		'.toolbar-border[data-region="left"] .palette-default-segmented.palette-default-layout-vertical button'
 	)

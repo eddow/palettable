@@ -21,3 +21,5 @@ Horizontal parking stacks toolbars *vertically* (and vice-versa)
 - check edition in drawer
 - refactor adding tool
 - divide the css into technical and cosmetic
+- resize longitudinal tools? (sliders, ...)
+- status are completely not-done: 0

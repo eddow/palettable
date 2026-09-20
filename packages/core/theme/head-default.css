@@ -731,16 +731,22 @@
 	overflow: visible;
 	/* Borderless wrapper (drawer pattern): the chip + label below carry the
 	 * chrome, so the overlay positions against a borderless box — no 1px
-	 * miss. Radius mirrors the chip for the focus shape. */
+	 * miss. Radius mirrors the chip for the focus shape: fully round
+	 * without text, square on the joint side with text (see below). */
 	padding: 0;
 	border: 0;
 	background: transparent;
+	border-radius: 12px;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger:has(> .palette-default-choice) {
 	border-radius: 12px 0 0 12px;
 }
 
-/* Right-docked: mirror — always flat on the left. */
+/* Right-docked: mirror — joint (when text) flat on the left. */
 .palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-trigger {
+	> .palette-default-select-trigger:has(> .palette-default-choice) {
 	border-radius: 0 12px 12px 0;
 }
 
@@ -769,13 +775,22 @@
 	padding: 0.3rem 0;
 	box-sizing: border-box;
 	border: 1px solid rgba(71, 85, 105, 0.95);
-	border-radius: 12px 0 0 12px;
+	/* Fully round without text; square on the joint side with text (the
+	 * trigger wrapper above mirrors this for the focus shape). */
+	border-radius: 12px;
 	background: rgba(15, 23, 42, 0.88);
+}
+
+/* Text on board: the chip squares its joint side to meet the overlay. */
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger:has(> .palette-default-choice)
+	> .palette-default-select-value {
+	border-radius: 12px 0 0 12px;
 }
 
 /* Right-docked: mirror the chip chrome. */
 .palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-trigger
+	> .palette-default-select-trigger:has(> .palette-default-choice)
 	> .palette-default-select-value {
 	border-radius: 0 12px 12px 0;
 }
@@ -1481,8 +1496,11 @@
  * the icons stay the only hit targets. Hovering anywhere over the group
  * reveals ALL labels together (not one by one). Mirrors the vertical
  * slider overlay. Standard joined-box joint (shared with the select +
- * drawer triggers): the workspace-side corners of the end buttons are
- * always square, meeting the overlay's flat inside edge as one box. */
+ * drawer triggers): with text on board the joint-side corners of the end
+ * buttons are square, meeting the overlay's flat inside edge as one box;
+ * the rounding lives on the EXTERIOR side (toolbar-outer edge). The overlay
+ * opens towards the workspace: left by default (right-docked bars),
+ * right on `region-left` (left-docked bars). */
 
 .palette-default-segmented.palette-default-layout-vertical
 	> .palette-default-tool:has(> .palette-default-choice-icon) {
@@ -1648,9 +1666,11 @@
  * `:not(:last-child)` = everything but the visual top → flatten top;
  * `:not(:first-child)` = everything but the visual bottom → flatten bottom.
  * Standard joined-box joint (shared with the select + drawer triggers):
- * the workspace-side corners of the end buttons are always square, meeting
- * the overlay's flat inside edge as one box. Default opens left (towards
- * the workspace on right-docked bars); `region-left` mirrors. */
+ * with text on board the workspace-side corners of the end buttons are
+ * square, meeting the overlay's flat inside edge as one box; without text
+ * (no icon, so no overlay — see the `:has(...)` gate above) the ends keep
+ * their full rounding. Default opens left (towards the workspace on
+ * right-docked bars); `region-left` mirrors. */
 .palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
@@ -1661,16 +1681,35 @@
 	border-bottom-right-radius: 0;
 }
 
-.palette-default-segmented.palette-default-layout-vertical > :first-child,
-.palette-default-segmented.palette-default-layout-vertical > :last-child {
+/* Text on board: square the joint side of the end buttons, round the
+ * EXTERIOR (toolbar-outer) side. The gate mirrors the overlay itself: only
+ * buttons carrying BOTH icon and label get an overlay, so only those square
+ * the joint — without text the ends keep the full rounding from the
+ * visual-ends rules above. Default opens left (joint left, exterior right):
+ * visual bottom (DOM first) rounds bottom-right, visual top (DOM last)
+ * rounds top-right. */
+.palette-default-segmented.palette-default-layout-vertical
+	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: 0;
 	border-top-right-radius: 0;
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 9px;
+}
+
+.palette-default-segmented.palette-default-layout-vertical
+	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: 0;
+	border-top-right-radius: 9px;
+	border-bottom-left-radius: 0;
 	border-bottom-right-radius: 0;
 }
 
-/* Left-docked opens right: the joint is on the right, so the outer rounding
- * lives on the left. */
+/* `region-left` opens right: exterior is the left edge — mirror. Same
+ * per-button gate: only buttons with an overlay square the joint. Visual
+ * bottom (DOM first) rounds bottom-left, visual top (DOM last) rounds
+ * top-left; joint side + the other exterior corner stay square. */
 .palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :first-child {
+	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 	border-bottom-left-radius: 9px;
@@ -1678,7 +1717,7 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :last-child {
+	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
 	border-top-left-radius: 9px;
 	border-top-right-radius: 0;
 	border-bottom-left-radius: 0;
