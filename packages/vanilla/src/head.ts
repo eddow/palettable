@@ -21,6 +21,7 @@ import {
 	type PaletteRegion,
 	paletteCommandEntries,
 	type SurfaceContext,
+	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
 	statusPresenter,
@@ -156,28 +157,127 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	return button
 }
 
-/** Render a `select` (enum dropdown) item. */
+/** Render a `select` (enum dropdown) item.
+ * Custom button + listbox (no native `<select>`): the closed trigger always
+ * shows the tool icon (when declared) *and* the value icon — icon+value,
+ * like numerics — stacked vertically on a vertical toolbar (tool icon above,
+ * value icon below, mirroring the vertical stepper readout). The closed
+ * label follows `selectClosedLabel` (`showText` + `choiceDisplay`, icon-less
+ * fallback keeps the label); the list always renders icon + full text and
+ * opens on click only (never hover). On a vertical toolbar with text enabled
+ * the label is a hover/focus overlay extending the icon stack into an
+ * icon+text select box (segmented pattern), so the toolbar never resizes. */
 export function renderSelect(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
-	const label = document.createElement('label')
-	label.className = `palette-default-select ${toneClass(view.tone)}`
-	label.title = view.title
-	const icon = iconSpan(view.icon)
-	if (icon) label.append(icon)
-	const select = document.createElement('select')
-	for (const option of view.options) {
-		const node = document.createElement('option')
-		node.value = option.value
-		node.textContent = option.text
-		if (!option.can) node.disabled = true
-		select.append(node)
+	const closedLabel = selectClosedLabel(view)
+	const box = el(
+		'div',
+		`palette-default-select ${toneClass(view.tone)} palette-default-layout-${view.direction} palette-default-region-${view.region ?? 'top'}`
+	)
+	box.title = view.title
+	const trigger = document.createElement('button')
+	trigger.type = 'button'
+	trigger.className = 'palette-default-select-trigger'
+	trigger.setAttribute('aria-haspopup', 'listbox')
+	trigger.setAttribute('aria-expanded', 'false')
+	const chip = el(
+		'span',
+		`palette-default-select-value${closedLabel === undefined ? ' is-icon-only' : ''}`
+	)
+	// Tool icon first (when declared), then the value icon — icon+value, like
+	// numerics. The icons are tagged so in-place sync can tell them apart.
+	if (view.toolIcon !== undefined) {
+		const toolIcon = el('span', 'palette-default-icon palette-default-tool-icon')
+		toolIcon.textContent = view.toolIcon
+		chip.append(toolIcon)
 	}
-	select.value = view.value ?? ''
-	select.addEventListener('change', () => core.run(view.select(select.value)))
-	label.append(select)
-	return label
+	const icon = iconSpan(view.icon)
+	if (icon) {
+		icon.classList.add('palette-default-value-icon')
+		chip.append(icon)
+	}
+	// Vertical: the closed label is a direct child of the trigger, sibling of
+	// the icon chip — the segmented overlay pattern (`button > icon + label`).
+	// Horizontal keeps the label inside the chip (inline icon + text).
+	if (closedLabel !== undefined) {
+		const text = el('span', 'palette-default-choice')
+		text.textContent = closedLabel
+		if (view.direction === 'vertical') {
+			trigger.append(chip, text)
+		} else {
+			chip.append(text)
+			trigger.append(chip)
+		}
+	} else {
+		trigger.append(chip)
+	}
+	const list = el('div', 'palette-default-select-list')
+	list.setAttribute('role', 'listbox')
+	list.hidden = true
+	for (const option of view.listOptions) {
+		const row = document.createElement('button')
+		row.type = 'button'
+		row.className = `palette-default-select-option${view.value === option.value ? ' is-selected' : ''}`
+		row.setAttribute('role', 'option')
+		row.setAttribute('aria-selected', view.value === option.value ? 'true' : 'false')
+		row.disabled = !option.can
+		// `data-value` is the stable identity for in-place updates (same as
+		// segmented): rows always render full text, so matching on rendered
+		// text is not reliable.
+		row.dataset.value = option.value
+		if (option.icon !== undefined) {
+			const rowIcon = el('span', 'palette-default-choice-icon')
+			rowIcon.textContent = option.icon
+			row.append(rowIcon)
+		}
+		const rowText = el('span', 'palette-default-choice')
+		rowText.textContent = option.label
+		row.append(rowText)
+		row.addEventListener('click', (event) => {
+			event.stopPropagation()
+			void core.run(view.select(option.value))
+			closeList()
+		})
+		list.append(row)
+	}
+	const closeList = (): void => {
+		list.hidden = true
+		trigger.setAttribute('aria-expanded', 'false')
+	}
+	trigger.addEventListener('click', (event) => {
+		event.stopPropagation()
+		// Single-open: close any other open select list first.
+		for (const other of document.querySelectorAll('.palette-default-select-list:not([hidden])')) {
+			if (other !== list) {
+				other.setAttribute('hidden', '')
+				const otherTrigger = other.parentElement?.querySelector('.palette-default-select-trigger')
+				otherTrigger?.setAttribute('aria-expanded', 'false')
+			}
+		}
+		const open = list.hidden
+		list.hidden = !open
+		trigger.setAttribute('aria-expanded', open ? 'true' : 'false')
+	})
+	// Clicking anywhere outside the box closes the list; Escape closes it and
+	// returns focus to the trigger.
+	document.addEventListener(
+		'click',
+		(event) => {
+			if (!list.hidden && !box.contains(event.target as Node | null)) closeList()
+		},
+		{ capture: true }
+	)
+	trigger.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape' && !list.hidden) {
+			event.stopPropagation()
+			closeList()
+			trigger.focus()
+		}
+	})
+	box.append(trigger, list)
+	return box
 }
 
 /** Render a `segmented` (enum joined-buttons) item.

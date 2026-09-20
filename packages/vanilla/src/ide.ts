@@ -45,6 +45,7 @@ import {
 	parsePointSpec,
 	type SlideFrame,
 	type SurfaceContext,
+	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
 	type Toolbar,
@@ -146,16 +147,75 @@ function updateToolNode(
 		}
 		case 'select': {
 			const view = selectPresenter(item, { point, value, bags }, surface)
-			const select = node.querySelector('select')
-			if (!(select instanceof HTMLSelectElement)) return
-			// Guard: never clobber an open dropdown mid-interaction.
-			if (document.activeElement === select) return
-			const nextSelect = view.value ?? ''
-			if (select.value !== nextSelect) select.value = nextSelect
-			for (const option of select.options) {
-				const spec = view.options.find((entry) => entry.value === option.value)
-				if (spec) option.disabled = !spec.can
+			const closedLabel = selectClosedLabel(view)
+			const trigger = node.querySelector('.palette-default-select-trigger')
+			// Icons nest inside the value chip (tool icon + value icon, like
+			// numerics), so only the label node carries the text — rewriting
+			// textContent would destroy the icons.
+			const chip = node.querySelector('.palette-default-select-value')
+			// Vertical: the closed label is a direct child of the trigger,
+			// sibling of the icon chip (segmented pattern); horizontal keeps
+			// it inside the chip.
+			const labelParent =
+				view.direction === 'vertical' && trigger instanceof HTMLButtonElement ? trigger : chip
+			if (chip) {
+				chip.classList.toggle('is-icon-only', closedLabel === undefined)
+				const toolIconNode = chip.querySelector('.palette-default-tool-icon')
+				if (view.toolIcon === undefined) {
+					toolIconNode?.remove()
+				} else if (toolIconNode) {
+					if (toolIconNode.textContent !== view.toolIcon) toolIconNode.textContent = view.toolIcon
+				} else {
+					const toolIcon = document.createElement('span')
+					toolIcon.className = 'palette-default-icon palette-default-tool-icon'
+					toolIcon.textContent = view.toolIcon
+					chip.prepend(toolIcon)
+				}
+				const iconNode = chip.querySelector('.palette-default-value-icon')
+				if (iconNode) {
+					if (iconNode.textContent !== view.icon) iconNode.textContent = view.icon
+				} else {
+					const valueIcon = document.createElement('span')
+					valueIcon.className = 'palette-default-icon palette-default-value-icon'
+					valueIcon.textContent = view.icon
+					chip.append(valueIcon)
+				}
+				const labelScope = labelParent ?? chip
+				const labelNode = labelScope.querySelector(':scope > .palette-default-choice')
+				if (closedLabel === undefined) {
+					labelNode?.remove()
+				} else if (labelNode) {
+					if (labelNode.textContent !== closedLabel) labelNode.textContent = closedLabel
+					// A direction flip (horizontal ↔ vertical) moves the label
+					// node to its axis-home without rebuilding the trigger.
+					if (labelNode.parentElement !== labelScope) labelScope.append(labelNode)
+				} else {
+					const text = document.createElement('span')
+					text.className = 'palette-default-choice'
+					text.textContent = closedLabel
+					labelScope.append(text)
+				}
 			}
+			// Rows always render full text: match on `data-value` (stable
+			// identity), not rendered text. Preserve the open state + focus —
+			// never rebuild the list mid-interaction.
+			const list = node.querySelector('.palette-default-select-list')
+			if (list instanceof HTMLElement && trigger instanceof HTMLButtonElement) {
+				const wasOpen = !list.hidden
+				for (const row of list.querySelectorAll('.palette-default-select-option')) {
+					const spec = view.listOptions.find(
+						(entry) => entry.value === (row as HTMLElement).dataset.value
+					)
+					if (!spec) continue
+					row.classList.toggle('is-selected', view.value === spec.value)
+					row.setAttribute('aria-selected', view.value === spec.value ? 'true' : 'false')
+					if (row instanceof HTMLButtonElement) row.disabled = !spec.can
+				}
+				list.hidden = !wasOpen
+				trigger.setAttribute('aria-expanded', wasOpen ? 'true' : 'false')
+			}
+			const box = node.classList.contains('palette-default-select') ? node : null
+			if (box) box.title = view.title
 			return
 		}
 		case 'segmented': {
@@ -2412,7 +2472,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			})
 			row('Display number', showInput)
 		}
-		if (currentEditor === 'segmented') {
+		if (currentEditor === 'select' || currentEditor === 'segmented') {
 			const showInput = document.createElement('input')
 			showInput.type = 'checkbox'
 			showInput.checked = config.showText !== false

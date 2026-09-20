@@ -48,7 +48,7 @@ export type HeadItemConfig = {
 	readonly tone?: string
 	/** Slider readout opt-out (`slider` / `drawerSlider` only; default shown). */
 	readonly showValue?: boolean
-	/** Segmented label opt-out (`segmented` only; default shown). */
+	/** Select + segmented label opt-out (`select` / `segmented`; default shown). */
 	readonly showText?: boolean
 }
 
@@ -254,7 +254,7 @@ export function statusPresenter(item: ToolbarItem): StatusPresenter {
 
 export type SelectOption = {
 	readonly value: string
-	/** Merged display string (`icon label` / `label` / `icon`) — used by `<select>`. */
+	/** Merged display string (`icon label` / `label` / `icon`) — used by segmented tooltips. */
 	readonly text: string
 	/** Icon part, when the option declares one. */
 	readonly icon: string | undefined
@@ -264,19 +264,46 @@ export type SelectOption = {
 	readonly can: boolean
 }
 
+/** Current option in raw (unfiltered) form — the closed select box source. */
+export type SelectCurrent = {
+	readonly value: string
+	/** Raw declared icon (ignores `choiceDisplay`); `undefined` when none. */
+	readonly icon: string | undefined
+	/** Raw label (`option.label ?? option.value`); always defined. */
+	readonly label: string
+}
+
+/** Listbox row — always icon (when declared) + full text, ignoring `showText`/`choiceDisplay`. */
+export type SelectListOption = {
+	readonly value: string
+	readonly icon: string | undefined
+	readonly label: string
+	readonly can: boolean
+}
+
 export type SelectPresenter = {
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
 	readonly label: string
+	/** Tool icon (`config.icon`); renders before the value icon, like numerics. */
+	readonly toolIcon: string | undefined
+	/** Current value icon (raw declared option icon, ignores `choiceDisplay`). */
 	readonly icon: string
 	readonly direction: 'horizontal' | 'vertical'
 	/** Docking region, so axis-aware editors can pick the overlay side. */
 	readonly region: PaletteRegion | undefined
-	/** Segmented label visibility (`config.showText === false` hides it → icon-only). */
+	/** Closed-box + segmented label visibility (`config.showText === false` hides it → icon-only). */
 	readonly showText: boolean
+	/** Display mode (`config.choiceDisplay`, default `'both'`); gates the closed-box label. */
+	readonly display: ChoiceDisplay
 	/** Current value; `undefined` = skeleton (no option selected). */
 	readonly value: string | undefined
+	/** Current option in raw form; `undefined` = skeleton or unknown value. */
+	readonly current: SelectCurrent | undefined
+	/** Display-filtered options for `segmented` (honours `choiceDisplay`). */
 	readonly options: readonly SelectOption[]
+	/** Unfiltered rows for the select listbox (always full text). */
+	readonly listOptions: readonly SelectListOption[]
 	/** Spec string selecting a value (`id=value`). */
 	readonly select: (value: string) => string
 }
@@ -301,7 +328,7 @@ function choiceLabel(option: EnumOption, display: ChoiceDisplay): string | undef
 	return option.label ?? option.value
 }
 
-/** Merged display string for a single-node renderer (`<select>`, `<option>`). */
+/** Merged display string for a single-node renderer (segmented tooltips). */
 function choiceText(option: EnumOption, display: ChoiceDisplay): string {
 	const label = option.label ?? option.value
 	const icon = choiceIcon(option, display)
@@ -311,13 +338,30 @@ function choiceText(option: EnumOption, display: ChoiceDisplay): string {
 }
 
 /**
- * Whether a segmented shows its option labels. Opt-out via
- * `config.showText === false` (segmented only; default shown, so existing
- * layouts are unchanged). Mirrors `showValueOf` for sliders.
+ * Whether a select closed box / segmented shows its option labels. Opt-out
+ * via `config.showText === false` (`select` / `segmented`; default shown, so
+ * existing layouts are unchanged). Mirrors `showValueOf` for sliders. The
+ * select *list* always shows full text regardless of this flag.
  */
 function showTextOf(item: ToolbarItem): boolean {
 	const config = (item as { config?: unknown }).config as { showText?: unknown } | undefined
 	return config?.showText !== false
+}
+
+/**
+ * Closed select-box label: `undefined` = icon-only trigger. The label shows
+ * when text is enabled (`showText` and `display !== 'icon'`); an option with
+ * no icon keeps its label as a fallback so the trigger is never empty
+ * (mirrors the segmented icon-less fallback).
+ */
+export function selectClosedLabel(
+	view: Pick<SelectPresenter, 'showText' | 'display' | 'current'>
+): string | undefined {
+	const current = view.current
+	if (current === undefined) return undefined
+	if (view.showText && view.display !== 'icon') return current.label
+	if (current.icon === undefined) return current.label
+	return undefined
 }
 
 /** View-model for an enum point: current icon/value + display-filtered options.
@@ -339,20 +383,38 @@ export function selectPresenter(
 	const display = choiceDisplayOf(item)
 	const current = optionsList.find((option) => option.value === value)
 	const currentIcon = current !== undefined ? current.icon : undefined
+	const toolIcon = meta.icon
+	const currentEntry: SelectCurrent | undefined =
+		current !== undefined
+			? {
+					value: current.value,
+					icon: typeof current.icon === 'string' ? current.icon : undefined,
+					label: current.label ?? current.value,
+				}
+			: undefined
 	return {
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
 		label: meta.label,
+		toolIcon,
 		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? value ?? ''),
 		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
 		region: surface.region,
 		showText: showTextOf(item),
+		display,
 		value,
+		current: currentEntry,
 		options: optionsList.map((option) => ({
 			value: option.value,
 			text: choiceText(option, display),
 			icon: choiceIcon(option, display),
 			label: choiceLabel(option, display),
+			can: option.can !== false,
+		})),
+		listOptions: optionsList.map((option) => ({
+			value: option.value,
+			icon: typeof option.icon === 'string' ? option.icon : undefined,
+			label: option.label ?? option.value,
 			can: option.can !== false,
 		})),
 		select: (next: string) => `${pointId}=${next}`,
@@ -500,7 +562,7 @@ export function configuratorTonePatch(value: string): Record<string, string> {
  * Prune config keys when switching editors (mirrors the svelte `setEditor`
  * cleanup for `values`/`keywords`/`choiceDisplay`).
  * - slider / drawerSlider keep `showValue`, prune the enum-subset keys + `showText`.
- * - segmented keeps `showText` + the enum-subset keys, prunes `showValue`.
+ * - select / segmented keep `showText` + the enum-subset keys, prune `showValue`.
  * - other enum editors keep the enum-subset keys, prune `showValue` + `showText`.
  * - everything else prunes both.
  * Returns the keys to delete (adapter deletes them from `item.config`).
@@ -514,7 +576,7 @@ export function configuratorEditorCleanup(nextEditor: string): readonly string[]
 		nextEditor === 'segmented' ||
 		nextEditor === 'splitRadio'
 	if (isSlider) return ['values', 'keywords', 'choiceDisplay', 'showText']
-	if (nextEditor === 'segmented') return ['showValue']
+	if (nextEditor === 'select' || nextEditor === 'segmented') return ['showValue']
 	if (isEnum) return ['showValue', 'showText']
 	return ['values', 'keywords', 'choiceDisplay', 'showValue', 'showText']
 }

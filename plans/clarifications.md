@@ -14,5 +14,10 @@ Horizontal parking stacks toolbars *vertically* (and vice-versa)
 
 ## TODOs
 
-* HTML change *does* change which element the mouse is over (or a least should)
-* We have to double the stack-DZ before de-highlighting the other ones
+- demo+tests contexts
+- demo+tests light/dark themes
+- isolate demo data for it to be usable by all demos
+- drawers are not yet presentable
+- check edition in drawer
+- refactor adding tool
+- divide the css into technical and cosmetic

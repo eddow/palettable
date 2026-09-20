@@ -577,7 +577,6 @@
 	position: relative;
 }
 
-.palette-default-select,
 .palette-default-radio-group,
 .palette-default-stepper,
 .palette-default-stars {
@@ -587,22 +586,269 @@
 	background: rgba(15, 23, 42, 0.88);
 }
 
+/* ── Select (custom listbox) ── */
+/* The closed box mirrors the (drawer-)slider trigger: the trigger wraps a
+ * value chip (icon nested inside, exactly like the slider/stepper readout)
+ * so all three read as the same control. The option list is a click-opened
+ * popout (never hover) sharing the drawer-track panel chrome; rows always
+ * render icon (when declared) + full text. */
 .palette-default-select {
 	padding: 0;
 	border: 0;
 	background: transparent;
+	position: relative;
+	overflow: visible;
 }
 
-.palette-default-select select {
-	min-width: 0;
-	padding: 0.42rem 0.72rem;
-	border-radius: 9px;
+.palette-default-select-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 0.72rem;
+	min-inline-size: 3.2rem;
+	min-block-size: 2rem;
 	border: 1px solid rgba(71, 85, 105, 0.95);
-	background: rgba(15, 23, 42, 0.96);
+	border-radius: 12px;
+	background: rgba(15, 23, 42, 0.88);
 	color: inherit;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	box-sizing: border-box;
 }
 
-.palette-default-select > .palette-default-icon,
+.palette-default-select-trigger::after {
+	content: '▾';
+	font-size: 0.7rem;
+	color: #94a3b8;
+	margin-inline-start: auto;
+}
+
+/* Inside the trigger the value is bare text: the trigger provides the
+ * chrome. Its size is inherited so it matches the slider readout exactly. */
+.palette-default-select-trigger > .palette-default-select-value {
+	min-inline-size: 0;
+	min-block-size: 0;
+	padding-inline: 0;
+	border: 0;
+	background: transparent;
+}
+
+/* The option list is a click-opened popout (never hover): same panel chrome
+ * as the drawer-track (border re-asserted as longhands so the edge stays
+ * painted over the toolbar behind it). Rows always render icon + full text,
+ * ignoring `showText`/`choiceDisplay`. */
+.palette-default-select-list {
+	position: absolute;
+	z-index: 2;
+	margin: 0;
+	min-inline-size: 100%;
+	inline-size: max-content;
+	max-inline-size: 16rem;
+	display: grid;
+	gap: 2px;
+	padding: 4px;
+	border-width: 1px;
+	border-style: solid;
+	border-color: rgba(71, 85, 105, 0.95);
+	border-radius: 12px;
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	box-sizing: border-box;
+}
+
+.palette-default-select-list[hidden] {
+	display: none;
+}
+
+.palette-default-select-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0.42rem 0.72rem;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	text-align: start;
+	white-space: nowrap;
+}
+
+.palette-default-select-option:hover:not(:disabled),
+.palette-default-select-option:focus-visible:not(:disabled) {
+	border-color: rgba(96, 165, 250, 0.9);
+}
+
+.palette-default-select-option.is-selected {
+	border-color: rgba(96, 165, 250, 0.95);
+	box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4) inset;
+}
+
+.palette-default-select-option:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+/* ── Select: horizontal toolbar ── */
+/* Closed chip inline (icon + label side by side); the list drops below the
+ * trigger, or above it on a bottom-docked toolbar (region picks the side). */
+.palette-default-select.palette-default-layout-horizontal > .palette-default-select-list {
+	top: calc(100% + 4px);
+	inset-inline-start: 0;
+}
+
+.palette-default-select.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-select-list {
+	top: auto;
+	bottom: calc(100% + 4px);
+}
+
+/* ── Select: vertical toolbar ── */
+/* At rest the trigger is a square exactly `--palette-toolbar-perpendicular`
+ * wide showing the tool icon above the value icon (stacked, mirroring the
+ * vertical stepper readout), so the toolbar never resizes. With text enabled
+ * the label is a hover/focus overlay extending the icon stack into an
+ * icon+text select box beside the toolbar (same pattern as the vertical
+ * segmented overlay): absolutely positioned, `pointer-events: none`. The
+ * list opens only on click, sideways into the workspace like the vertical
+ * drawer track. */
+.palette-default-select.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+	justify-content: center;
+	position: relative;
+	overflow: visible;
+	/* Borderless wrapper (drawer pattern): the chip + label below carry the
+	 * chrome, so the overlay positions against a borderless box — no 1px
+	 * miss. Radius mirrors the chip for the focus shape. */
+	padding: 0;
+	border: 0;
+	background: transparent;
+	border-radius: 12px 0 0 12px;
+}
+
+/* Right-docked: mirror — always flat on the left. */
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger {
+	border-radius: 0 12px 12px 0;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger::after {
+	content: none;
+}
+
+/* The chip is the visible trigger at rest: icon stack in flow (tool icon
+ * above value icon), carrying the bordered chrome (drawer pattern — the
+ * trigger wrapper is borderless). The label is a direct child of the
+ * trigger, sibling of the chip — the segmented overlay pattern
+ * (`button > icon + label`): absolutely positioned, `pointer-events: none`. */
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
+	> .palette-default-select-value {
+	flex-direction: column;
+	gap: 1px;
+	line-height: 1;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	overflow: visible;
+	inline-size: 100%;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	padding: 0.3rem 0;
+	box-sizing: border-box;
+	border: 1px solid rgba(71, 85, 105, 0.95);
+	border-radius: 12px 0 0 12px;
+	background: rgba(15, 23, 42, 0.88);
+}
+
+/* Right-docked: mirror the chip chrome. */
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger
+	> .palette-default-select-value {
+	border-radius: 0 12px 12px 0;
+}
+
+/* Anchor (mirrors the segmented `:has(...)` gate): the trigger only
+ * positions the overlay when the label sibling exists. */
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger:has(> .palette-default-choice) {
+	position: relative;
+	overflow: visible;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 100%;
+	/* Same panel level as the drawer track (`z-index: 2` there): above the
+	 * work-zone column so the overlay keeps hit-testing past the edge. */
+	z-index: 2;
+	display: inline-flex;
+	align-items: center;
+	inline-size: max-content;
+	padding-inline: 0.72rem;
+	border: 1px solid rgba(71, 85, 105, 0.9);
+	border-radius: 0 12px 12px 0;
+	background: rgba(2, 6, 23, 0.98);
+	box-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	white-space: nowrap;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(-0.4rem);
+	transition:
+		transform 140ms ease,
+		opacity 120ms ease;
+}
+
+/* Right-docked toolbars open the overlay towards the IDE (to the left). */
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	inset-inline-start: auto;
+	inset-inline-end: 100%;
+	border-radius: 12px 0 0 12px;
+	transform: translateX(0.4rem);
+}
+
+/* The label is a direct child of the trigger, sibling of the chip — the
+ * segmented overlay pattern (`button > icon + label`). Hover-only (never
+ * focus): at rest it ignores the pointer; on hover it catches it, so moving
+ * across the text keeps `:hover` alive and the overlay open. The trigger's
+ * workspace-side corners are always square (see above), so no hover-only
+ * joint rule is needed — the joint is square at rest too. */
+.palette-default-select.palette-default-layout-vertical:hover
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	opacity: 1;
+	transform: translateX(0);
+	pointer-events: auto;
+}
+
+.palette-default-select.palette-default-layout-vertical > .palette-default-select-list {
+	inset-block-start: 0;
+	inset-inline-start: calc(100% + 4px);
+}
+
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-list {
+	inset-inline-start: auto;
+	inset-inline-end: calc(100% + 4px);
+}
+
 .palette-default-slider > .palette-default-icon,
 .palette-default-stars > .palette-default-icon {
 	display: inline-flex;
@@ -620,7 +866,8 @@
  * text) sharing the group's chrome, never a bare floating number. Both share
  * every declaration so the two read as the same control. */
 .palette-default-slider-value,
-.palette-default-stepper-value {
+.palette-default-stepper-value,
+.palette-default-select-value {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -634,14 +881,16 @@
 }
 
 .palette-default-slider-value > .palette-default-icon,
-.palette-default-stepper-value > .palette-default-icon {
+.palette-default-stepper-value > .palette-default-icon,
+.palette-default-select-value > .palette-default-icon {
 	min-inline-size: 0;
 	padding-inline: 0;
 }
 
 /* Icon-only slider chip (`showValue: false`): the number is hidden, so the
  * chip shrinks to the icon instead of keeping the readout's min width. */
-.palette-default-slider-value.is-icon-only {
+.palette-default-slider-value.is-icon-only,
+.palette-default-select-value.is-icon-only {
 	min-inline-size: 0;
 }
 
@@ -1231,7 +1480,9 @@
  * positioned and `pointer-events: none`, so the toolbar never resizes and
  * the icons stay the only hit targets. Hovering anywhere over the group
  * reveals ALL labels together (not one by one). Mirrors the vertical
- * slider overlay. */
+ * slider overlay. Standard joined-box joint (shared with the select +
+ * drawer triggers): the workspace-side corners of the end buttons are
+ * always square, meeting the overlay's flat inside edge as one box. */
 
 .palette-default-segmented.palette-default-layout-vertical
 	> .palette-default-tool:has(> .palette-default-choice-icon) {
@@ -1243,8 +1494,11 @@
 	> .palette-default-tool:has(> .palette-default-choice-icon)
 	> .palette-default-choice {
 	position: absolute;
-	inset-block: 0;
-	inset-inline-end: calc(100% - 1px);
+	/* Bordered anchor (unlike the borderless select/drawer wrappers): the
+	 * button carries the chrome, so span its border box (-1px block) and
+	 * start past its outer face (+1px inline) — same abutting joint. */
+	inset-block: -1px;
+	inset-inline-end: calc(100% + 1px);
 	display: inline-flex;
 	align-items: center;
 	inline-size: max-content;
@@ -1267,7 +1521,7 @@
 	> .palette-default-tool:has(> .palette-default-choice-icon)
 	> .palette-default-choice {
 	inset-inline-end: auto;
-	inset-inline-start: calc(100% - 1px);
+	inset-inline-start: calc(100% + 1px);
 	border-radius: 0 12px 12px 0;
 	transform: translateX(-0.4rem);
 }
@@ -1299,8 +1553,7 @@
 .palette-default-segmented > .palette-default-tool,
 .palette-default-stepper > .palette-default-tool,
 .palette-default-stepper-value,
-.palette-default-select > .palette-default-icon,
-.palette-default-select > select,
+.palette-default-select-trigger,
 .palette-default-stars > .palette-default-icon,
 .palette-default-stars > .palette-default-stars-row,
 .palette-default-radio-group > .palette-default-radio-item {
@@ -1310,7 +1563,6 @@
 .palette-default-split > :first-child,
 .palette-default-segmented > :first-child,
 .palette-default-stepper > :first-child,
-.palette-default-select > :first-child,
 .palette-default-stars > :first-child,
 .palette-default-radio-group > .palette-default-radio-item:first-of-type {
 	margin-inline-start: 0;
@@ -1318,7 +1570,6 @@
 
 .palette-default-split > :first-child,
 .palette-default-stepper > :first-child,
-.palette-default-select > :first-child,
 .palette-default-stars > :first-child {
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
@@ -1326,14 +1577,12 @@
 
 .palette-default-split > :last-child,
 .palette-default-stepper > :last-child,
-.palette-default-select > :last-child,
 .palette-default-stars > :last-child {
 	border-top-left-radius: 0;
 	border-bottom-left-radius: 0;
 }
 
 .palette-default-stepper > :not(:first-child):not(:last-child),
-.palette-default-select > :not(:first-child):not(:last-child),
 .palette-default-stars > :not(:first-child):not(:last-child) {
 	border-radius: 0;
 }
@@ -1397,13 +1646,41 @@
 
 /* Interior segmented buttons stay flat: the ends round themselves above.
  * `:not(:last-child)` = everything but the visual top → flatten top;
- * `:not(:first-child)` = everything but the visual bottom → flatten bottom. */
+ * `:not(:first-child)` = everything but the visual bottom → flatten bottom.
+ * Standard joined-box joint (shared with the select + drawer triggers):
+ * the workspace-side corners of the end buttons are always square, meeting
+ * the overlay's flat inside edge as one box. Default opens left (towards
+ * the workspace on right-docked bars); `region-left` mirrors. */
 .palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 }
 
 .palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical > :first-child,
+.palette-default-segmented.palette-default-layout-vertical > :last-child {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+/* Left-docked opens right: the joint is on the right, so the outer rounding
+ * lives on the left. */
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> :first-child {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-left-radius: 9px;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> :last-child {
+	border-top-left-radius: 9px;
+	border-top-right-radius: 0;
 	border-bottom-left-radius: 0;
 	border-bottom-right-radius: 0;
 }
@@ -1600,7 +1877,6 @@
 .palette-default-theme-light .palette-default-tool,
 .palette-default-theme-light .palette-default-trigger,
 .palette-default-theme-light .palette-default-menu-item,
-.palette-default-theme-light .palette-default-select,
 .palette-default-theme-light .palette-default-radio-group,
 .palette-default-theme-light .palette-default-radio-item,
 .palette-default-theme-light .palette-default-slider,
@@ -1613,12 +1889,13 @@
 .palette-default-theme-light .palette-default-command-chip,
 .palette-default-theme-light .palette-default-command-suggestion,
 .palette-default-theme-light .palette-default-command-result,
-.palette-default-theme-light .palette-default-select select,
+.palette-default-theme-light .palette-default-select-trigger,
 .palette-default-theme-light .palette-default-menu,
 .palette-default-theme-light .palette-default-command-popover,
 .palette-default-theme-light .palette-default-command-parking,
 .palette-default-theme-light .palette-default-stepper-value,
 .palette-default-theme-light .palette-default-slider-value,
+.palette-default-theme-light .palette-default-select-value,
 .palette-default-theme-light .palette-default-config-value input,
 .palette-default-theme-light .palette-default-config-value select,
 .palette-default-theme-light .palette-default-add-variant,
@@ -1638,6 +1915,7 @@
 .palette-default-theme-light .palette-default-command-panel,
 .palette-default-theme-light .palette-default-command-popover,
 .palette-default-theme-light .palette-default-menu,
+.palette-default-theme-light .palette-default-select-list,
 .palette-default-theme-light.palettable-drawer__popup,
 .palette-default-theme-light .palettable-drawer__popup {
 	background: rgba(255, 255, 255, 0.98);
@@ -1656,9 +1934,14 @@
 /* The drawer slider's trigger + range panel are dark overlays in the base theme. */
 .palette-default-theme-light .palette-default-slider-drawer > .palette-default-slider-track,
 .palette-default-theme-light .palette-default-slider-drawer > .palette-default-slider-trigger,
+.palette-default-theme-light .palette-default-select-list,
 .palette-default-theme-light
 	.palette-default-segmented.palette-default-layout-vertical
 	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice,
+.palette-default-theme-light
+	.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
 	> .palette-default-choice {
 	border-color: rgba(148, 163, 184, 0.9);
 	background: #ffffff;
@@ -1674,6 +1957,7 @@
 .palette-default-theme-light .palette-default-menu-item.is-selected,
 .palette-default-theme-light .palette-default-command-result.is-selected,
 .palette-default-theme-light .palette-default-command-result:hover:not(:disabled),
+.palette-default-theme-light .palette-default-select-option.is-selected,
 .palette-default-theme-light .palette-default-radio-item.is-selected {
 	border-color: #60a5fa;
 	background: #1d4ed8;

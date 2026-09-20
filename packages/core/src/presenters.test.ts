@@ -15,6 +15,7 @@ import {
 	headTooltip,
 	isPresenterDrawerItem,
 	resolveEditorVariant,
+	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
 	stashPressedState,
@@ -394,6 +395,86 @@ describe('selectPresenter / sliderPresenter', () => {
 				.showText
 		).toBe(true)
 	})
+
+	it('exposes raw current + full-text list rows for the select listbox', () => {
+		const point = {
+			id: 'theme',
+			label: 'T',
+			type: 'enum' as const,
+			constraints: {
+				options: [
+					{ value: 'mars', label: 'Mars', icon: '🔴' },
+					{ value: 'void', label: 'Void' },
+				],
+			},
+		}
+		const view = selectPresenter({ tool: 'theme' }, { point, value: 'mars' }, surface)
+		expect(view.current).toMatchObject({ value: 'mars', icon: '🔴', label: 'Mars' })
+		expect(view.toolIcon).toBeUndefined()
+		expect(view.icon).toBe('🔴')
+		expect(
+			selectPresenter({ tool: 'theme', config: { icon: '🪐' } }, { point, value: 'mars' }, surface)
+				.toolIcon
+		).toBe('🪐')
+		expect(view.listOptions).toEqual([
+			{ value: 'mars', icon: '🔴', label: 'Mars', can: true },
+			{ value: 'void', icon: undefined, label: 'Void', can: true },
+		])
+		// The list ignores `showText` / `choiceDisplay`: rows stay full text.
+		const hidden = selectPresenter(
+			{ tool: 'theme', config: { showText: false, choiceDisplay: 'icon' } },
+			{ point, value: 'mars' },
+			surface
+		)
+		expect(hidden.listOptions).toEqual(view.listOptions)
+		expect(hidden.current).toMatchObject({ value: 'mars', icon: '🔴', label: 'Mars' })
+		// Unknown value / skeleton → no current.
+		expect(
+			selectPresenter({ tool: 'theme' }, { point, value: 'nope' }, surface).current
+		).toBeUndefined()
+		expect(
+			selectPresenter({ tool: 'theme' }, { point, value: undefined }, surface).current
+		).toBeUndefined()
+	})
+
+	it('derives the closed select-box label from showText + display mode', () => {
+		const point = {
+			id: 'theme',
+			label: 'T',
+			type: 'enum' as const,
+			constraints: { options: [{ value: 'mars', label: 'Mars', icon: '🔴' }] },
+		}
+		const shown = selectPresenter({ tool: 'theme' }, { point, value: 'mars' }, surface)
+		expect(selectClosedLabel(shown)).toBe('Mars')
+		const hidden = selectPresenter(
+			{ tool: 'theme', config: { showText: false } },
+			{ point, value: 'mars' },
+			surface
+		)
+		expect(selectClosedLabel(hidden)).toBeUndefined()
+		const iconMode = selectPresenter(
+			{ tool: 'theme', config: { choiceDisplay: 'icon' } },
+			{ point, value: 'mars' },
+			surface
+		)
+		expect(selectClosedLabel(iconMode)).toBeUndefined()
+		// Icon-less option keeps its label so the trigger is never empty.
+		const bare = selectPresenter(
+			{ tool: 'theme', config: { showText: false } },
+			{
+				point: {
+					id: 'theme',
+					label: 'T',
+					type: 'enum' as const,
+					constraints: { options: [{ value: 'void', label: 'Void' }] },
+				},
+				value: 'void',
+			},
+			surface
+		)
+		expect(selectClosedLabel(bare)).toBe('Void')
+		expect(selectClosedLabel({ ...shown, current: undefined })).toBeUndefined()
+	})
 })
 
 describe('configuratorModel + patches', () => {
@@ -405,7 +486,7 @@ describe('configuratorModel + patches', () => {
 		expect(configuratorTextPatch('label', 'A')).toEqual({ label: 'A' })
 		expect(configuratorTonePatch('accent')).toEqual({ tone: 'accent' })
 		expect(configuratorTonePatch('x')).toEqual({ tone: 'neutral' })
-		expect(configuratorEditorCleanup('select')).toEqual(['showValue', 'showText'])
+		expect(configuratorEditorCleanup('select')).toEqual(['showValue'])
 		expect(configuratorEditorCleanup('segmented')).toEqual(['showValue'])
 		expect(configuratorEditorCleanup('slider')).toEqual([
 			'values',

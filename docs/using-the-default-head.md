@@ -42,14 +42,26 @@ Notes:
   never bound to a point.
 
 - `segmented` is the "radio-button" idiom: joined buttons where the selected one
-  reads as pushed-in. `select` is the compact dropdown. Both are enum editors.
+  reads as pushed-in. `select` is the compact dropdown (custom button +
+  listbox, no native `<select>`). Both are enum editors.
   `config.choiceDisplay` (`'icon' | 'text' | 'both'`, default `'both'`) controls
   whether option text is shown. In a **vertical** toolbar a segmented with icons
   shows icons only at rest and reveals the text on hover/focus as an overlay
   beside them — the toolbar never resizes. `config.showText: false` hides the
   option labels on **both** axes (icon-only buttons, mirroring the slider's
   `showValue: false`). The tool editor exposes this as a "Show text"
-  checkbox (segmented only, checked by default).
+  checkbox (`select` + `segmented`, checked by default).
+- The `select` closed box always shows the tool icon (when declared) *and*
+  the value icon — icon+value like numerics (☀️ over 1.2): side by side on a
+  horizontal toolbar, stacked (tool above value) on a vertical one. The closed
+  label follows `showText` + `choiceDisplay` (an option with no icon keeps its
+  label so the trigger is never empty); the option list always renders icon
+  (when declared) + full text and opens on click only (never hover). With
+  `showText: false` the trigger is icons only and the list still carries the
+  text. In a **vertical** toolbar with text enabled the label is a hover/focus
+  overlay extending the icon stack into an icon+text select box beside the
+  toolbar (same pattern as the vertical segmented overlay) — the toolbar
+  never resizes.
 - `stepper` is a ± button pair for integer/stepped values; `slider` is the
   continuous range. Both are number editors (they share `sliderPresenter`).
   A slider's range is `inline` by default, running along the toolbar axis;

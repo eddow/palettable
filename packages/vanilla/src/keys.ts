@@ -166,16 +166,14 @@ export function createVanillaKeys(bindings: KeyBindings = {}): VanillaKeys {
 	}
 }
 
-/** An input-like target swallows palette shortcuts (typing wins). */
+/** An input-like target swallows palette shortcuts (typing wins).
+ * The select is a custom button + listbox (no native `<select>`), so its
+ * buttons must NOT swallow shortcuts — only real text inputs do. */
 export function isEditableTarget(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false
 	if (target.isContentEditable) return true
-	if (
-		target instanceof HTMLInputElement ||
-		target instanceof HTMLTextAreaElement ||
-		target instanceof HTMLSelectElement
-	) {
+	if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
 		return true
 	}
-	return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+	return Boolean(target.closest('input, textarea, [contenteditable="true"]'))
 }

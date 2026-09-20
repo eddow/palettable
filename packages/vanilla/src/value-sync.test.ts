@@ -158,6 +158,257 @@ describe('per-tool value sync', () => {
 		ide.dispose()
 	})
 
+	it('select renders trigger chip + full-text list rows', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector('.palette-default-select-trigger')
+		expect(trigger?.getAttribute('aria-haspopup')).toBe('listbox')
+		expect(trigger?.getAttribute('aria-expanded')).toBe('false')
+		expect(trigger?.querySelector('.palette-default-choice')?.textContent).toBe('Light')
+		const list = host.querySelector('.palette-default-select-list')
+		expect(list?.getAttribute('role')).toBe('listbox')
+		expect((list as HTMLElement | null)?.hidden).toBe(true)
+		const rows = [...(list?.querySelectorAll('.palette-default-select-option') ?? [])]
+		expect(rows).toHaveLength(2)
+		expect(rows[0]?.getAttribute('aria-selected')).toBe('true')
+		expect(rows[1]?.getAttribute('aria-selected')).toBe('false')
+		// Rows always render icon + full text.
+		expect(rows[0]?.querySelector('.palette-default-choice-icon')?.textContent).toBe('☀️')
+		expect(rows[0]?.querySelector('.palette-default-choice')?.textContent).toBe('Light')
+		// Click opens the list; picking a row runs + closes + syncs in place.
+		;(trigger as HTMLButtonElement).click()
+		expect((list as HTMLElement | null)?.hidden).toBe(false)
+		expect(trigger?.getAttribute('aria-expanded')).toBe('true')
+		;(rows[1] as HTMLButtonElement).click()
+		expect(core.values.get('theme' as never)).toBe('dark')
+		expect((list as HTMLElement | null)?.hidden).toBe(true)
+		expect(trigger?.querySelector('.palette-default-choice')?.textContent).toBe('Dark')
+		ide.dispose()
+	})
+
+	it('select with showText:false keeps an icon-only trigger but full-text rows', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'theme', editor: 'select', config: { showText: false } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const chip = host.querySelector('.palette-default-select-value')
+		expect(chip?.classList.contains('is-icon-only')).toBe(true)
+		expect(chip?.querySelector('.palette-default-choice')).toBe(null)
+		const rows = host.querySelectorAll('.palette-default-select-option .palette-default-choice')
+		expect(rows).toHaveLength(2)
+		expect(rows[0]?.textContent).toBe('Light')
+		ide.dispose()
+	})
+
+	it('vertical select puts the closed label beside the icon chip (segmented pattern)', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [],
+						right: [],
+						bottom: [],
+						left: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const box = host.querySelector('.palette-default-select.palette-default-layout-vertical')
+		expect(box).not.toBe(null)
+		const trigger = host.querySelector('.palette-default-select-trigger')
+		const chip = host.querySelector('.palette-default-select-value')
+		const label = trigger?.querySelector(':scope > .palette-default-choice')
+		expect(label?.textContent).toBe('Light')
+		// The chip keeps icons only; the label is its sibling, not its child.
+		expect(chip?.querySelector(':scope > .palette-default-choice')).toBe(null)
+		expect(label?.parentElement).toBe(trigger)
+		expect(chip?.parentElement).toBe(trigger)
+		// Model change updates the sibling label in place, same trigger node.
+		core.values.set('theme' as never, 'dark' as never)
+		expect(host.querySelector('.palette-default-select-trigger')).toBe(trigger)
+		expect(trigger?.querySelector(':scope > .palette-default-choice')?.textContent).toBe('Dark')
+		ide.dispose()
+	})
+
+	it('select renders tool icon + value icon + label in the closed chip', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'theme', editor: 'select', config: { icon: '🪐' } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const chip = host.querySelector('.palette-default-select-value')
+		expect(chip?.querySelector('.palette-default-tool-icon')?.textContent).toBe('🪐')
+		expect(chip?.querySelector('.palette-default-value-icon')?.textContent).toBe('☀️')
+		expect(chip?.querySelector('.palette-default-choice')?.textContent).toBe('Light')
+		// Model change swaps the value icon in place, keeping the tool icon.
+		core.values.set('theme' as never, 'dark' as never)
+		expect(chip?.querySelector('.palette-default-tool-icon')?.textContent).toBe('🪐')
+		expect(chip?.querySelector('.palette-default-value-icon')?.textContent).toBe('🌙')
+		ide.dispose()
+	})
+
+	it('select syncs the trigger in place and preserves the open state', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector(
+			'.palette-default-select-trigger'
+		) as HTMLButtonElement | null
+		trigger?.click()
+		const list = host.querySelector('.palette-default-select-list') as HTMLElement | null
+		expect(list?.hidden).toBe(false)
+		core.values.set('theme' as never, 'dark' as never)
+		expect(host.querySelector('.palette-default-select-trigger')).toBe(trigger)
+		expect(list?.hidden).toBe(false)
+		expect(trigger?.querySelector('.palette-default-choice')?.textContent).toBe('Dark')
+		expect(list?.querySelector('[data-value="dark"]')?.getAttribute('aria-selected')).toBe('true')
+		ide.dispose()
+	})
+
 	it('focused slider is not clobbered mid-drag', () => {
 		const { core, ide, host } = setup()
 		const input = host.querySelector('input[type="range"]') as HTMLInputElement | null

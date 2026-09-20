@@ -330,10 +330,8 @@ export function drawerTriggerShellTemplate(options: {
 }): string {
 	const accessible = options.label !== '' ? options.label : (options.hint ?? 'More')
 	const title = options.label !== '' ? options.label : (options.hint ?? 'More')
-	const layout =
-		options.axis !== undefined ? ` palette-default-layout-${options.axis}` : ''
-	const region =
-		options.region !== undefined ? ` palette-default-region-${options.region}` : ''
+	const layout = options.axis !== undefined ? ` palette-default-layout-${options.axis}` : ''
+	const region = options.region !== undefined ? ` palette-default-region-${options.region}` : ''
 	const icon =
 		options.icon !== undefined
 			? `<span class="palette-default-icon">${escapeHtml(options.icon)}</span>`
