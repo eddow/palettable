@@ -148,7 +148,8 @@ test('inline slider runs along the toolbar axis', async ({ page }) => {
 	expect(sliderW).toBeCloseTo(40, 0)
 })
 
-test('horizontal command box hides its input until hover', async ({ page }) => {	const box = page.locator('.toolbar-border[data-region="top"] .palette-default-command-box')
+test('horizontal command box hides its input until hover', async ({ page }) => {
+	const box = page.locator('.toolbar-border[data-region="top"] .palette-default-command-box')
 	const input = box.locator('.palette-default-command-input')
 	const text = box.locator('.palette-default-command-text')
 
@@ -180,9 +181,9 @@ test('theme tool cycles the value and toggles the light class on <html>', async 
 	const top = page.locator('.toolbar-border[data-region="top"]')
 	const tool = top.locator('[data-testid="theme-tool"]')
 	await expect(tool).toBeVisible()
-	// Single track: exactly one toolbar up top, holding the theme tool.
+	// Two toolbars up top: the main bar plus the theme-tool bar.
 	const topToolbars = top.locator(':scope > .toolbar, :scope .toolbar-track-slot .toolbar')
-	await expect(topToolbars).toHaveCount(1)
+	await expect(topToolbars).toHaveCount(2)
 	const html = page.locator('html')
 	const icon = tool.locator('.palette-default-icon')
 	// Default is `system` (resolves via `prefers-color-scheme` — light in
@@ -236,9 +237,7 @@ test('horizontal select shows icon + label and opens a full-text list on click',
 	await page.keyboard.press('Escape')
 })
 
-test('vertical select stacks tool + value icons and extends to text on hover', async ({
-	page,
-}) => {
+test('vertical select stacks tool + value icons and extends to text on hover', async ({ page }) => {
 	// The left border hosts the `colonyTheme` select (enum, tool icon 🪐).
 	const box = page.locator(
 		'.toolbar-border[data-region="left"] .palette-default-select.palette-default-layout-vertical'

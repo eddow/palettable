@@ -32,8 +32,16 @@ async function openConsole(page: import('@playwright/test').Page) {
 // centered console overlay.
 async function dragOntoTool(page: import('@playwright/test').Page, index: number): Promise<void> {
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
-	const guard = border.locator('.toolbar-item-guard').nth(index)
-	const target = border.locator('.toolbar-item').nth(index)
+	// Border-scoped: drawer popups are hierarchical children with their own
+	// guards/items — drag gestures target the real border toolbar only.
+	const guard = border
+		.locator(
+			'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item > .toolbar-item-guard'
+		)
+		.nth(index)
+	const target = border
+		.locator('> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item')
+		.nth(index)
 	const guardBox = await guard.boundingBox()
 	const targetBox = await target.boundingBox()
 	expect(guardBox).not.toBeNull()
@@ -59,8 +67,15 @@ test('dragging the last tool highlights the track gap after the toolbar', async 
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
-	const bar = border.locator('.toolbar').first()
-	await expect(border.locator('.toolbar-item-guard').nth(3)).toBeVisible()
+	const bar = border.locator('> .toolbar-track > .toolbar-track-slot > .toolbar').first()
+	// Border-scoped guards (drawer popup carries its own hierarchical set).
+	await expect(
+		border
+			.locator(
+				'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item > .toolbar-item-guard'
+			)
+			.nth(3)
+	).toBeVisible()
 	try {
 		await dragOntoTool(page, 3)
 		// The TB-gap after the dragged tool stays dark (a DZ beside a
@@ -91,8 +106,14 @@ test('dragging the first tool highlights the track gap before the toolbar', asyn
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
-	const bar = border.locator('.toolbar').first()
-	await expect(border.locator('.toolbar-item-guard').first()).toBeVisible()
+	const bar = border.locator('> .toolbar-track > .toolbar-track-slot > .toolbar').first()
+	await expect(
+		border
+			.locator(
+				'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item > .toolbar-item-guard'
+			)
+			.first()
+	).toBeVisible()
 	try {
 		await dragOntoTool(page, 0)
 		// The TB-gap before the dragged tool stays dark …

@@ -87,12 +87,12 @@ describe('drawer + command-box shells', () => {
 		expect(trigger.classList.contains('palette-default-region-left')).toBe(true)
 	})
 
-	it('drawer popup shell is overlay + dialog popup', () => {
-		const overlay = elementFromHtml(drawerPopupShellTemplate('horizontal'))
-		expect(overlay.getAttribute('role')).toBe('presentation')
-		const popup = overlay.querySelector('.palettable-drawer__popup')
-		expect(popup?.classList.contains('is-horizontal')).toBe(true)
-		expect(popup?.getAttribute('role')).toBe('dialog')
+	it('drawer popup shell is a hidden dialog popup (hierarchical, no overlay)', () => {
+		const popup = elementFromHtml(drawerPopupShellTemplate('horizontal'))
+		expect(popup.classList.contains('palettable-drawer__popup')).toBe(true)
+		expect(popup.classList.contains('is-horizontal')).toBe(true)
+		expect(popup.getAttribute('role')).toBe('dialog')
+		expect(popup.hasAttribute('hidden')).toBe(true)
 	})
 
 	it('command-box shell carries combobox testids', () => {

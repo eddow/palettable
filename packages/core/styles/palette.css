@@ -238,6 +238,15 @@
 	min-height: 0;
 }
 
+/* Hierarchical drawer popups escape the toolbar's flex row/column: the
+ * wrapper is the flex item, the popup floats above it (center-seeking). */
+.toolbar-item > .palettable-drawer {
+	position: relative;
+	display: inline-flex;
+	min-width: 0;
+	min-height: 0;
+}
+
 .toolbar-item-guard {
 	position: absolute;
 	inset: -3px;
@@ -450,8 +459,22 @@
 	min-width: var(--palette-toolbar-perpendicular);
 }
 
-/* ── Drawer Popup ── */
+/* ── Drawer (hierarchical) ── */
+/* The popup is a hidden/shown child of the tool wrapper (sibling of the
+ * trigger), positioned absolutely toward the IDE center. No body portal,
+ * no JS repositioning — the side comes from `from-{region}` on the
+ * wrapper, stamped from the parent region at render time. */
 
+.palettable-drawer {
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 auto;
+	min-width: 0;
+	min-height: 0;
+}
+
+/* Legacy body-portal overlay (svelte oracle only — vanilla renders no
+ * overlay since the hierarchical popup toggles `hidden` in place). */
 .palettable-drawer__overlay {
 	position: fixed;
 	inset: 0;
@@ -468,7 +491,7 @@
 }
 
 .palettable-drawer__popup {
-	position: fixed;
+	position: absolute;
 	z-index: 211;
 	padding: 0.25rem;
 	border: 1px solid rgba(148, 163, 184, 0.38);
@@ -479,10 +502,35 @@
 	max-height: min(70vh, 24rem);
 	overflow-y: auto;
 	overflow-x: hidden;
-	/* Body-portaled: outside `.palette-ide`, so re-declare the sizing var
-	 * here — drawer children size themselves off it (stepper value stretch,
-	 * square vertical triggers). */
+	/* Hierarchical: inside `.palette-ide`, so the sizing var inherits.
+	 * Kept as a fallback for body-portaled popups (svelte oracle). */
 	--palette-toolbar-perpendicular: 2.5rem;
+}
+
+.palettable-drawer__popup[hidden] {
+	display: none;
+}
+
+/* Center-seeking sides: left opens right, right opens left, top opens
+ * down, bottom opens up. Nested drawers recurse via their own wrapper. */
+.palettable-drawer.from-left > .palettable-drawer__popup {
+	left: calc(100% + 6px);
+	top: 0;
+}
+
+.palettable-drawer.from-right > .palettable-drawer__popup {
+	right: calc(100% + 6px);
+	top: 0;
+}
+
+.palettable-drawer.from-top > .palettable-drawer__popup {
+	top: calc(100% + 6px);
+	left: 0;
+}
+
+.palettable-drawer.from-bottom > .palettable-drawer__popup {
+	bottom: calc(100% + 6px);
+	left: 0;
 }
 
 /* Suppress toolbar ::before overflow inside popups (avoids phantom scrollbar) */

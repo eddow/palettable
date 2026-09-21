@@ -211,8 +211,10 @@ export function commandEmptyTemplate(text: string): string {
 }
 
 // ── Drawer shells ───────────────────────────────────────────────────────────
-// Static trigger + overlay + popup skeleton. The caller renders the child
-// track into the popup and owns open/close + repositioning.
+// Hierarchical drawer: trigger + popup are siblings in a `.palettable-drawer`
+// wrapper (child of the tool node). The caller renders the child track into
+// the popup and toggles `hidden` — no body portal, no JS repositioning.
+// The popup side comes from `from-{region}` on the wrapper (CSS only).
 
 export function drawerTriggerShellTemplate(options: {
 	label: string
@@ -243,9 +245,8 @@ export function drawerTriggerShellTemplate(options: {
 
 export function drawerPopupShellTemplate(childAxis: 'horizontal' | 'vertical'): string {
 	return (
-		`<div class="palettable-drawer__overlay" role="presentation">` +
 		`<div class="palettable-drawer__popup is-${childAxis}" data-placement="center"` +
-		` role="dialog" tabindex="-1"></div></div>`
+		` role="dialog" tabindex="-1" hidden=""></div>`
 	)
 }
 

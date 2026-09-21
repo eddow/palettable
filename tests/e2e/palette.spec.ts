@@ -40,7 +40,8 @@ test('drawer opens with axis inversion and closes on Escape', async ({ page }) =
 	// Left drawer inverts to a horizontal popup.
 	await expect(popup.first()).toHaveClass(/is-horizontal/)
 	await page.keyboard.press('Escape')
-	await expect(popup).toHaveCount(0)
+	// Hierarchical drawer: popup stays in the DOM, toggled hidden.
+	await expect(popup).toBeHidden()
 })
 
 test('inspector shows presentation-only configurator for the selected item', async ({ page }) => {

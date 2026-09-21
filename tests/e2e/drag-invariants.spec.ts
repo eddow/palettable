@@ -15,13 +15,15 @@ async function openConsole(page: import('@playwright/test').Page) {
 }
 
 // Movement was stripped for a restart from scratch: no drag sessions run.
-// This locks the static edit-mode layout (5 tools, no empty containers).
+// This locks the static edit-mode layout (6 tools on the top border: 5 in
+// the main bar + theme in its own bar — no empty containers).
 test('edit mode shows the full toolbar with no empty containers', async ({ page }) => {
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
 	const topBorder = page.locator('.toolbar-border[data-region="top"]').first()
-	await expect(topBorder.locator('.toolbar-item-guard')).toHaveCount(5)
-	await expect(topBorder.locator('.toolbar-item')).toHaveCount(5)
+	const topBar = topBorder.locator('> .toolbar-track > .toolbar-track-slot > .toolbar')
+	await expect(topBar.locator(':scope > .toolbar-item > .toolbar-item-guard')).toHaveCount(6)
+	await expect(topBar.locator(':scope > .toolbar-item')).toHaveCount(6)
 	const empties = await page.evaluate(() => {
 		const emptyToolbars = Array.from(document.querySelectorAll('.toolbar')).filter(
 			(toolbar) => toolbar.querySelectorAll('.toolbar-item').length === 0

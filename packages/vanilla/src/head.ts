@@ -591,7 +591,11 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 	return box
 }
 
-/** Render a `drawer` trigger item. The popup mounts into `document.body`. */
+/** Render a `drawer` trigger item. Hierarchical: trigger + popup are
+ * siblings in a `.palettable-drawer.from-{region}` wrapper (child of the
+ * tool node). The popup toggles `hidden` — no body portal, no JS
+ * repositioning; the side is CSS-only from the parent region
+ * (center-seeking: left→right, right→left, top→down, bottom→up). */
 export function renderDrawer(context: HeadContext): HTMLElement {
 	const { item, surface } = context
 	const config = ((item as { config?: Record<string, unknown> }).config ?? {}) as Record<
@@ -621,54 +625,68 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 
 	const childAxis = surface.axis === 'vertical' ? 'horizontal' : 'vertical'
 	const childRegion: PaletteRegion = childAxis === 'vertical' ? 'left' : 'top'
-	let overlay: HTMLElement | null = null
-	let popup: HTMLElement | null = null
+	const parentRegion = context.region ?? surface.region ?? 'top'
+	const wrapper = elementFromHtml(`<div class="palettable-drawer from-${parentRegion}"></div>`)
+	const popup = elementFromHtml(drawerPopupShellTemplate(childAxis))
+	if (!popup.classList.contains('palettable-drawer__popup'))
+		throw new Error('drawer popup shell missing node')
+	// Drawer content is one track (several toolbars in line along the
+	// child axis); render it like a border track with gaps.
+	const track: Track = isDrawerItem(item) ? item.toolbar : []
+	const inner =
+		context.renderToolbar?.(track, childAxis, childRegion) ?? document.createElement('div')
+	popup.append(inner)
+	wrapper.append(trigger, popup)
+
+	let open = false
 	const close = () => {
-		overlay?.remove()
-		overlay = null
-		popup = null
+		if (!open) return
+		open = false
+		popup.hidden = true
 		trigger.setAttribute('aria-expanded', 'false')
 		if (chevron) chevron.textContent = '▸'
 		context.onCloseDrawer?.(trigger)
 	}
-	const reposition = () => {
-		if (!popup) return
-		const rect = trigger.getBoundingClientRect()
-		const offset = 6
-		popup.style.left = `${(surface.axis === 'vertical' ? rect.right : rect.left) + offset}px`
-		popup.style.top = `${(surface.axis === 'vertical' ? rect.top : rect.bottom) + offset}px`
-	}
-	trigger.addEventListener('click', () => {
-		if (overlay) {
-			close()
-			return
-		}
-		overlay = elementFromHtml(drawerPopupShellTemplate(childAxis))
-		popup = overlay.querySelector('.palettable-drawer__popup')
-		if (!(popup instanceof HTMLElement)) throw new Error('drawer popup shell missing node')
-		reposition()
-		// Drawer content is one track (several toolbars in line along the
-		// child axis); render it like a border track with gaps.
-		const track: Track = isDrawerItem(item) ? item.toolbar : []
-		const inner =
-			context.renderToolbar?.(track, childAxis, childRegion) ?? document.createElement('div')
-		popup.append(inner)
-		overlay.addEventListener('click', close)
-		popup.addEventListener('click', (event) => event.stopPropagation())
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape') return
-			close()
-			trigger.focus()
-		}
-		window.addEventListener('keydown', onKey, { once: true })
-		document.body.append(overlay)
+	const openPopup = () => {
+		open = true
+		popup.hidden = false
+		trigger.setAttribute('aria-expanded', 'true')
+		if (chevron) chevron.textContent = '▾'
 		if (surface.axis === 'horizontal' || surface.axis === 'vertical') {
 			context.onOpenDrawer?.(trigger, popup, surface.axis)
 		}
-		trigger.setAttribute('aria-expanded', 'true')
-		if (chevron) chevron.textContent = '▾'
+	}
+	trigger.addEventListener('click', () => {
+		if (open) close()
+		else openPopup()
 	})
-	return trigger
+	// Outside-click closes (capture): clicks inside the wrapper (trigger,
+	// popup, nested drawers) are ignored. Self-removes when the wrapper
+	// leaves the DOM (re-render while open) so no listener leaks.
+	const onDocumentClick = (event: MouseEvent) => {
+		if (!wrapper.isConnected) {
+			document.removeEventListener('click', onDocumentClick, true)
+			window.removeEventListener('keydown', onEscape, true)
+			return
+		}
+		if (!open || popup.hidden) return
+		if (wrapper.contains(event.target as Node | null)) return
+		close()
+	}
+	const onEscape = (event: KeyboardEvent) => {
+		if (!wrapper.isConnected) {
+			document.removeEventListener('click', onDocumentClick, true)
+			window.removeEventListener('keydown', onEscape, true)
+			return
+		}
+		if (event.key !== 'Escape' || !open) return
+		event.stopPropagation()
+		close()
+		trigger.focus()
+	}
+	document.addEventListener('click', onDocumentClick, true)
+	window.addEventListener('keydown', onEscape, true)
+	return wrapper
 }
 
 /** Dispatch an item to its head editor by explicit `editor` id. */

@@ -23,11 +23,16 @@ async function openConsole(page: import('@playwright/test').Page) {
 	await expect(page.getByTestId('console-overlay')).toBeVisible()
 }
 
-/** Read the live tool order of the first left-border toolbar. */
+/** Read the live tool order of the first left-border toolbar (drawer
+ * popups are hierarchical children of the border — excluded). */
 async function toolOrder(page: import('@playwright/test').Page): Promise<(string | null)[]> {
 	return page
 		.evaluate(() =>
-			[...document.querySelectorAll('.toolbar-border[data-region="left"] .toolbar')].map((bar) =>
+			[
+				...document.querySelectorAll(
+					'.toolbar-border[data-region="left"] > .toolbar-track > .toolbar-track-slot > .toolbar'
+				),
+			].map((bar) =>
 				[...bar.querySelectorAll(':scope > .toolbar-item')].map(
 					(item) => item.getAttribute('data-tool') ?? item.getAttribute('data-editor')
 				)
@@ -54,7 +59,11 @@ test('hovering a dark gap never re-organises tools', async ({ page }) => {
 	// never-beside-a-dragged-tool rule. Hover it directly (gaps are
 	// zero-size until highlighted, so step onto its centre via bounding
 	// box — a dark gap has no size, but the pointer still lands on it).
-	const gap = border.locator('.toolbar-item-space.toolbar-drop-zone[data-item-space-index="1"]')
+	// Scoped to the border track: drawer popups are hierarchical children
+	// carrying their own item spaces.
+	const gap = border.locator(
+		'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item-space.toolbar-drop-zone[data-item-space-index="1"]'
+	)
 	const guardBox = await guard.boundingBox()
 	const gapBox = await gap.boundingBox()
 	expect(guardBox).not.toBeNull()
@@ -78,13 +87,15 @@ test('hovering a dark gap never re-organises tools', async ({ page }) => {
 		// The gap stays dark …
 		expect(
 			await border
-				.locator('.toolbar-item-space.toolbar-drop-zone[data-item-space-index="1"].highlighted')
+				.locator(
+					'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item-space.toolbar-drop-zone[data-item-space-index="1"].highlighted'
+				)
 				.count()
 		).toBe(0)
 		// … and the order is untouched (no re-organisation on a dark DZ).
 		await page.waitForTimeout(400)
 		expect(await toolOrder(page)).toEqual(before)
-		expect(await border.locator('.toolbar-track-slot').count()).toBe(1)
+		expect(await border.locator('> .toolbar-track > .toolbar-track-slot').count()).toBe(1)
 	} finally {
 		await page.mouse.up()
 	}

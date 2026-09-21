@@ -31,7 +31,9 @@ test('hovering without a drag highlights no drop-zone', async ({ page }) => {
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
-	const tools = border.locator('.toolbar-item')
+	// Border-scoped: drawer popups are hierarchical children with their own
+	// items/tracks — hover sweeps target the real border toolbar only.
+	const tools = border.locator('> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item')
 	await expect(tools.first()).toBeVisible()
 	const count = await tools.count()
 	expect(count).toBeGreaterThan(0)
@@ -44,7 +46,7 @@ test('hovering without a drag highlights no drop-zone', async ({ page }) => {
 		expect(await border.locator('.toolbar-drop-zone.highlighted').count()).toBe(0)
 	}
 	// Sweep across the track backgrounds too (flanking-stack candidates).
-	const tracks = border.locator('.toolbar-track')
+	const tracks = border.locator('> .toolbar-track')
 	const trackCount = await tracks.count()
 	for (let i = 0; i < trackCount; i += 1) {
 		const box = await tracks.nth(i).boundingBox()

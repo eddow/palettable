@@ -1606,7 +1606,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		return bar
 	}
 
-	/** Render a drawer child track (one track, several toolbars in line). */
+	/** Render a drawer child track (one track, several toolbars in line).
+	 * Drawer content lives inside the tool wrapper (hierarchical popup),
+	 * so it is tagged `data-drawer-track` to keep border-scoped queries
+	 * (drag hit-testing, e2e locators) on the real border toolbars. */
 	function renderDrawerTrack(
 		track: Track,
 		axis: 'horizontal' | 'vertical',
@@ -1614,6 +1617,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		editing: boolean
 	): HTMLElement {
 		const wrap = el('div', 'toolbar-track')
+		wrap.dataset.drawerTrack = 'true'
 		const gap = (index: number) => {
 			const gapEl = el('div', 'toolbar-track-space toolbar-drop-zone')
 			gapEl.dataset.paletteId = paletteId
@@ -1981,8 +1985,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		renderConsoleDetails()
 	}
 
-	/** Resolve the live item object behind a rendered wrapper (identity scan). */
+	/** Resolve the live item object behind a rendered wrapper (identity scan).
+	 * Drawer-child wrappers live inside a hierarchical popup
+	 * (`[data-drawer-track]`): they have no border origin, so they resolve
+	 * to `undefined` (no inspect-drag — mirrors the `createDrag` catch in
+	 * `startToolDrag`/`startToolbarDrag`). */
 	function itemOfWrapper(wrapper: HTMLElement): ToolbarItem | undefined {
+		if (wrapper.closest('[data-drawer-track]')) return undefined
 		const live = core.layout.getLayout()
 		const itemIndex = Number(wrapper.dataset.itemIndex ?? '-1')
 		if (!Number.isInteger(itemIndex) || itemIndex < 0) return undefined
@@ -2978,7 +2987,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			dropAllBindings()
 			keyWindow.removeEventListener('keydown', onKeyDown)
 			consoleHost.textContent = ''
-			for (const overlay of document.querySelectorAll('.palettable-drawer__overlay')) {
+			// Hierarchical drawers die with their trigger (no body portal),
+			// so nothing to sweep — the svelte-oracle overlay selector is
+			// kept only for foreign portaled nodes, if any.
+			for (const overlay of document.querySelectorAll('body > .palettable-drawer__overlay')) {
 				overlay.remove()
 			}
 			core.dispose()
