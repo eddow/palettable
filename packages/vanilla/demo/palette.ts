@@ -32,7 +32,6 @@ export type DemoState = {
 	colonyTheme: 'mars' | 'neptune' | 'void' | 'matrix'
 	alertLevel: 'green' | 'yellow' | 'red' | 'black'
 	powerPriority: 'research' | 'defense' | 'economy' | 'balanced'
-	theme: 'light' | 'dark' | 'system'
 	gameSpeed: number
 	taxRate: number
 	solarEfficiency: number
@@ -45,6 +44,8 @@ export type DemoState = {
  * Single consumer defaults object: the only reset/dirty source.
  * Reset = `core.setMany(CONSUMER_DEFAULTS)`; dirty = diff of live bag
  * values vs these defaults. Point definitions carry no `defaultValue`.
+ * `theme` is a nothing-point system value (document root class) — it never
+ * enters the bag, so it stays out of defaults/dirty/reset.
  */
 export const CONSUMER_DEFAULTS = {
 	autoOxygen: true,
@@ -53,7 +54,6 @@ export const CONSUMER_DEFAULTS = {
 	colonyTheme: 'mars',
 	alertLevel: 'green',
 	powerPriority: 'balanced',
-	theme: 'system',
 	gameSpeed: 1,
 	taxRate: 15,
 	solarEfficiency: 1.2,
@@ -176,17 +176,40 @@ export function demoPoints(): AnyPoint[] {
 		{
 			id: 'theme',
 			label: 'Theme',
-			type: 'enum',
+			type: 'nothing',
 			icon: '🎨',
 			categories: ['appearance'],
-			keywords: ['color'],
-			constraints: {
-				options: [
-					{ value: 'light', icon: '☀️', label: 'Light' },
-					{ value: 'dark', icon: '🌙', label: 'Dark' },
-					{ value: 'system', icon: '💻', label: 'System' },
-				],
-			},
+			keywords: ['color', 'theme', 'dark', 'light', 'system'],
+			options: [
+				{ value: 'light', icon: '☀️', label: 'Light' },
+				{ value: 'dark', icon: '🌙', label: 'Dark' },
+				{ value: 'system', icon: '💻', label: 'System' },
+			],
+		},
+		{
+			id: 'commandBox',
+			label: 'Command',
+			type: 'nothing',
+			icon: '⌘',
+			categories: ['system'],
+			keywords: ['command', 'search', 'run', 'palette'],
+		},
+		{
+			id: 'moreDrawer',
+			label: 'More',
+			type: 'nothing',
+			icon: '🗂',
+			categories: ['system'],
+			keywords: ['drawer', 'more', 'nested'],
+		},
+		{
+			id: 'missionTime',
+			label: 'Mission time',
+			type: 'nothing',
+			icon: '⏱️',
+			categories: ['colony'],
+			keywords: ['mission', 'time', 'status', 'clock'],
+			uses: ['mission'],
 		},
 		{
 			id: 'taxRate',
@@ -317,6 +340,7 @@ const rwComboboxLayout: Borders = {
 				space: 0.1,
 				toolbar: [
 					{
+						tool: 'commandBox',
 						editor: 'commandBox',
 						config: { icon: '⌘', label: 'Command', hint: 'Search and run a command' },
 					},
@@ -348,7 +372,7 @@ const rwComboboxLayout: Borders = {
 					{
 						tool: 'theme',
 						editor: 'theme',
-						config: { icon: '🎨', label: 'Theme', hint: 'Pointless theme cycle' },
+						config: { icon: '🎨', label: 'Theme', hint: 'Theme cycle (nothing-point)' },
 					},
 				],
 			},
@@ -379,6 +403,7 @@ const rwComboboxLayout: Borders = {
 						config: { icon: '🔌', label: 'Power focus', hint: 'Head segmented (enum)' },
 					},
 					{
+						tool: 'moreDrawer',
 						editor: 'drawer',
 						toolbar: [
 							{
@@ -409,6 +434,7 @@ const rwComboboxLayout: Borders = {
 				space: 0,
 				toolbar: [
 					{
+						tool: 'commandBox',
 						editor: 'commandBox',
 						config: {
 							icon: '⌘',
@@ -470,8 +496,9 @@ const rwComboboxLayout: Borders = {
 						config: { icon: '⚡', label: 'Hyper-tick', hint: 'Compact icon toggle' },
 					},
 					{
+						tool: 'missionTime',
 						editor: 'status',
-						config: { icon: '⏱️', label: 'Mission time', hint: 'Pointless status readout' },
+						config: { icon: '⏱️', label: 'Mission time', hint: 'Status readout (nothing-point)' },
 					},
 					{
 						tool: 'taxRate',

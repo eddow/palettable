@@ -5,6 +5,9 @@
  * presenter view-model (button/toggle/select/segmented/slider/stepper/stars/
  * status/theme/commandBox/drawer). Presentation only: all reads go through core
  * presenters, all writes through `core.run(spec)` / `core.values.set`.
+ * Status/commandBox/drawer/theme tools bind nothing-points (1:1 — one tool,
+ * one nothing-point whose `uses` names its context); display state comes
+ * from the resolved bags, never from `core.values`.
  * Mirrors the svelte default head (`head/editors/*.svelte`) + the demo
  * overrides (`DemoSlider` value badge, `StarsEditor` rating row).
  */
@@ -100,8 +103,10 @@ export function boundOf(
 /**
  * Read the live value for a bound point: dual-source precedence
  * (context-display) — first non-root used bag holding the id wins, else
- * the root value. Absent bag / absent key → root. Shared by initial
- * render (`boundOf`) and in-place updates (`ide.ts:updateToolNode`).
+ * the root value. Absent bag / absent key → root. Nothing-points carry no
+ * value (always `undefined` — display state comes from the bags).
+ * Shared by initial render (`boundOf`) and in-place updates
+ * (`ide.ts:updateToolNode`).
  */
 export function liveValue(core: PaletteCore, point: AnyPoint | undefined): unknown {
 	if (point === undefined || !isValuedPoint(point)) return undefined
@@ -401,16 +406,33 @@ export function renderStars(context: HeadContext): HTMLElement {
 	return group
 }
 
-/** Render a `theme` (pointless cycle) item. Binds the `theme` enum point
- * (`light`/`dark`/`system`) and applies the resolved theme to the document
- * root on render + every click — the standard `<html>` class toggle
+/** Read the current theme setting from the document root (`data-theme`, default `system`). Exported for `ide.ts` in-place updates. */
+export function readThemeSetting(): 'light' | 'dark' | 'system' {
+	if (typeof document === 'undefined') return 'system'
+	const raw = document.documentElement.dataset.theme
+	return raw === 'light' || raw === 'dark' ? raw : 'system'
+}
+
+/** Parse the `theme=<next>` cycle spec into its next value. */
+function nextCycleValue(cycle: string): 'light' | 'dark' | 'system' {
+	const next = cycle.split('=')[1]
+	return next === 'light' || next === 'dark' ? next : 'system'
+}
+
+/** Render a `theme` tool bound to the enum-shaped `theme` nothing-point
+ * (`light`/`dark`/`system` options). Get/set lives adapter-side: the
+ * current setting is read from the document root (`data-theme` /
+ * `palette-default-theme-light` class, `system` default) and writes go
+ * through `applyThemeSetting` — never through `core.values`.
+ * Applies the resolved theme to the document root on render + every click
  * (`head-light.css` keys off `.palette-default-theme-light`, so
  * body-portaled drawer popups follow the same switch). Icon-value only
  * (current option icon, no text — like the toggle): the button is a compact
  * icon square. Skeleton renders the tool icon only. */
 export function renderTheme(context: HeadContext): HTMLElement {
 	const { core, item } = context
-	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const { point, bags } = boundOf(core, pointIdOf(item))
+	const value = readThemeSetting()
 	const view = themePresenter(item, { point, value, bags })
 	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone, compact: true }),
@@ -432,32 +454,34 @@ export function renderTheme(context: HeadContext): HTMLElement {
 	btn.addEventListener('click', () => {
 		// Recompute the cycle at click time: `view.cycle` is captured from
 		// render and goes stale after the first click (system→light would
-		// replay forever). Fresh read → fresh `theme=<next>` spec.
+		// replay forever). Fresh read → apply next value to the root, then
+		// refresh the icon in place (theme has no core value subscription —
+		// the document root is the source of truth).
 		const fresh = boundOf(core, pointIdOf(item))
-		const next = themePresenter(item, fresh)
-		core.run(next.cycle)
-		if (typeof document !== 'undefined') {
-			const { value: applied } = boundOf(core, pointIdOf(item))
-			applyThemeSetting(
-				document.documentElement,
-				typeof applied === 'string' ? (applied as 'light' | 'dark' | 'system') : undefined
-			)
-		}
+		const next = themePresenter(item, { ...fresh, value: readThemeSetting() })
+		const applied = nextCycleValue(next.cycle)
+		applyThemeSetting(document.documentElement, applied)
+		const synced = themePresenter(item, { ...fresh, value: applied })
+		fillIcon(icon, synced.valueIcon)
+		btn.title = synced.title
 	})
 	return btn
 }
 
-/** Render a `status` (pointless readout) item. */
+/** Render a `status` tool bound to a nothing-point (read-only display from context bags). */
 export function renderStatus(context: HeadContext): HTMLElement {
-	const view = statusPresenter(context.item)
-	const [span, icon, value] = sel(
+	const { core, item } = context
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = statusPresenter(item, { point, value, bags })
+	const [span, icon, valueNode] = sel(
 		statusShellTemplate(view.tone),
 		'.palette-default-icon',
 		'.palette-default-status-value'
 	)
 	span.title = view.title
 	fillIcon(icon, view.icon)
-	value.textContent = view.value
+	valueNode.textContent = view.value
+	if (!view.can) span.setAttribute('aria-disabled', 'true')
 	return span
 }
 

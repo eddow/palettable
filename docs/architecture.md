@@ -330,7 +330,7 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   (command-box launcher, lockdown, life-support, shields, threat
   segmented), left (sim-speed slider, atmosphere select, power segmented +
   nested drawer), right (tax slider, solar stepper, satisfaction stars),
-  bottom (console, save, reset, hyper-tick, pointless status readout). `editorDefaults`
+  bottom (console, save, reset, hyper-tick, nothing-point status readout). `editorDefaults`
   covers the point families (`run`/`boolean`/`enum`/`number`).
 - `src/routes/+page.svelte` renders `Ide` with `$state` borders + a save/load
   layout button group. The work-zone shows every colony variable as pills + a

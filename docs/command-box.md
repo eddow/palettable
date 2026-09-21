@@ -3,7 +3,7 @@
 Vocabulary: the command-box (as command palette) lists **points**
 (`PaletteConfig.tools` data definitions, no layout) as executable commands;
 binding one to a toolbar creates a **tool**. `status` / `command-box` / `drawer`
-are **pointless tools** (no bound value). See `docs/core-concepts.md` for the glossary.
+are **nothing-point tools** (context plus enablement, no core value). See `docs/core-concepts.md` for the glossary.
 
 Builders and model live in `src/lib/palette/command-box.svelte.ts`. Console (headless core +
 head modal): `src/lib/palette/console.svelte.ts` + `src/lib/head/Console.svelte`.

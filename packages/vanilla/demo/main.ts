@@ -1,4 +1,4 @@
-import { ConsoleStore, PaletteCore, validateSerializedLayout } from '@palettable/core'
+import { ConsoleStore, PaletteCore, validateSerializedLayout, ValuesBag } from '@palettable/core'
 import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
 import '../../core/styles/palette.css'
 import '../../core/styles/head-default.css'
@@ -109,6 +109,13 @@ bindResetViaCore(() => {
 	demo.lastAction = 'Colony reset to defaults'
 })
 
+// Host-owned context bag for the `missionTime` nothing-point status
+// (`uses: ['mission']`). Single key — the presenter reads the first string
+// value. Registered before `createIDE` so the status renders live on first
+// paint instead of disabled + placeholder.
+const missionBag = new ValuesBag({ elapsed: '00:00' })
+core.setContext('mission', missionBag)
+
 const ide = createIDE(ideHost, {
 	core,
 	consoleStore,
@@ -163,7 +170,16 @@ function renderPills(): void {
 }
 
 function applyTheme(): void {
-	applyThemeSetting(document.documentElement, demo.theme)
+	// Theme is a nothing-point system value: the document root is the source
+	// of truth. Seed `system` on first load so the toggle has a defined start.
+	if (document.documentElement.dataset.theme === undefined) {
+		applyThemeSetting(document.documentElement, 'system')
+		return
+	}
+	applyThemeSetting(
+		document.documentElement,
+		document.documentElement.dataset.theme as 'light' | 'dark' | 'system'
+	)
 }
 
 // Per-tool DOM updates are owned by the IDE's own bindings; chrome
@@ -233,8 +249,10 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(
 const started = Date.now()
 window.setInterval(() => {
 	const elapsed = Math.floor((Date.now() - started) / 1000)
-	demo.missionElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
+	const formatted = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
+	demo.missionElapsed = formatted
 	chip.textContent = `⏱ ${demo.missionElapsed}`
+	missionBag.set('elapsed', formatted)
 }, 1000)
 
 // Demo always boots on "R/W + command box" (`initial` above): a stored

@@ -29,8 +29,9 @@
  * - **editor** = the *variant id* of a tool (`'button'`, `'toggle'`, …) plus
  *   its configuration panel. The core only manipulates variant ids and
  *   capability descriptors; adapters map ids to components.
- * - **pointless tools** = items binding no point: `status`, `command-box` and
- *   `drawer`. A drawer carries a nested `toolbar` (perpendicular to its
+ * - **nothing-point tools** = tools bound to nothing-points (`status`, `command-box`,
+ *   `drawer`, `theme` — one tool, one nothing-point whose `uses` names its
+ *   context). A drawer carries a nested `toolbar` (perpendicular to its
  *   parent — enforced by adapters, opaque to the core).
  */
 

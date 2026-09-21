@@ -101,7 +101,7 @@ describe('editorChoicesFor', () => {
 		expect(fallback.find((choice) => choice.selected)?.id).toBe('press')
 	})
 
-	it('uses the item family for pointless items', () => {
+	it('uses the item family for nothing-point tools', () => {
 		const choices = editorChoicesFor(
 			undefined,
 			{ axis: 'horizontal' },

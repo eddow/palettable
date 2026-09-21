@@ -142,7 +142,7 @@ describe('canonicalItemTool / itemFingerprint', () => {
 		expect(canonicalItemTool({ tool: 'alertLevel=red' })).toBe('alertLevel')
 		expect(canonicalItemTool({ tool: 'alertLevel|red' })).toBe('alertLevel')
 		expect(canonicalItemTool({ tool: 'alertLevel:inc' })).toBe('alertLevel')
-		expect(canonicalItemTool({ editor: 'status' })).toBe('')
+		expect(() => canonicalItemTool({ editor: 'status' } as never)).toThrow('no bound point')
 	})
 
 	it('resolves inline virtual definitions to their own id', () => {

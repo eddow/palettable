@@ -225,7 +225,7 @@ export function togglePresenter(item: ToolbarItem, bound: BoundDisplay): ToggleP
 	}
 }
 
-// ── Status (pointless) ──────────────────────────────────────────────────────
+// ── Status (nothing-point) ──────────────────────────────────────────────────
 
 export type StatusPresenter = {
 	readonly label: string
@@ -233,24 +233,43 @@ export type StatusPresenter = {
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
 	readonly value: string
+	/** False when the context bag is absent (`undefined` slot) — adapter renders disabled + placeholder. */
+	readonly can: boolean
 }
 
-/** View-model for a pointless status tool (read-only display, no bound point). */
-export function statusPresenter(item: ToolbarItem): StatusPresenter {
+/**
+ * View-model for a status tool bound to a nothing-point (read-only display).
+ * Reads display state from the resolved `uses` bags in order (first string
+ * value wins); `undefined` slot = context absent → `can: false`, value
+ * falls back to the tool label (adapter renders disabled + placeholder).
+ */
+export function statusPresenter(item: ToolbarItem, bound: BoundDisplay): StatusPresenter {
 	const meta = headMeta(item)
-	const config = ((item as { config?: unknown }).config ?? {}) as { value?: unknown }
-	const value =
-		typeof config.value === 'string' && config.value.length > 0 ? config.value : meta.label
+	const bags = bound.bags ?? []
+	let value: string | undefined
+	for (const bag of bags) {
+		if (bag === undefined) continue
+		for (const key of Object.keys(bag.asObject())) {
+			const candidate = bag.get(key)
+			if (typeof candidate === 'string' && candidate.length > 0) {
+				value = candidate
+				break
+			}
+		}
+		if (value !== undefined) break
+	}
+	const can = bags.length === 0 || bags.some((bag) => bag !== undefined)
 	return {
 		label: meta.label,
 		icon: meta.icon,
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
-		value,
+		value: value ?? meta.label,
+		can,
 	}
 }
 
-// ── Theme (pointless) ───────────────────────────────────────────────────────
+// ── Theme (nothing-point) ───────────────────────────────────────────────────────
 
 /** Resolved UI theme: explicit `light`/`dark`, or `system` (adapter resolves via media query). */
 export type ThemeValue = 'light' | 'dark' | 'system'
@@ -260,7 +279,7 @@ export type ThemePresenter = {
 	readonly icon: string | undefined
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
-	/** Current setting (`config.value`); `undefined` = skeleton (no value yet). */
+	/** Current setting (adapter-provided system value); `undefined` = skeleton (no value yet). */
 	readonly value: ThemeValue | undefined
 	/** Icon of the current option (`light` → ☀️ …), resolved from the bound enum point; falls back to the tool icon. */
 	readonly valueIcon: string | undefined
@@ -270,24 +289,17 @@ export type ThemePresenter = {
 
 const THEME_ORDER: readonly ThemeValue[] = ['light', 'dark', 'system']
 
-/** View-model for a pointless theme tool: cycles light → dark → system.
- * Skeleton: no `config.value` → `value: undefined` (adapters render unset).
- * Like `status`, it binds no point — the adapter applies the resolved theme
- * to the document root (standard `<html>` class toggle) itself. `valueIcon`
+/** View-model for a theme tool bound to an enum-shaped nothing-point: cycles light → dark → system.
+ * Skeleton: adapter-provided `bound.value` absent → `value: undefined` (adapters render unset).
+ * The adapter owns get/set on the document root (standard `<html>` class toggle). `valueIcon`
  * carries the current option's icon (icon-value, no text needed). */
 export function themePresenter(item: ToolbarItem, bound: BoundDisplay): ThemePresenter {
 	const meta = headMeta(item)
-	const raw =
-		typeof bound.value === 'string'
-			? bound.value
-			: (item as { config?: unknown }).config !== undefined
-				? ((item as { config?: unknown }).config as { value?: unknown }).value
-				: undefined
+	const raw = typeof bound.value === 'string' ? bound.value : undefined
 	const value = raw === 'light' || raw === 'dark' || raw === 'system' ? raw : undefined
 	const options =
-		bound.point !== undefined && isValuedPoint(bound.point) && bound.point.type === 'enum'
-			? (((bound.point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
-					?.options ?? []) as readonly EnumOption[])
+		bound.point !== undefined && bound.point.type === 'nothing'
+			? ((bound.point.options ?? []) as readonly EnumOption[])
 			: []
 	const current = options.find((option) => option.value === value)
 	const valueIcon = typeof current?.icon === 'string' ? current.icon : meta.icon

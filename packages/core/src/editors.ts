@@ -9,7 +9,7 @@ import type { AnyPoint } from './points.js'
 import { isActionPoint, isNothingPoint } from './points.js'
 import type { PointType } from './type.js'
 
-/** Point family: valued-type id, `'action'`, or `'item'` (pointless + nothing-point variants). */
+/** Point family: valued-type id, `'action'`, or `'item'` (nothing-point variants). */
 export type PointFamily = PointType | 'item'
 
 /** Capability descriptor for one editor variant (e.g. `'toggle'`, `'select'`). */

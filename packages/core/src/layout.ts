@@ -76,30 +76,27 @@ export type ToolToolbarItem<TPoint extends string = string, TEditor extends stri
 	 * Binding to the point: a string reference (`id`, `id=value`, `id:action`)
 	 * or an inline virtual definition (`StashDefinition` / `EnumFromDefinition`).
 	 * Inline definitions behave like the same definition registered under
-	 * their `id`, with lifetime scoped to this item.
+	 * their `id`, with lifetime scoped to this item. Nothing-points bind by
+	 * plain id (setter/action suffixes and inline virtuals never apply).
 	 */
 	readonly tool: PointTarget<TPoint>
 	editor?: TEditor
 	config?: Record<string, unknown>
 }
 
-/** Pointless item: binds no point (`status`, `command-box`, … — except `drawer`, see below). */
-export type PointlessToolbarItem<TEditor extends string = string> = {
-	readonly tool?: undefined
-	editor: TEditor
-	config?: Record<string, unknown>
-}
-
 /**
- * Drawer item — a pointless tool carrying a nested track.
+ * Drawer tool — a tool bound to a nothing-point carrying a nested track.
  * The child track renders **perpendicular** to its parent (enforced by adapters).
  * Content is one `Track`: several toolbars in line along the child axis with
  * track spaces between them (same node-identity map as borders).
  */
-export type DrawerToolbarItem<TConfig extends Record<string, unknown> = Record<string, unknown>> = {
-	readonly tool?: undefined
+export type DrawerToolbarItem<
+	TPoint extends string = string,
+	TConfig extends Record<string, unknown> = Record<string, unknown>,
+> = {
+	readonly tool: PointTarget<TPoint>
 	readonly editor: 'drawer'
-	readonly toolbar: Track
+	readonly toolbar: Track<TPoint>
 	config?: {
 		readonly icon?: IconToken
 		readonly label?: string
@@ -110,11 +107,10 @@ export type DrawerToolbarItem<TConfig extends Record<string, unknown> = Record<s
 	} & TConfig
 }
 
-/** Any item that can live in a toolbar. */
+/** Any item that can live in a toolbar: a bound tool, or a drawer tool with nested track. */
 export type ToolbarItem<TPoint extends string = string, TEditor extends string = string> =
 	| ToolToolbarItem<TPoint, TEditor>
-	| PointlessToolbarItem<TEditor>
-	| DrawerToolbarItem
+	| DrawerToolbarItem<TPoint>
 
 export type Toolbar<TPoint extends string = string, TEditor extends string = string> = ToolbarItem<
 	TPoint,
@@ -163,6 +159,12 @@ export type PaletteLayout<TPoint extends string = string, TEditor extends string
 // with no separate virtuals lookup.
 
 export type SerializedToolbarItem = {
+	/**
+	 * Bound point id (required on v2 writes). Optional only for
+	 * back-compat reads of pre-nothing-point payloads carrying bare
+	 * `{ editor: 'status' }` items — hydration migrates those to
+	 * `{ tool: editor, editor }` so every live tool is bound.
+	 */
 	readonly tool?: string | import('./virtual.js').VirtualPoint
 	readonly editor?: string
 	readonly config?: Record<string, unknown>
@@ -696,6 +698,7 @@ function toPaletteLayout(layout: AnySerializedLayout | PaletteLayout): PaletteLa
 function hydrateItem(item: SerializedToolbarItem): ToolbarItem {
 	if (item.toolbar !== undefined) {
 		return {
+			tool: typeof item.tool === 'string' ? item.tool : (item.tool ?? 'drawer'),
 			editor: 'drawer',
 			config: item.config === undefined ? undefined : { ...item.config },
 			toolbar: item.toolbar.map((slot) => ({
@@ -705,7 +708,10 @@ function hydrateItem(item: SerializedToolbarItem): ToolbarItem {
 		} as DrawerToolbarItem
 	}
 	if (item.tool === undefined)
+		// Back-compat: pre-nothing-point payloads carry bare
+		// `{ editor: 'status' }` — migrate to `{ tool: editor, editor }`.
 		return {
+			tool: item.editor ?? 'status',
 			editor: item.editor ?? 'status',
 			config: item.config === undefined ? undefined : { ...item.config },
 		}
@@ -736,6 +742,7 @@ function clonePaletteLayout(layout: PaletteLayout): PaletteLayout {
 function cloneItem(item: ToolbarItem): ToolbarItem {
 	if (isDrawerItem(item)) {
 		return {
+			tool: typeof item.tool === 'string' ? item.tool : cloneValue(item.tool),
 			editor: 'drawer',
 			config: item.config === undefined ? undefined : { ...item.config },
 			toolbar: item.toolbar.map((slot) => ({
@@ -744,11 +751,6 @@ function cloneItem(item: ToolbarItem): ToolbarItem {
 			})),
 		} as DrawerToolbarItem
 	}
-	if (item.tool === undefined)
-		return {
-			editor: item.editor,
-			config: item.config === undefined ? undefined : { ...item.config },
-		}
 	return {
 		// Strings are immutable; inline virtual definitions are deep-cloned
 		// (JSON-safe definition objects) so the clone shares no structure.
@@ -785,6 +787,7 @@ export function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 function serializeItem(item: ToolbarItem): SerializedToolbarItem {
 	if (isDrawerItem(item))
 		return {
+			tool: typeof item.tool === 'string' ? item.tool : cloneValue(item.tool),
 			editor: 'drawer',
 			config: item.config,
 			toolbar: item.toolbar.map((slot) => ({
@@ -802,7 +805,7 @@ function serializeItem(item: ToolbarItem): SerializedToolbarItem {
 	return { tool, editor: item.editor, config: item.config }
 }
 
-/** Null-safe drawer guard (a drawer is pointless + carries a nested toolbar). */
+/** Null-safe drawer guard (a drawer tool bound to a nothing-point + nested toolbar). */
 export function isDrawerItem(item: ToolbarItem | null | undefined): item is DrawerToolbarItem {
 	return (
 		item != null &&
@@ -2096,7 +2099,8 @@ export function moveToolbarToStack(
  * Canonical point id for a toolbar item: the string spec's point id
  * (setter `=`/`|` and action `:` suffixes stripped, so `alertLevel`,
  * `alertLevel=red`, and `alertLevel|red` fingerprint as the same point),
- * or the inline definition's own `id`. Pointless items fingerprint on `editor`.
+ * or the inline definition's own `id`. Every tool is bound, so a missing
+ * spec is a malformed item and throws `PaletteError`.
  */
 export function canonicalItemTool(item: ToolbarItem): string {
 	const spec = (item as { tool?: unknown }).tool
@@ -2108,12 +2112,12 @@ export function canonicalItemTool(item: ToolbarItem): string {
 		return spec.slice(0, cut)
 	}
 	if (spec !== null && typeof spec === 'object') return canonicalSpecId(spec as never) ?? ''
-	return ''
+	throw new PaletteError('canonicalItemTool: toolbar item has no bound point')
 }
 
 /**
- * Stable structural fingerprint of an instantiated tool: canonical point (or
- * pointless editor) + editor variant + stable-stringified config.
+ * Stable structural fingerprint of an instantiated tool: canonical point
+ * + editor variant + stable-stringified config.
  * Position is NOT part of the fingerprint — it is the container that makes
  * two identical fingerprints two distinct instances.
  */

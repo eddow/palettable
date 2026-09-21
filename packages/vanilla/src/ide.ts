@@ -49,6 +49,7 @@ import {
 	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
+	statusPresenter,
 	type Toolbar,
 	type ToolbarDrag,
 	type ToolbarItem,
@@ -62,7 +63,7 @@ import {
 import '@palettable/core'
 import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
-import { liveValue, renderHeadItem, surfaceForRegion } from './head.js'
+import { liveValue, readThemeSetting, renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
@@ -278,6 +279,14 @@ function updateToolNode(
 			}
 			return
 		}
+		case 'status': {
+			const view = statusPresenter(item, { point, value, bags })
+			const valueNode = node.querySelector('.palette-default-status-value')
+			if (valueNode && valueNode.textContent !== view.value) valueNode.textContent = view.value
+			if (view.can) node.removeAttribute('aria-disabled')
+			else node.setAttribute('aria-disabled', 'true')
+			return
+		}
 		case 'button': {
 			const spec =
 				typeof (item as { tool?: unknown }).tool === 'string'
@@ -292,7 +301,7 @@ function updateToolNode(
 			return
 		}
 		case 'theme': {
-			const view = themePresenter(item, { point, value, bags })
+			const view = themePresenter(item, { point, value: readThemeSetting(), bags })
 			const button = node.querySelector('button')
 			if (button instanceof HTMLButtonElement) {
 				button.title = view.title
@@ -307,7 +316,7 @@ function updateToolNode(
 				}
 			}
 			if (point !== undefined && typeof document !== 'undefined') {
-				applyThemeSetting(document.documentElement, view.value)
+				applyThemeSetting(document.documentElement, view.value ?? readThemeSetting())
 			}
 			return
 		}
@@ -455,10 +464,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * update — never a structural sync). Valued editors follow
 	 * `values.subscribe(id)`; action buttons follow `subscribeCan` flips;
 	 * context-bound tools (`uses`) additionally follow `subscribeContext`
-	 * (bag change → re-read dual-source value). The `theme` tool follows
-	 * its bound enum value so the document-root class stays in sync even
-	 * when the value changes elsewhere. Pointless tools without a point
-	 * (`status`/`commandBox`/`drawer`) bind nothing.
+	 * (bag change → re-read dual-source value). Nothing-point tools
+	 * (`status`/`commandBox`/`drawer`/`theme`) follow `subscribeContext`
+	 * for their used bags; `theme` additionally re-applies the document-root
+	 * class on every update (adapter-owned system value).
 	 */
 	function bindTool(content: HTMLElement, item: ToolbarItem, surface: SurfaceContext): void {
 		const editor = (item as { editor?: unknown }).editor
@@ -485,6 +494,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					if (id === point.id) update()
 				})
 			)
+		} else if (point !== undefined && !isValuedPoint(point)) {
+			// Nothing-point tools: re-render on context identity/key changes
+			// for their used bags (missing bag → disabled + placeholder).
+			if ((point.uses ?? []).length > 0) {
+				unsubs.push(
+					core.subscribeContext((bagName, _changed) => {
+						if (!(point.uses ?? []).includes(bagName)) return
+						update()
+					})
+				)
+			}
 		}
 		if (unsubs.length > 0) toolBindings.set(content, unsubs)
 	}

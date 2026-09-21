@@ -33,6 +33,11 @@ function points(): AnyPoint[] {
 	]
 }
 
+/** Points plus a boundable `drawer` nothing-point for drawer tests. */
+function pointsWithDrawer(): AnyPoint[] {
+	return [...points(), { id: 'drawer', label: 'Drawer', type: 'nothing' }]
+}
+
 const registry: EditorRegistry = {
 	boolean: {
 		toggle: { id: 'toggle', label: 'Toggle', families: ['boolean'], compact: true },
@@ -174,7 +179,7 @@ describe('golden render model', () => {
 	})
 
 	it('resolves drawers recursively with children', () => {
-		const core = new PaletteCore(points())
+		const core = new PaletteCore(pointsWithDrawer())
 		const layout: SerializedLayout = {
 			version: 2,
 			borders: {
@@ -183,7 +188,11 @@ describe('golden render model', () => {
 						{
 							space: 1,
 							toolbar: [
-								{ editor: 'drawer', toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }] },
+								{
+									tool: 'drawer',
+									editor: 'drawer',
+									toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }],
+								},
 							],
 						},
 					],
@@ -208,10 +217,10 @@ describe('golden render model', () => {
 	})
 
 	it(`rejects drawer nesting beyond ${RENDER_MAX_DEPTH}`, () => {
-		const core = new PaletteCore(points())
+		const core = new PaletteCore(pointsWithDrawer())
 		let toolbar: SerializedToolbarItem[] = [{ tool: 'theme' }]
 		for (let depth = 0; depth < RENDER_MAX_DEPTH + 1; depth++) {
-			toolbar = [{ editor: 'drawer', toolbar: [{ space: 1, toolbar }] }]
+			toolbar = [{ tool: 'drawer', editor: 'drawer', toolbar: [{ space: 1, toolbar }] }]
 		}
 		const layout: SerializedLayout = {
 			version: 2,

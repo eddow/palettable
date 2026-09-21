@@ -116,8 +116,7 @@ token, not a light-override selector.
 | `--pd-star*` / `--pd-drag-border` | `#facc15` / `#f59e0b` / accent dashed | unchanged |
 | `--pd-r-*` / `--pd-ease` / `--pd-slide` | `9/10/12/14/18px`, `120/140ms` | unchanged |
 
-The `theme` tool (a pointless cycle tool, like `status` but bound to the
-`theme` enum point) applies the resolved theme itself: the vanilla renderer
+The `theme` tool (an enum-shaped nothing-point tool, like `status` but presenting `light`/`dark`/`system` options) applies the resolved theme itself: the vanilla renderer
 (`renderTheme` + `updateToolNode` in `head.ts`/`ide.ts`, via
 `applyThemeSetting` in `theme.ts`) toggles `.palette-default-theme-light`
 on `<html>` on render + every value change, so the demo no longer needs its

@@ -32,7 +32,7 @@ import type {
 import { isDrawerItem, snapshotLayout, validateSerializedLayout } from './layout.js'
 import type { ServerPointDescriptor } from './palette.js'
 import type { ActionPoint, AnyPoint, AnyValuedPoint } from './points.js'
-import { isActionPoint, isValuedPoint } from './points.js'
+import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import { axisForRegion, drawerChildAxis, resolveEditorVariant } from './presenters.js'
 import { canonicalPointId, canonicalSpecId, isInlineSpec, parsePointSpec } from './specs.js'
 import type { VirtualPoint } from './virtual.js'
@@ -43,9 +43,9 @@ export const RENDER_MAX_DEPTH = 8
 
 /** One resolved toolbar item in the render tree. */
 export type ResolvedItem = {
-	/** Canonical point id (`canonicalPointId`), or `undefined` for pointless items. */
+	/** Canonical point id (`canonicalPointId`) — every tool is bound. */
 	readonly pointId: string | undefined
-	/** Point descriptor (no `run` closure), or `undefined` for pointless items. */
+	/** Point descriptor (no `run` closure) — nothing-points carry descriptor only. */
 	readonly descriptor: ServerPointDescriptor | undefined
 	/** Current value / enum-from key / stash pressed-state (see below). */
 	readonly value: unknown
@@ -221,20 +221,30 @@ type ResolveContext = {
 }
 
 function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
+	const bound = (item as { tool?: unknown }).tool
+	if (typeof bound !== 'string' && !isInlineSpec(bound))
+		throw new PaletteError('resolveRenderTree: toolbar item has no bound point')
 	if (isDrawerItem(item)) {
+		if (typeof bound !== 'string')
+			throw new PaletteError('resolveRenderTree: drawer must bind a nothing-point by id')
 		if (context.depth >= RENDER_MAX_DEPTH)
 			throw new PaletteError(`resolveRenderTree: drawer nesting exceeds ${RENDER_MAX_DEPTH}`)
+		const drawerParsed = parsePointSpec(bound)
+		const drawerDef = context.definitions.get(drawerParsed.pointId)
+		if (drawerDef === undefined || !isNothingPoint(drawerDef))
+			throw new PaletteError(`resolveRenderTree: drawer "${bound}" must bind a nothing-point`)
+		const { can: _drawerCan, ...drawerDescriptor } = drawerDef as Record<string, unknown>
 		const childAxis = drawerChildAxis(
 			context.surface.axis === 'vertical' ? 'vertical' : 'horizontal'
 		)
 		const childSurface: SurfaceContext = { axis: childAxis, region: context.surface.region }
 		return {
-			pointId: undefined,
-			descriptor: undefined,
+			pointId: drawerParsed.pointId,
+			descriptor: { ...drawerDescriptor } as ServerPointDescriptor,
 			value: undefined,
 			editor: 'drawer',
 			capability: lookupCapability(context, 'item', 'drawer'),
-			keystrokes: [],
+			keystrokes: findKeystrokesFor(context.keys, drawerParsed.pointId),
 			children: item.toolbar.map((slot) => ({
 				space: slot.space,
 				toolbar: {
@@ -246,23 +256,10 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 			config: item.config as Record<string, unknown> | undefined,
 		}
 	}
-	const tool = (item as { tool?: unknown }).tool
-	if (tool === undefined) {
-		return {
-			pointId: undefined,
-			descriptor: undefined,
-			value: undefined,
-			editor: (item as { editor?: string }).editor,
-			capability: lookupCapability(context, 'item', (item as { editor?: string }).editor),
-			keystrokes: [],
-			children: [],
-			config: (item as { config?: Record<string, unknown> }).config,
-		}
+	if (isInlineSpec(bound)) {
+		return resolveInlineItem(item, bound, context)
 	}
-	if (isInlineSpec(tool)) {
-		return resolveInlineItem(item, tool, context)
-	}
-	const spec = tool as string
+	const spec = bound as string
 	const parsed = parsePointSpec(spec)
 	const pointId = parsed.pointId
 	const virtual = context.virtuals.get(canonicalPointId(spec))
@@ -519,6 +516,7 @@ function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
 function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 	if (item.toolbar !== undefined) {
 		return {
+			tool: typeof item.tool === 'string' ? item.tool : (item.tool ?? 'drawer'),
 			editor: 'drawer',
 			config: item.config,
 			toolbar: item.toolbar.map((slot) => ({
@@ -528,7 +526,13 @@ function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 		} as ToolbarItem
 	}
 	if (item.tool === undefined) {
-		return { editor: item.editor ?? 'status', config: item.config } as ToolbarItem
+		// Back-compat: pre-nothing-point payloads carry bare
+		// `{ editor: 'status' }` — migrate to `{ tool: editor, editor }`.
+		return {
+			tool: item.editor ?? 'status',
+			editor: item.editor ?? 'status',
+			config: item.config,
+		} as ToolbarItem
 	}
 	return { tool: item.tool, editor: item.editor, config: item.config } as ToolbarItem
 }

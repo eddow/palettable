@@ -5,7 +5,7 @@ layout — e.g. the fact *alert* can be `green`/`yellow`/`red`); **tools** are
 the toolbar-bound controls that modify a point (`{ tool: spec, editor?,
 config? }` items resolved to a presenter + head component); **editors** are the
 configuration panels (`BaseConfigurator`, rendered in the console *Details*
-panel). `status`, `commandBox`, `drawer`, and `theme` are **pointless tools**
+panel). `status`, `commandBox`, `drawer`, and `theme` are **nothing-point tools**
 (`theme` binds the `theme` enum point but owns no layout — it writes the
 resolved theme onto `<html>` directly). See `docs/core-concepts.md` for the full glossary.
 
@@ -29,22 +29,20 @@ lacks — a play/rating row). Together they prove both replacement and extension
 | enum | `segmented` | `selectPresenter` | `head/editors/SegmentedEditor.svelte` | `BaseConfigurator` |
 | number | `slider` | `sliderPresenter` | `head/editors/SliderEditor.svelte` | `BaseConfigurator` |
 | number | `stepper` | `sliderPresenter` | `head/editors/StepperEditor.svelte` | `BaseConfigurator` |
-| item (pointless tool, no bound value) | `commandBox` | `commandBoxPresenter` | `head/editors/CommandBoxEditor.svelte` | `BaseConfigurator` |
-| item (pointless tool, no bound value) | `drawer` | — (core portal) | `palette/components/DrawerEditor.svelte` (reused, not duplicated) | `BaseConfigurator` |
-| item (pointless tool, no bound value) | `status` | `statusPresenter` | `head/editors/StatusEditor.svelte` | `BaseConfigurator` |
-| item (pointless cycle tool, binds the `theme` enum point) | `theme` | `themePresenter` | vanilla `renderTheme` (svelte `ThemeEditor` pending — svelte frozen until Phase 7) | `BaseConfigurator` |
+| item (nothing-point tool, context plus enablement) | `commandBox` | `commandBoxPresenter` | `head/editors/CommandBoxEditor.svelte` | `BaseConfigurator` |
+| item (nothing-point tool, context plus enablement) | `drawer` | — (core portal) | `palette/components/DrawerEditor.svelte` (reused, not duplicated) | `BaseConfigurator` |
+| item (nothing-point tool, context plus enablement) | `status` | `statusPresenter` | `head/editors/StatusEditor.svelte` | `BaseConfigurator` |
+| item (enum-shaped nothing-point, adapter get/set on `<html>`) | `theme` | `themePresenter` | vanilla `renderTheme` (svelte `ThemeEditor` pending — svelte frozen until Phase 7) | `BaseConfigurator` |
 
 Notes:
 
 - The `commandBox` tool is a real **commands-combo-box** (text input + results popup,
   Ctrl-Shift-P style): it runs commands inline on the toolbar. Running commands does *not*
   require the console; the console is a separate modal for edition (and command-first fallback).
-- The `status` tool is a **pointless read-only readout** (a `<span>`, no interaction): it
-  displays the item `config` (`value`, falling back to `label`). It modifies nothing and is
-  never bound to a point.
-- The `theme` tool is a **pointless cycle button** bound to the `theme` enum
-  point (`light` → `dark` → `system`): each click runs the next `theme=<value>`
-  spec and applies the resolved theme to `<html>`
+- The `status` tool is a **nothing-point read-only readout** (a `<span>`, no interaction): it
+  displays the first string value from its context bags (disabled + label placeholder when absent). It modifies nothing in `core.values`.
+- The `theme` tool is a **nothing-point cycle button** presenting the `light` / `dark` / `system` options with adapter get/set on the document root
+  point with adapter get/set on the document root (`readThemeSetting` / `applyThemeSetting`): each click applies the next value
   (`.palette-default-theme-light` class + `data-theme` + `color-scheme`), so
   body-portaled drawer popups follow the same switch. It renders icon-value
   only (the current option's icon — ☀️/🌙/💻 — no text, like the toggle), so

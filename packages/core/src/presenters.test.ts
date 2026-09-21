@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ValuesBag } from './context.js'
 import type { EditorRegistry } from './editors.js'
 import type { SurfaceContext } from './layout.js'
 import {
@@ -128,34 +129,43 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		expect(skeleton.pressed).toBeUndefined()
 	})
 
-	it('builds status view-models from config', () => {
-		expect(statusPresenter({ editor: 'status', config: { value: 'ok' } }).value).toBe('ok')
-		expect(statusPresenter({ editor: 'status' }).value).toBe('status')
+	it('builds status view-models from context bags', () => {
+		const bag = new ValuesBag({ fileName: 'a.ts' })
+		const bound = statusPresenter(
+			{ tool: 'missionTime', editor: 'status' },
+			{ point: undefined, value: undefined, bags: [bag] }
+		)
+		expect(bound.value).toBe('a.ts')
+		expect(bound.can).toBe(true)
+		const absent = statusPresenter(
+			{ tool: 'missionTime', editor: 'status' },
+			{ point: undefined, value: undefined, bags: [undefined] }
+		)
+		expect(absent.value).toBe('missionTime')
+		expect(absent.can).toBe(false)
 	})
 
 	it('builds theme view-models cycling light → dark → system', () => {
 		const point = {
 			id: 'theme',
 			label: 'Theme',
-			type: 'enum',
-			constraints: {
-				options: [
-					{ value: 'light', icon: '☀️', label: 'Light' },
-					{ value: 'dark', icon: '🌙', label: 'Dark' },
-					{ value: 'system', icon: '💻', label: 'System' },
-				],
-			},
+			type: 'nothing',
+			options: [
+				{ value: 'light', icon: '☀️', label: 'Light' },
+				{ value: 'dark', icon: '🌙', label: 'Dark' },
+				{ value: 'system', icon: '💻', label: 'System' },
+			],
 		} as const
 		expect(
-			themePresenter({ editor: 'theme', config: { value: 'light' } }, { point, value: 'light' })
+			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'light' })
 		).toMatchObject({ value: 'light', valueIcon: '☀️', cycle: 'theme=dark' })
 		expect(
-			themePresenter({ editor: 'theme', config: { value: 'dark' } }, { point, value: 'dark' })
+			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'dark' })
 		).toMatchObject({ value: 'dark', valueIcon: '🌙', cycle: 'theme=system' })
 		expect(
-			themePresenter({ editor: 'theme', config: { value: 'system' } }, { point, value: 'system' })
+			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'system' })
 		).toMatchObject({ value: 'system', valueIcon: '💻', cycle: 'theme=light' })
-		const skeleton = themePresenter({ editor: 'theme' }, { point, value: undefined })
+		const skeleton = themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: undefined })
 		expect(skeleton.value).toBeUndefined()
 		expect(skeleton.cycle).toBe('theme=light')
 	})
@@ -555,7 +565,7 @@ describe('enum-from / stash display helpers', () => {
 	})
 
 	it('detects drawer items', () => {
-		expect(isPresenterDrawerItem({ editor: 'drawer', toolbar: [] })).toBe(true)
+		expect(isPresenterDrawerItem({ tool: 'drawer', editor: 'drawer', toolbar: [] })).toBe(true)
 		expect(isPresenterDrawerItem({ tool: 'a' })).toBe(false)
 	})
 })

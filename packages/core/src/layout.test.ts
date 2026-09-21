@@ -318,6 +318,7 @@ describe('PaletteLayoutTree construction', () => {
 							space: 1,
 							toolbar: [
 								{
+									tool: 'drawer',
 									editor: 'drawer',
 									config: { label: 'D' },
 									toolbar: [{ space: 1, toolbar: [{ tool: 'a' }] }],
@@ -333,6 +334,7 @@ describe('PaletteLayoutTree construction', () => {
 		})
 		const snapshot = tree.getSnapshot()
 		expect(snapshot.borders.top[0]?.[0]?.toolbar[0]).toEqual({
+			tool: 'drawer',
 			editor: 'drawer',
 			config: { label: 'D' },
 			toolbar: [{ space: 1, toolbar: [{ tool: 'a', editor: undefined, config: undefined }] }],
@@ -1450,8 +1452,8 @@ describe('isDrawerItem', () => {
 		expect(isDrawerItem(null)).toBe(false)
 		expect(isDrawerItem(undefined)).toBe(false)
 		expect(isDrawerItem({ tool: 'a' })).toBe(false)
-		expect(isDrawerItem({ editor: 'status' })).toBe(false)
-		expect(isDrawerItem({ editor: 'drawer', toolbar: [] })).toBe(true)
-		expect(isDrawerItem({ editor: 'drawer' })).toBe(false)
+		expect(isDrawerItem({ tool: 'status', editor: 'status' })).toBe(false)
+		expect(isDrawerItem({ tool: 'drawer', editor: 'drawer', toolbar: [] })).toBe(true)
+		expect(isDrawerItem({ tool: 'drawer', editor: 'drawer' })).toBe(false)
 	})
 })

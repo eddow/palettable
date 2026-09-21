@@ -32,7 +32,7 @@ import type { IconToken } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
 import { findKeystrokesFor } from './keys.js'
 import type { AnyPoint, NumberPoint } from './points.js'
-import { isActionPoint, isValuedPoint } from './points.js'
+import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { EnumOption } from './type.js'
 
 /** Search query accepted by `filterCommandEntries`. */
@@ -244,7 +244,13 @@ export function paletteCommandEntries(
 			})
 			continue
 		}
-		if (!isValuedPoint(point)) continue
+		if (!isValuedPoint(point)) {
+			// Nothing-points (status, command-box, drawer, theme) bind tools
+			// but carry no runnable value: no executable run entries.
+			// They stay eligible as add-item `item`-kind sources via
+			// `context.itemEditors` below.
+			continue
+		}
 		if (point.type === 'boolean') {
 			for (const [value, verb] of [
 				[true, 'Enable'],
@@ -343,7 +349,7 @@ export function paletteCommandEntries(
 	return entries
 }
 
-/** Build the add-item entries used when creating new toolbar items. */
+/** Build the add-item entries used when creating new toolbar items. Valued points seed `tool`-kind sources; nothing-points surface via `context.itemEditors` (`item`-kind). */
 export function paletteAddItemEntries(
 	points: readonly AnyPoint[],
 	context: CommandBoxContext = {},
@@ -354,6 +360,7 @@ export function paletteAddItemEntries(
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
 		if (isActionPoint(point)) continue
+		if (isNothingPoint(point)) continue
 		if (!isValuedPoint(point)) continue
 		// Enum points collapse to one catalog row (no per-option add source).
 		if (point.type === 'enum') continue

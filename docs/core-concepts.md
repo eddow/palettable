@@ -162,10 +162,7 @@ toggles, selects, sliders, steppers are tools. Code names (kept):
 `PaletteToolbarItem` + `PaletteEditorSpec.editor` + `*Presenter` + head
 `editors/*` component.
 
-Three tools are **pointless**: they bind no value to modify and are not
-controlled by the palette — `status` (read-only display from item `config`),
-`commandBox` (commands-combo-box, runs commands inline), `drawer`
-(child-toolbar portal trigger, holds other tools).
+Three tools bind **nothing-points** (context plus enablement, no core value) — `status` (read-only display from context bags), `commandBox` (commands-combo-box, runs commands inline), `drawer` (child-toolbar portal trigger bound to a nothing-point, holds other tools), `theme` (enum-shaped nothing-point, adapter get/set on the document root class).
 
 ## Editors (configuration panels)
 
@@ -188,7 +185,7 @@ stays the fallback:
 - `number`: `slider` + `stepper` (head) + demo `slider` override (value badge) and
   `stars` extension (play/rating row)
 - `run`: `button` (head) — demo adds nothing
-- `item` (editor-only, no tool): `commandBox`, `drawer`, `status` (head; demo adds nothing)
+- `item` (nothing-point variants): `commandBox`, `drawer`, `status`, `theme` (head; demo adds nothing)
 
 Head components are dumb: each binds a headless core presenter
 (`src/lib/palette/presenters.svelte.ts` — `button/toggle/select/slider/commandBox/

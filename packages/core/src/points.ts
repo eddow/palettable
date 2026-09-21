@@ -80,15 +80,25 @@ export type AnyValuedPoint = ValuedPoint<Exclude<PointType, 'action' | 'nothing'
 
 /**
  * Nothing-point: context plus optional enablement, no value of its own.
- * How pointless tools become pointful 1:1 — `status`, `command-box`, and
- * `drawer` each bind a nothing-point whose `uses` names their context.
+ * How `status`, `command-box`, and `drawer` tools bind 1:1 — each tool binds
+ * the nothing-point whose `uses` names its context.
  * Core semantics: `values.get` → `undefined`, `values.set` throws
  * `PaletteError`, `reset` is a no-op, excluded from value serialization
  * (only the binding itself serializes).
+ * System-variable rule: display state lives adapter-side (context bags,
+ * document root class, …), never in `core.values`. `theme` is the
+ * enum-shaped example: options `light`/`dark`/`system`, adapter get/set
+ * toggling the document root class.
  */
 export type NothingPoint = PointBase<'nothing'> & {
 	readonly defaultValue?: undefined
 	readonly constraints?: undefined
+	/**
+	 * Enum-shaped options for nothing-points presenting a fixed choice
+	 * (e.g. `theme`: `light`/`dark`/`system`). Display-only: the adapter
+	 * owns get/set (document root class, …), core never stores the value.
+	 */
+	readonly options?: readonly import('./type.js').EnumOption[]
 }
 
 /** Any point the core accepts. */
@@ -106,7 +116,7 @@ export function isValuedPoint(point: AnyPoint | null | undefined): point is AnyV
 	return point != null && point.type !== 'action' && point.type !== 'nothing'
 }
 
-/** Narrow guard for nothing-points (`status` / `command-box` / `drawer` bindings). */
+/** Narrow guard for nothing-points (`status` / `command-box` / `drawer` / `theme` bindings). */
 export function isNothingPoint(point: AnyPoint | null | undefined): point is NothingPoint {
 	return point != null && point.type === 'nothing'
 }
