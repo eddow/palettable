@@ -24,6 +24,7 @@ import {
 	type Border,
 	buttonPresenter,
 	type ConsoleStore,
+	canonicalItemTool,
 	configuration,
 	configuratorEditorCleanup,
 	type DragEvent,
@@ -52,6 +53,7 @@ import {
 	type ToolbarDrag,
 	type ToolbarItem,
 	type Track,
+	themePresenter,
 	togglePresenter,
 	type Unsubscribe,
 	validateSerializedLayout,
@@ -60,12 +62,14 @@ import {
 import '@palettable/core'
 import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
-import { renderHeadItem, surfaceForRegion } from './head.js'
+import { liveValue, renderHeadItem, surfaceForRegion } from './head.js'
 import { clearGapClasses } from './highlight.js'
 import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
 import { outsideGapForTrack } from './outside.js'
 import { extractionGrabOffset, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
+import { el, iconSpan } from './templates.js'
+import { applyThemeSetting } from './theme.js'
 
 export type IdeOptions = {
 	readonly core: PaletteCore
@@ -93,31 +97,8 @@ type ToolBinding = readonly Unsubscribe[]
 
 /** Resolve the point id a tool item binds (spec prefix before `=`/`:`/`|`). */
 function toolPointId(item: ToolbarItem): string | undefined {
-	const tool = (item as { tool?: unknown }).tool
-	if (typeof tool !== 'string') return undefined
-	const cut = tool.search(/[=|:]/)
-	return cut < 0 ? tool : tool.slice(0, cut)
-}
-
-/**
- * Read the live value for a tool item, mirroring `head.ts:boundOf`
- * dual-source precedence (first non-root used bag holding the id wins,
- * else root). Keeps in-place updates consistent with initial render when
- * context bags exist; the demo is context-free so this is root-only there.
- */
-function toolLiveValue(core: PaletteCore, point: AnyPoint | undefined): unknown {
-	if (point === undefined || !isValuedPoint(point)) return undefined
-	let value: unknown = core.values.get(point.id)
-	for (const bag of core.resolveBags(point.uses)) {
-		if (bag === undefined) continue
-		if (bag === (core.values as unknown as typeof bag)) continue
-		const selected: unknown = bag.get(point.id as never)
-		if (selected !== undefined) {
-			value = selected
-			break
-		}
-	}
-	return value
+	const id = canonicalItemTool(item)
+	return id === '' ? undefined : id
 }
 
 /** Re-run the presenter view-model and patch the live DOM node in place. */
@@ -130,7 +111,7 @@ function updateToolNode(
 	const editor = (item as { editor?: unknown }).editor
 	const pointId = toolPointId(item)
 	const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
-	const value = toolLiveValue(core, point)
+	const value = liveValue(core, point)
 	const bags = core.resolveBags(point?.uses)
 	switch (editor) {
 		case 'toggle': {
@@ -166,8 +147,7 @@ function updateToolNode(
 				} else if (toolIconNode) {
 					if (toolIconNode.textContent !== view.toolIcon) toolIconNode.textContent = view.toolIcon
 				} else {
-					const toolIcon = document.createElement('span')
-					toolIcon.className = 'palette-default-icon palette-default-tool-icon'
+					const toolIcon = el('span', 'palette-default-icon palette-default-tool-icon')
 					toolIcon.textContent = view.toolIcon
 					chip.prepend(toolIcon)
 				}
@@ -175,8 +155,7 @@ function updateToolNode(
 				if (iconNode) {
 					if (iconNode.textContent !== view.icon) iconNode.textContent = view.icon
 				} else {
-					const valueIcon = document.createElement('span')
-					valueIcon.className = 'palette-default-icon palette-default-value-icon'
+					const valueIcon = el('span', 'palette-default-icon palette-default-value-icon')
 					valueIcon.textContent = view.icon
 					chip.append(valueIcon)
 				}
@@ -312,6 +291,26 @@ function updateToolNode(
 			button.title = view.title
 			return
 		}
+		case 'theme': {
+			const view = themePresenter(item, { point, value, bags })
+			const button = node.querySelector('button')
+			if (button instanceof HTMLButtonElement) {
+				button.title = view.title
+				button.disabled = point === undefined
+				const icon = button.querySelector('.palette-default-icon')
+				if (icon instanceof HTMLElement) {
+					if (view.valueIcon === undefined) icon.hidden = true
+					else {
+						icon.hidden = false
+						if (icon.textContent !== view.valueIcon) icon.textContent = view.valueIcon
+					}
+				}
+			}
+			if (point !== undefined && typeof document !== 'undefined') {
+				applyThemeSetting(document.documentElement, view.value)
+			}
+			return
+		}
 		default:
 			return
 	}
@@ -356,19 +355,6 @@ function directionFor(region: PaletteRegion): 'horizontal' | 'vertical' {
 	return region === 'left' || region === 'right' ? 'vertical' : 'horizontal'
 }
 
-function el(tag: string, className: string): HTMLElement {
-	const node = document.createElement(tag)
-	node.className = className
-	return node
-}
-
-function iconSpan(icon: string | undefined): HTMLElement | null {
-	if (icon === undefined) return null
-	const span = el('span', 'palette-default-icon')
-	span.textContent = icon
-	return span
-}
-
 /** Vanilla head capability registry for the configurator editor choices. */
 const VANILLA_EDITOR_REGISTRY = {
 	boolean: {
@@ -388,6 +374,7 @@ const VANILLA_EDITOR_REGISTRY = {
 		commandBox: { id: 'commandBox', label: 'Command box', families: ['item'] as const },
 		drawer: { id: 'drawer', label: 'Drawer', families: ['item'] as const },
 		status: { id: 'status', label: 'Status', families: ['item'] as const },
+		theme: { id: 'theme', label: 'Theme', families: ['item'] as const },
 	},
 	run: {
 		button: { id: 'button', label: 'Button', families: ['action'] as const },
@@ -437,7 +424,7 @@ function filterAddSources(
 export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandle {
 	const { core, consoleStore } = options
 	const paletteId = options.paletteId ?? 'demo'
-	const itemEditors = options.itemEditors ?? ['commandBox', 'drawer', 'status']
+	const itemEditors = options.itemEditors ?? ['commandBox', 'drawer', 'status', 'theme']
 	const keys = createVanillaKeys(core.keys)
 	const nodes = new NodeRegistry()
 	/**
@@ -468,7 +455,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * update — never a structural sync). Valued editors follow
 	 * `values.subscribe(id)`; action buttons follow `subscribeCan` flips;
 	 * context-bound tools (`uses`) additionally follow `subscribeContext`
-	 * (bag change → re-read dual-source value). Pointless tools
+	 * (bag change → re-read dual-source value). The `theme` tool follows
+	 * its bound enum value so the document-root class stays in sync even
+	 * when the value changes elsewhere. Pointless tools without a point
 	 * (`status`/`commandBox`/`drawer`) bind nothing.
 	 */
 	function bindTool(content: HTMLElement, item: ToolbarItem, surface: SurfaceContext): void {

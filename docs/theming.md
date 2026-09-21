@@ -1,12 +1,13 @@
 # Theming
 
-Two stylesheets, both imported once by the app (`src/routes/+page.svelte`) —
-never injected at runtime, never duplicated per instance:
+Three stylesheets, all imported once by the app — never injected at runtime,
+never duplicated per instance:
 
-| File                   | Owner | Contents                                                        |
-| ---------------------- | ----- | --------------------------------------------------------------- |
-| `palette/styles/palette.css`         | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell (`.palettable-drawer__*`) |
-| `head/styles/head-default.css` | head (default theme) | tool chrome, icons, command box, editors, menus, configurator, add-panel, light override |
+| File | Owner | Contents |
+| ---- | ----- | -------- |
+| `core/styles/palette.css` | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell layout (`.palettable-drawer__*`) |
+| `core/styles/head-default.css` | head (default theme) | structural chrome (§§1–12: buttons, panels, command box, editors, vertical, joined-box, configurator) — no raw colors, tokens referenced only |
+| `core/styles/head-dark.css` / `core/styles/head-light.css` | head themes | `--pd-*` tokens (§0) + light drawer-popup paint; import the base plus **one** theme (dark is the default when neither class applies) |
 
 ## Rules
 
@@ -89,6 +90,62 @@ follow the *visual* ends — `:first-child` (DOM) rounds the bottom corners and
 `:last-child` rounds the top ones. Writing them the other way around leaves the
 rounded ends inverted.
 
+## Tokens (`head-dark.css` / `head-light.css` §0)
+
+All paint lives in `--pd-*` custom properties: dark tokens on `:root` in
+`head-dark.css`, light tokens under `.palette-default-theme-light` in
+`head-light.css`. No raw color appears in `head-default.css` — every
+`background` / `border-color` / `box-shadow` / `color` rule references a
+token. Adding a new paint value means adding a token in both theme files,
+not a light-override selector.
+
+All paint lives in `--pd-*` custom properties declared once on `:root`
+(dark base) and re-set under `.palette-default-theme-light`. No raw color
+appears below §0 — every `background` / `border-color` / `box-shadow` /
+`color` rule references a token. Adding a new paint value means adding a
+token, not a light-override selector.
+
+| Token family | Dark | Light |
+| ------------ | ---- | ----- |
+| `--pd-border*` (chrome, panel, faint, field) | slate `71,85,105` | `148,163,184,0.9` |
+| `--pd-surface*` (chrome, soft, ghost, status, track) | `15,23,42` | `241,245,249,0.96` / `#ffffff` |
+| `--pd-panel*` (popovers, console panel) | `2,6,23,0.98` / `#020617` | `#ffffff`-ish |
+| `--pd-tool-bg` | slate gradient | flat `241,245,249,0.96` |
+| `--pd-muted` / `--pd-faint` / `--pd-icon` / `--pd-status-fg` | `#94a3b8` / `#64748b` / `#93c5fd` / `#bfdbfe` | `#475569` / `#64748b` / `#475569` / `#1d4ed8` |
+| `--pd-accent*` / `--pd-selected-*` / `--pd-option-ring` | blue `#1d4ed8` + `#60a5fa` | unchanged |
+| `--pd-star*` / `--pd-drag-border` | `#facc15` / `#f59e0b` / accent dashed | unchanged |
+| `--pd-r-*` / `--pd-ease` / `--pd-slide` | `9/10/12/14/18px`, `120/140ms` | unchanged |
+
+The `theme` tool (a pointless cycle tool, like `status` but bound to the
+`theme` enum point) applies the resolved theme itself: the vanilla renderer
+(`renderTheme` + `updateToolNode` in `head.ts`/`ide.ts`, via
+`applyThemeSetting` in `theme.ts`) toggles `.palette-default-theme-light`
+on `<html>` on render + every value change, so the demo no longer needs its
+own `applyTheme` — it just imports all three stylesheets and lets the tool
+sync the class. `system` follows `matchMedia('(prefers-color-scheme: light)')`.
+
+The demo syncs `.palette-default-theme-light` onto `<html>` (not `<main>`)
+so it also covers body-portaled drawer popups, which live outside the IDE
+subtree. The drawer popup shell is split: layout in `palette.css`, paint in
+the head theme (light rule at the end of `head-light.css`).
+
+## Section map (`head-default.css`)
+
+1 buttons · 2 icon/choice/status · 3 shared floating panel ·
+4 command box · 5 console overlay · 6 editor groups + readout · 7 select ·
+8 slider · 9 stepper/stars (+ drawer trigger) · 10 vertical axis ·
+11 joined-box collapsing · 12 configurator/add-panel. Tokens live in
+`head-dark.css` / `head-light.css` (§0: `--pd-*` paint + `--pd-r-*` radii +
+`--pd-ease`/`--pd-slide` timings).
+
+Shared patterns: one button-chrome group (§1, incl. the selected/hover
+triple), one floating-panel chrome (§3: popover, select list, drawer track,
+vertical overlays), one readout chip (§6: slider/stepper/select), one
+reveal transition (opacity + pointer-events + translate), one vertical
+overlay pattern (§10: segmented + select). Joined boxes (§11) collapse
+shared edges via `-1px`; vertical groups use `column-reverse`, so
+`:first-child` rounds the visual bottom and `:last-child` the visual top.
+
 ## Base (dark) theme
 
 `head-default.css` base rules are dark: slate gradients on tools/chips/results
@@ -97,18 +154,7 @@ rounded ends inverted.
 chrome (`+page.svelte` `<style>`) matches: `main` on `#020617`, hero/panel cards
 on `rgba(15,23,42,…)`.
 
-## Light override
-
-`.palette-default-theme-light` overrides every dark fill with
-`rgba(241,245,249,0.96)` / white panels (`rgba(255,255,255,0.98)`), ink text
-(`#0f172a`), muted text (`#475569`). When adding a dark `background` /
-`border-color` rule to the base theme, add its light counterpart in the same
-block — the light list must stay in sync (tools, triggers, menus, selects,
-radios, sliders, steppers, stars, segmented, split, command shell/chips/results/
-panel/popover/parking, stepper value, config inputs, add variants, command
-close, drawer popup).
-
-## Demo wiring (`src/routes/+page.svelte`)
+## Demo wiring
 
 `demoState.theme` (`light`/`dark`/`system`) resolves to what renders via
 `prefers-color-scheme` for `system` (subscribed with `matchMedia` +

@@ -20,6 +20,7 @@ import {
 	sliderPresenter,
 	stashPressedState,
 	statusPresenter,
+	themePresenter,
 	togglePresenter,
 } from './presenters.js'
 
@@ -130,6 +131,33 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 	it('builds status view-models from config', () => {
 		expect(statusPresenter({ editor: 'status', config: { value: 'ok' } }).value).toBe('ok')
 		expect(statusPresenter({ editor: 'status' }).value).toBe('status')
+	})
+
+	it('builds theme view-models cycling light → dark → system', () => {
+		const point = {
+			id: 'theme',
+			label: 'Theme',
+			type: 'enum',
+			constraints: {
+				options: [
+					{ value: 'light', icon: '☀️', label: 'Light' },
+					{ value: 'dark', icon: '🌙', label: 'Dark' },
+					{ value: 'system', icon: '💻', label: 'System' },
+				],
+			},
+		} as const
+		expect(
+			themePresenter({ editor: 'theme', config: { value: 'light' } }, { point, value: 'light' })
+		).toMatchObject({ value: 'light', valueIcon: '☀️', cycle: 'theme=dark' })
+		expect(
+			themePresenter({ editor: 'theme', config: { value: 'dark' } }, { point, value: 'dark' })
+		).toMatchObject({ value: 'dark', valueIcon: '🌙', cycle: 'theme=system' })
+		expect(
+			themePresenter({ editor: 'theme', config: { value: 'system' } }, { point, value: 'system' })
+		).toMatchObject({ value: 'system', valueIcon: '💻', cycle: 'theme=light' })
+		const skeleton = themePresenter({ editor: 'theme' }, { point, value: undefined })
+		expect(skeleton.value).toBeUndefined()
+		expect(skeleton.cycle).toBe('theme=light')
 	})
 })
 

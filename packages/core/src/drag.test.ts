@@ -26,11 +26,11 @@ afterEach(() => {
 
 function twoItemLayout(): SerializedLayout {
 	return {
-		version: 1,
+		version: 2,
 		borders: {
 			top: [
-				{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] },
-				{ space: 1, toolbar: [{ tool: 'c' }] },
+				[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] }],
+				[{ space: 1, toolbar: [{ tool: 'c' }] }],
 			],
 			right: [],
 			bottom: [],
@@ -42,9 +42,9 @@ function twoItemLayout(): SerializedLayout {
 
 function fourItemLayout(): SerializedLayout {
 	return {
-		version: 1,
+		version: 2,
 		borders: {
-			top: [{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }, { tool: 'd' }] }],
+			top: [[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }, { tool: 'd' }] }]],
 			right: [],
 			bottom: [],
 			left: [],
@@ -222,11 +222,11 @@ describe('createDrag session shell', () => {
 describe('slide geometry home (Phase 4)', () => {
 	function wholeToolbarLayout(): SerializedLayout {
 		return {
-			version: 1,
+			version: 2,
 			borders: {
 				top: [
-					{ space: 0.2, toolbar: [{ tool: 'a' }] },
-					{ space: 0.3, toolbar: [{ tool: 'b' }] },
+					[{ space: 0.2, toolbar: [{ tool: 'a' }] }],
+					[{ space: 0.3, toolbar: [{ tool: 'b' }] }],
 				],
 				right: [],
 				bottom: [],
@@ -648,12 +648,9 @@ describe('event completeness (every transition is an event)', () => {
 		// Use a layout where the origin toolbar has exactly one item, so
 		// dragging it out empties and prunes the toolbar.
 		const singleItemLayout: SerializedLayout = {
-			version: 1,
+			version: 2,
 			borders: {
-				top: [
-					{ space: 1, toolbar: [{ tool: 'x' }] },
-					{ space: 1, toolbar: [{ tool: 'y' }] },
-				],
+				top: [[{ space: 1, toolbar: [{ tool: 'x' }] }], [{ space: 1, toolbar: [{ tool: 'y' }] }]],
 				right: [],
 				bottom: [],
 				left: [],

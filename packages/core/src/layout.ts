@@ -172,25 +172,43 @@ export type SerializedToolbarItem = {
 	}[]
 }
 
-export type SerializedLayout = {
+export type SerializedTrackSlot = {
+	readonly space: number
+	readonly toolbar: readonly SerializedToolbarItem[]
+}
+
+/**
+ * v1 flat payload (deprecated): region = flat slot list, track boundaries
+ * lost on load (each slot rehydrates as its own single-slot track).
+ * Read-only back-compat for payloads persisted before v2 (old localStorage
+ * saves, e2e fixtures) — never written anymore.
+ */
+export type SerializedLayoutV1 = {
 	readonly version: 1
-	readonly borders: Record<
-		PaletteRegion,
-		readonly {
-			readonly space: number
-			readonly toolbar: readonly SerializedToolbarItem[]
-		}[]
-	>
+	readonly borders: Record<PaletteRegion, readonly SerializedTrackSlot[]>
 	readonly parking?: readonly (readonly SerializedToolbarItem[])[]
 }
+
+/**
+ * v2 nested payload (current): region = list of tracks, each track = list
+ * of slots. Track boundaries survive save/load round-trips.
+ */
+export type SerializedLayout = {
+	readonly version: 2
+	readonly borders: Record<PaletteRegion, readonly (readonly SerializedTrackSlot[])[]>
+	readonly parking?: readonly (readonly SerializedToolbarItem[])[]
+}
+
+/** Any persisted payload the tree can load (v2 preferred, v1 back-compat). */
+export type AnySerializedLayout = SerializedLayout | SerializedLayoutV1
 
 /** Build a trivial initial layout: one toolbar per region holding every point id. */
 export function defaultLayoutFromPoints(pointIds: readonly string[]): SerializedLayout {
 	const toolbar = pointIds.map((tool) => ({ tool }) as SerializedToolbarItem)
 	return {
-		version: 1,
+		version: 2,
 		borders: {
-			top: toolbar.length > 0 ? [{ space: 1, toolbar }] : [],
+			top: toolbar.length > 0 ? [[{ space: 1, toolbar }]] : [],
 			right: [],
 			bottom: [],
 			left: [],
@@ -200,32 +218,39 @@ export function defaultLayoutFromPoints(pointIds: readonly string[]): Serialized
 }
 
 /**
- * Validate that an unknown value is a properly structured `SerializedLayout`.
+ * Validate that an unknown value is a properly structured serialized layout.
  *
- * Headless port of the svelte adapter's `validatePaletteLayout` (which stays
- * adapter-owned until Phase 7): checks `version: 1`, the four region slot
- * lists (`space` number + `toolbar` array), and per-item shape (`tool` as a
- * string reference or an inline virtual definition object, `editor` string,
- * `config` plain object, drawer `toolbar` array). Returns `false` for
- * anything else — never throws.
+ * Accepts both the current v2 nested form (region = track list) and the
+ * legacy v1 flat form (region = slot list, back-compat for payloads
+ * persisted before v2). Headless port of the svelte adapter's
+ * `validatePaletteLayout` (which stays adapter-owned until Phase 7): checks
+ * the version marker, the four region lists, and per-item shape (`tool` as
+ * a string reference or an inline virtual definition object, `editor`
+ * string, `config` plain object, drawer `toolbar` array). Returns `false`
+ * for anything else — never throws.
  */
-export function validateSerializedLayout(layout: unknown): layout is SerializedLayout {
+export function validateSerializedLayout(
+	layout: unknown
+): layout is SerializedLayout | SerializedLayoutV1 {
 	if (typeof layout !== 'object' || layout === null) return false
 	const obj = layout as Record<string, unknown>
-	if (obj.version !== 1) return false
+	if (obj.version !== 1 && obj.version !== 2) return false
 	if (typeof obj.borders !== 'object' || obj.borders === null) return false
 	const borders = obj.borders as Record<string, unknown>
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	for (const region of regions) {
 		const border = borders[region]
 		if (!Array.isArray(border)) return false
-		for (const slot of border) {
-			if (typeof slot !== 'object' || slot === null) return false
-			const slotObj = slot as Record<string, unknown>
-			if (typeof slotObj.space !== 'number') return false
-			if (!Array.isArray(slotObj.toolbar)) return false
-			for (const item of slotObj.toolbar) {
-				if (!isSerializedItem(item)) return false
+		if (obj.version === 2) {
+			for (const track of border) {
+				if (!Array.isArray(track)) return false
+				for (const slot of track) {
+					if (!isSerializedSlot(slot)) return false
+				}
+			}
+		} else {
+			for (const slot of border) {
+				if (!isSerializedSlot(slot)) return false
 			}
 		}
 	}
@@ -237,6 +262,17 @@ export function validateSerializedLayout(layout: unknown): layout is SerializedL
 				if (!isSerializedItem(item)) return false
 			}
 		}
+	}
+	return true
+}
+
+function isSerializedSlot(slot: unknown): boolean {
+	if (typeof slot !== 'object' || slot === null) return false
+	const slotObj = slot as Record<string, unknown>
+	if (typeof slotObj.space !== 'number') return false
+	if (!Array.isArray(slotObj.toolbar)) return false
+	for (const item of slotObj.toolbar) {
+		if (!isSerializedItem(item)) return false
 	}
 	return true
 }
@@ -332,7 +368,7 @@ export class PaletteLayoutTree {
 	private listeners = new Set<LayoutListener>()
 	private opListeners = new Set<LayoutOpListener>()
 
-	constructor(initial?: SerializedLayout | PaletteLayout) {
+	constructor(initial?: AnySerializedLayout | PaletteLayout) {
 		this.layout = initial === undefined ? emptyLayout() : toPaletteLayout(initial)
 	}
 
@@ -355,7 +391,7 @@ export class PaletteLayoutTree {
 	 * storage or demo presets). Functioning edits commit through the
 	 * structural methods instead. Always emits (snapshot + `replace` op).
 	 */
-	setLayout(next: SerializedLayout | PaletteLayout): void {
+	setLayout(next: AnySerializedLayout | PaletteLayout): void {
 		this.layout = toPaletteLayout(next)
 		const snapshot = this.getSnapshot()
 		this.emit()
@@ -610,22 +646,32 @@ function emptyLayout(): PaletteLayout {
 /**
  * Normalize a serialized layout into a live `PaletteLayout` (deep clone).
  *
- * NOTE (compat): the serialized form is flat per region (one slot list —
- * track boundaries are not persisted, mirroring the Svelte adapter's
- * `serializePaletteLayout`). Hydration wraps each slot in its own
- * single-slot track, exactly like the adapter's `hydratePaletteLayout`.
+ * v2 regions are track lists — hydration preserves track boundaries.
+ * v1 regions are flat slot lists (track boundaries were not persisted) —
+ * each slot hydrates as its own single-slot track (back-compat, mirrors the
+ * Svelte adapter's `hydratePaletteLayout`).
  */
-function fromSerializedLayout(layout: SerializedLayout): PaletteLayout {
+function fromSerializedLayout(layout: AnySerializedLayout): PaletteLayout {
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	const borders = {} as PaletteLayout['borders']
 	for (const region of regions) {
-		const slots = layout.borders[region]
-		borders[region] = slots.map((slot) => [
-			{
-				space: slot.space,
-				toolbar: slot.toolbar.map(hydrateItem),
-			},
-		])
+		if (layout.version === 2) {
+			const tracks = (layout as SerializedLayout).borders[region]
+			borders[region] = tracks.map((track) =>
+				track.map((slot) => ({
+					space: slot.space,
+					toolbar: slot.toolbar.map(hydrateItem),
+				}))
+			)
+		} else {
+			const slots = (layout as SerializedLayoutV1).borders[region]
+			borders[region] = slots.map((slot) => [
+				{
+					space: slot.space,
+					toolbar: slot.toolbar.map(hydrateItem),
+				},
+			])
+		}
 	}
 	return {
 		borders,
@@ -633,13 +679,16 @@ function fromSerializedLayout(layout: SerializedLayout): PaletteLayout {
 	}
 }
 
-/** Type guard: serialized layouts carry a `version: 1` marker; live layouts don't. */
-function isSerializedLayout(layout: SerializedLayout | PaletteLayout): layout is SerializedLayout {
-	return (layout as SerializedLayout).version === 1
+/** Type guard: serialized layouts carry a `version` marker; live layouts don't. */
+function isSerializedLayout(
+	layout: AnySerializedLayout | PaletteLayout
+): layout is AnySerializedLayout {
+	const version = (layout as { version?: unknown }).version
+	return version === 1 || version === 2
 }
 
 /** Normalize either layout form into a live `PaletteLayout` (deep clone). */
-function toPaletteLayout(layout: SerializedLayout | PaletteLayout): PaletteLayout {
+function toPaletteLayout(layout: AnySerializedLayout | PaletteLayout): PaletteLayout {
 	if (!isSerializedLayout(layout)) return clonePaletteLayout(layout)
 	return fromSerializedLayout(layout)
 }
@@ -710,8 +759,8 @@ function cloneItem(item: ToolbarItem): ToolbarItem {
 }
 
 /**
- * Serialize a live `PaletteLayout` into a JSON-safe `SerializedLayout`
- * (flat slot list per region — track boundaries are not persisted).
+ * Serialize a live `PaletteLayout` into a JSON-safe v2 `SerializedLayout`
+ * (nested track lists — track boundaries are persisted).
  * Exported for the SSR snapshot path (`render.ts`), which accepts either
  * layout form; the tree's own `getSnapshot()` routes through here too.
  */
@@ -719,9 +768,7 @@ export function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	const borders = {} as SerializedLayout['borders']
 	for (const region of regions) {
-		// Flat slot list (mirrors the Svelte adapter's `serializePaletteLayout`:
-		// `flatMap` over tracks). Track boundaries are not persisted.
-		borders[region] = layout.borders[region].flatMap((track) =>
+		borders[region] = layout.borders[region].map((track) =>
 			track.map((slot) => ({
 				space: slot.space,
 				toolbar: slot.toolbar.map(serializeItem),
@@ -729,7 +776,7 @@ export function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 		)
 	}
 	return {
-		version: 1,
+		version: 2,
 		borders,
 		parking: layout.parking.map((toolbar) => toolbar.map(serializeItem)),
 	}

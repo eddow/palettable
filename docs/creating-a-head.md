@@ -5,7 +5,9 @@ layout); **tools** are the toolbar-bound controls you render here (one head
 component per tool variant, bound to a headless presenter — usually modifying a
 point); **editors** are the configuration panels (`PaletteEditorSpec.configure`,
 e.g. `BaseConfigurator`). `status` / `commandBox` / `drawer` are **pointless
-tools** (no bound value to modify). See `docs/core-concepts.md` for the full glossary.
+tools** (no bound value to modify); `theme` is a pointless cycle tool bound to
+the `theme` enum point (it writes the resolved theme onto `<html>` directly).
+See `docs/core-concepts.md` for the full glossary.
 
 A **head** is presentation only: markup + CSS bound to headless core presenters.
 The palette core owns logic + functioning, **including HTML structure** (layout
@@ -40,6 +42,7 @@ Presenter cheat-sheet:
 | number | `sliderPresenter(context)` | `{ title, tone, icon, direction, region, min, max, step, value, set }` |
 | item | `commandBoxPresenter({ context })` | `{ title, icon, label, hint, model }` — `model` is a `paletteCommandBoxModel` (combobox) |
 | item | `statusPresenter(context)` | `{ label, icon, title, tone, value }` (pointless readout from `config`, no interaction) |
+| item | `themePresenter(context)` | `{ label, icon, title, tone, value, valueIcon, cycle }` (pointless cycle bound to the `theme` enum point; `valueIcon` is the current option's icon — adapters render icon-value only; adapter applies the resolved theme to `<html>`) |
 | any | `configuratorPresenter(context)` | `{ label, icon, hint, tone, editor, editorChoices, setText, setTone, setEditor }` |
 
 Helpers: `headMeta(item)` (config defaults), `headTooltip(item, suffix)`,

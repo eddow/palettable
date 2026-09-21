@@ -12,12 +12,12 @@ import { PaletteError } from './errors.js'
 import type { Unsubscribe } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
 import {
+	type AnySerializedLayout,
 	defaultLayoutFromPoints,
 	type LayoutListener,
 	type LayoutOpListener,
 	type PaletteLayout,
 	PaletteLayoutTree,
-	type SerializedLayout,
 } from './layout.js'
 import { readSetterValue, validateInitialValues } from './palette.js'
 import type { AnyPoint, AnyValuedPoint } from './points.js'
@@ -39,7 +39,7 @@ export type PaletteCoreOptions = {
 	readonly keys?: KeyBindings
 	readonly editors?: EditorRegistry
 	readonly editorDefaults?: EditorDefaults
-	readonly initialLayout?: SerializedLayout | PaletteLayout
+	readonly initialLayout?: AnySerializedLayout | PaletteLayout
 	/** End-user-defined virtual points (`enum-from` / `stash`). */
 	readonly virtuals?: readonly VirtualPoint[]
 	/**

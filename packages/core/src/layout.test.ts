@@ -28,6 +28,7 @@ import {
 	refreshDragMode,
 	resolveDragMode,
 	type SerializedLayout,
+	type SerializedLayoutV1,
 	startDraggingState,
 	trackSpaceHighlight,
 	validateSerializedLayout,
@@ -35,6 +36,23 @@ import {
 } from './layout.js'
 
 function twoItemLayout(): SerializedLayout {
+	return {
+		version: 2,
+		borders: {
+			top: [
+				[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] }],
+				[{ space: 1, toolbar: [{ tool: 'c' }] }],
+			],
+			right: [],
+			bottom: [],
+			left: [],
+		},
+		parking: [[{ tool: 'p' }]],
+	}
+}
+
+/** Legacy v1 flat payload (back-compat read path). */
+function twoItemLayoutV1(): SerializedLayoutV1 {
 	return {
 		version: 1,
 		borders: {
@@ -53,9 +71,9 @@ function twoItemLayout(): SerializedLayout {
 /** Four-tool single toolbar: the ABCD fixture for edge-drag conformance. */
 function fourItemLayout(): SerializedLayout {
 	return {
-		version: 1,
+		version: 2,
 		borders: {
-			top: [{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }, { tool: 'd' }] }],
+			top: [[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }, { tool: 'd' }] }]],
 			right: [],
 			bottom: [],
 			left: [],
@@ -69,12 +87,12 @@ function fourItemLayout(): SerializedLayout {
  * the tests below instead. */
 function _threeToolbarLayout(): SerializedLayout {
 	return {
-		version: 1,
+		version: 2,
 		borders: {
 			top: [
-				{ space: 0.2, toolbar: [{ tool: 'a' }] },
-				{ space: 0.3, toolbar: [{ tool: 'b' }] },
-				{ space: 0.1, toolbar: [{ tool: 'c' }] },
+				[{ space: 0.2, toolbar: [{ tool: 'a' }] }],
+				[{ space: 0.3, toolbar: [{ tool: 'b' }] }],
+				[{ space: 0.1, toolbar: [{ tool: 'c' }] }],
 			],
 			right: [],
 			bottom: [],
@@ -108,9 +126,9 @@ function borderDrag(toolbarIndex = 0, toolCount = 1): DraggingState {
 describe('defaultLayoutFromPoints', () => {
 	it('puts every point in one top toolbar', () => {
 		expect(defaultLayoutFromPoints(['a', 'b'])).toEqual({
-			version: 1,
+			version: 2,
 			borders: {
-				top: [{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] }],
+				top: [[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] }]],
 				right: [],
 				bottom: [],
 				left: [],
@@ -127,40 +145,61 @@ describe('defaultLayoutFromPoints', () => {
 
 	it('validates serialized layouts (version, regions, items, inline tools)', () => {
 		expect(validateSerializedLayout(twoItemLayout())).toBe(true)
+		expect(validateSerializedLayout(twoItemLayoutV1())).toBe(true)
+		expect(validateSerializedLayout({ version: 3, borders: {} })).toBe(false)
 		expect(validateSerializedLayout({ version: 2, borders: {} })).toBe(false)
-		expect(validateSerializedLayout({ version: 1 })).toBe(false)
-		expect(validateSerializedLayout({ version: 1, borders: { top: [] } })).toBe(false)
+		expect(validateSerializedLayout({ version: 2 })).toBe(false)
+		expect(validateSerializedLayout({ version: 2, borders: { top: [] } })).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 1,
-				borders: { top: [{ space: 'x', toolbar: [] }], right: [], bottom: [], left: [] },
+				version: 2,
+				borders: { top: [[{ space: 'x', toolbar: [] }]], right: [], bottom: [], left: [] },
 			})
 		).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 1,
-				borders: { top: [{ space: 1, toolbar: [{ tool: 123 }] }], right: [], bottom: [], left: [] },
+				version: 2,
+				borders: {
+					top: [[{ space: 1, toolbar: [{ tool: 123 }] }]],
+					right: [],
+					bottom: [],
+					left: [],
+				},
+			})
+		).toBe(false)
+		// v2 regions must be track lists — a flat slot list is rejected.
+		expect(
+			validateSerializedLayout({
+				version: 2,
+				borders: {
+					top: [{ space: 1, toolbar: [] }],
+					right: [],
+					bottom: [],
+					left: [],
+				},
 			})
 		).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 1,
+				version: 2,
 				borders: {
 					top: [
-						{
-							space: 1,
-							toolbar: [
-								{
-									tool: {
-										id: 'pause',
-										label: 'Pause',
-										source: 'gameSpeed',
-										kind: 'stash',
-										stashedValue: 0,
+						[
+							{
+								space: 1,
+								toolbar: [
+									{
+										tool: {
+											id: 'pause',
+											label: 'Pause',
+											source: 'gameSpeed',
+											kind: 'stash',
+											stashedValue: 0,
+										},
 									},
-								},
-							],
-						},
+								],
+							},
+						],
 					],
 					right: [],
 					bottom: [],
@@ -170,9 +209,9 @@ describe('defaultLayoutFromPoints', () => {
 		).toBe(true)
 		expect(
 			validateSerializedLayout({
-				version: 1,
+				version: 2,
 				borders: {
-					top: [{ space: 1, toolbar: [{ tool: { kind: 'bogus' } }] }],
+					top: [[{ space: 1, toolbar: [{ tool: { kind: 'bogus' } }] }]],
 					right: [],
 					bottom: [],
 					left: [],
@@ -186,19 +225,53 @@ describe('PaletteLayoutTree construction', () => {
 	it('starts empty with no initial layout', () => {
 		const tree = new PaletteLayoutTree()
 		expect(tree.getSnapshot()).toEqual({
-			version: 1,
+			version: 2,
 			borders: { top: [], right: [], bottom: [], left: [] },
 			parking: [],
 		})
 	})
 
-	it('hydrates a serialized layout (each slot in its own track)', () => {
+	it('hydrates a v2 serialized layout preserving track boundaries', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
 		expect(live.borders.top).toHaveLength(2)
 		expect(live.borders.top[0]).toHaveLength(1)
 		expect(live.borders.top[0]?.[0]?.toolbar).toEqual([{ tool: 'a' }, { tool: 'b' }])
 		expect(live.parking).toEqual([[{ tool: 'p' }]])
+	})
+
+	it('hydrates a legacy v1 flat layout (each slot in its own track)', () => {
+		const tree = new PaletteLayoutTree(twoItemLayoutV1())
+		const live = tree.getLayout()
+		expect(live.borders.top).toHaveLength(2)
+		expect(live.borders.top[0]).toHaveLength(1)
+		expect(live.borders.top[0]?.[0]?.toolbar).toEqual([{ tool: 'a' }, { tool: 'b' }])
+		expect(live.parking).toEqual([[{ tool: 'p' }]])
+	})
+
+	it('round-trips a multi-toolbar track through snapshot (track boundary preserved)', () => {
+		const live: PaletteLayout = {
+			borders: {
+				top: [
+					[
+						{ space: 0.1, toolbar: [{ tool: 'a' }] },
+						{ space: 0.9, toolbar: [{ tool: 'b' }] },
+					],
+				],
+				right: [],
+				bottom: [],
+				left: [],
+			},
+			parking: [],
+		}
+		const tree = new PaletteLayoutTree(live)
+		const snapshot = tree.getSnapshot()
+		expect(snapshot.version).toBe(2)
+		const reloaded = new PaletteLayoutTree(snapshot)
+		const top = reloaded.getLayout().borders.top
+		expect(top).toHaveLength(1)
+		expect(top[0]).toHaveLength(2)
+		expect(reloaded.getSnapshot()).toEqual(snapshot)
 	})
 
 	it('accepts a live layout without double-wrapping (regression)', () => {
@@ -219,35 +292,39 @@ describe('PaletteLayoutTree construction', () => {
 
 	it('clones inputs on load (mutating the constructor arg never touches the tree)', () => {
 		const input = {
-			version: 1,
+			version: 2,
 			borders: {
-				top: [{ space: 1, toolbar: [{ tool: 'a', config: { label: 'A' } }] }],
+				top: [[{ space: 1, toolbar: [{ tool: 'a', config: { label: 'A' } }] }]],
 				right: [],
 				bottom: [],
 				left: [],
 			},
 		} as const
 		const tree = new PaletteLayoutTree(input as never)
-		const written = input.borders.top[0]!.toolbar[0] as { config: Record<string, unknown> }
+		const written = input.borders.top[0]![0]!.toolbar[0] as {
+			config: Record<string, unknown>
+		}
 		written.config.label = 'mutated'
-		expect(tree.getSnapshot().borders.top[0]?.toolbar[0]?.config).toEqual({ label: 'A' })
+		expect(tree.getSnapshot().borders.top[0]?.[0]?.toolbar[0]?.config).toEqual({ label: 'A' })
 	})
 
 	it('round-trips drawer items through snapshot', () => {
 		const tree = new PaletteLayoutTree({
-			version: 1,
+			version: 2,
 			borders: {
 				top: [
-					{
-						space: 1,
-						toolbar: [
-							{
-								editor: 'drawer',
-								config: { label: 'D' },
-								toolbar: [{ space: 1, toolbar: [{ tool: 'a' }] }],
-							},
-						],
-					},
+					[
+						{
+							space: 1,
+							toolbar: [
+								{
+									editor: 'drawer',
+									config: { label: 'D' },
+									toolbar: [{ space: 1, toolbar: [{ tool: 'a' }] }],
+								},
+							],
+						},
+					],
 				],
 				right: [],
 				bottom: [],
@@ -255,7 +332,7 @@ describe('PaletteLayoutTree construction', () => {
 			},
 		})
 		const snapshot = tree.getSnapshot()
-		expect(snapshot.borders.top[0]?.toolbar[0]).toEqual({
+		expect(snapshot.borders.top[0]?.[0]?.toolbar[0]).toEqual({
 			editor: 'drawer',
 			config: { label: 'D' },
 			toolbar: [{ space: 1, toolbar: [{ tool: 'a', editor: undefined, config: undefined }] }],
@@ -273,18 +350,18 @@ describe('PaletteLayoutTree construction', () => {
 			stashedValue: 0,
 		} as const
 		const tree = new PaletteLayoutTree({
-			version: 1,
+			version: 2,
 			borders: {
-				top: [{ space: 1, toolbar: [{ tool: stash }] }],
+				top: [[{ space: 1, toolbar: [{ tool: stash }] }]],
 				right: [],
 				bottom: [],
 				left: [],
 			},
 		})
 		const snapshot = tree.getSnapshot()
-		expect(snapshot.borders.top[0]?.toolbar[0]?.tool).toEqual({ ...stash })
+		expect(snapshot.borders.top[0]?.[0]?.toolbar[0]?.tool).toEqual({ ...stash })
 		// The snapshot shares no structure with the live tree.
-		;(snapshot.borders.top[0]?.toolbar[0]?.tool as { label: string }).label = 'mutated'
+		;(snapshot.borders.top[0]?.[0]?.toolbar[0]?.tool as { label: string }).label = 'mutated'
 		expect(tree.getLayout().borders.top[0]?.[0]?.toolbar[0]).toEqual({
 			tool: { ...stash },
 			editor: undefined,
@@ -297,7 +374,10 @@ describe('moveItem', () => {
 	it('reorders within one toolbar (forward index adjusts for the removal)', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		tree.moveItem(topFirst(0), topFirst(2))
-		expect(tree.getSnapshot().borders.top[0]?.toolbar.map((item) => item.tool)).toEqual(['b', 'a'])
+		expect(tree.getSnapshot().borders.top[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual([
+			'b',
+			'a',
+		])
 	})
 
 	it('moves across toolbars and prunes the emptied toolbar', () => {
@@ -308,14 +388,14 @@ describe('moveItem', () => {
 		)
 		const snapshot = tree.getSnapshot()
 		expect(snapshot.borders.top).toHaveLength(1)
-		expect(snapshot.borders.top[0]?.toolbar.map((item) => item.tool)).toEqual(['a', 'c', 'b'])
+		expect(snapshot.borders.top[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual(['a', 'c', 'b'])
 	})
 
 	it('moves between borders and parking', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		tree.moveItem(topFirst(0), { container: 'parking', toolbarIndex: 0, itemIndex: 1 })
 		const snapshot = tree.getSnapshot()
-		expect(snapshot.borders.top[0]?.toolbar.map((item) => item.tool)).toEqual(['b'])
+		expect(snapshot.borders.top[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual(['b'])
 		expect(snapshot.parking?.[0]?.map((item) => item.tool)).toEqual(['p', 'a'])
 	})
 
@@ -346,7 +426,7 @@ describe('moveToolbar', () => {
 		)
 		const snapshot = tree.getSnapshot()
 		expect(snapshot.borders.top).toHaveLength(1)
-		expect(snapshot.borders.left[0]?.toolbar).toEqual(
+		expect(snapshot.borders.left[0]?.[0]?.toolbar).toEqual(
 			before?.map((item) => ({
 				tool: item.tool,
 				editor: item.editor,
@@ -363,7 +443,7 @@ describe('moveToolbar', () => {
 		)
 		const snapshot = tree.getSnapshot()
 		expect(snapshot.parking).toEqual([])
-		expect(snapshot.borders.bottom[0]?.toolbar.map((item) => item.tool)).toEqual(['p'])
+		expect(snapshot.borders.bottom[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual(['p'])
 	})
 
 	it('throws on unknown locations', () => {
@@ -381,7 +461,7 @@ describe('insertItem / removeItem', () => {
 	it('inserts at an exact index', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		tree.insertItem(topFirst(1), { tool: 'z' })
-		expect(tree.getSnapshot().borders.top[0]?.toolbar.map((item) => item.tool)).toEqual([
+		expect(tree.getSnapshot().borders.top[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual([
 			'a',
 			'z',
 			'b',
@@ -485,7 +565,7 @@ describe('setLayout / subscribe', () => {
 			parking: [],
 		}
 		tree.setLayout(live)
-		expect(tree.getSnapshot().borders.top[0]).toMatchObject({ space: 2 })
+		expect(tree.getSnapshot().borders.top[0]?.[0]).toMatchObject({ space: 2 })
 	})
 })
 
@@ -495,7 +575,7 @@ describe('moveItem / moveToolbar from?/to? + subscribeOps', () => {
 		const ops: unknown[] = []
 		tree.subscribeOps((op) => ops.push(op))
 		tree.moveItem(undefined, topFirst(1), { tool: 'z' })
-		expect(tree.getSnapshot().borders.top[0]?.toolbar.map((item) => item.tool)).toEqual([
+		expect(tree.getSnapshot().borders.top[0]?.[0]?.toolbar.map((item) => item.tool)).toEqual([
 			'a',
 			'z',
 			'b',

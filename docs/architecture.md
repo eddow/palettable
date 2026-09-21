@@ -544,12 +544,15 @@ but a build guarantee:
   resolved via `PaletteCore.resolveTargetVirtual`), but its lifetime is the
   spec — no registry entry, no id-collision check.
 - **Layout is pure data.** `PaletteLayoutTree` holds borders / tracks / toolbars /
-  items and emits a fresh `SerializedLayout` snapshot per mutation via
+  items and emits a fresh v2 `SerializedLayout` snapshot per mutation via
   `subscribe`. Two structurally different forms exist and must not be conflated:
-  a **serialized** region is a *flat* slot list (track boundaries are not
-  persisted), a **live** region is a list of *tracks*. `version: 1` is the
-  discriminator; hydration wraps each serialized slot in its own single-slot
-  track, cloning preserves track boundaries.
+  a **serialized** region is a *nested* track list (track boundaries are
+  persisted), a **live** region is a list of *tracks*. `version: 2` is the
+  current marker (`version: 1` = legacy flat slot list, read-only back-compat:
+  each slot hydrates as its own single-slot track); a live layout carries no
+  `version` marker, so the marker discriminates serialized from live. Cloning
+  preserves track boundaries. Preset/demo layouts are live `Borders` — pass
+  them directly, never via `.flat()`/serialized (that drops boundaries).
 - **Teardown**: `PaletteCore.dispose()` drops value **and** layout listeners
   (`PaletteStateStore.clearListeners` + `PaletteLayoutTree.clearListeners`).
   Values and layout are kept.
@@ -648,7 +651,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
   are SSR-unsafe-by-default (loud `PaletteError`, never silent mismatch).
 - Hygiene (SSR §4.7–§4.8): the render path never imports `globals.ts`
   or `umd.ts` (import-graph test reads `render.ts` source);
-  determinism (no `Math.random`/`Date.now`, `version: 1` rejection) tested.
+  determinism (no `Math.random`/`Date.now`, unknown-version rejection) tested.
 - Render-model tests (SSR §6, node, no jsdom): Node-only import (no
   `setTimeout`/`queueMicrotask` during build + resolve), golden snapshot,
   hydration round-trip (server → serialize → client → identical output),
@@ -719,7 +722,7 @@ map (`bagForwards`):
 - Structure: `context-display-types.ts` folded into `context-display.ts`
   (type-only import tree-shakes identically); `liveToSnapshot` /
   `liveItemToSerialized` deleted in favour of the canonical exported
-  `layout.snapshotLayout` (same flat-slot serialization + `cloneValue` on
+  `layout.snapshotLayout` (same nested-track serialization + `cloneValue` on
   inline definitions); `bagForwards` map dropped — `setContext` /
   `removeContext` / `dispose` rely on `clearListeners()` (the forward was
   stored but never invoked as a subscription).

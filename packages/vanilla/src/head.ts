@@ -3,7 +3,7 @@
  *
  * Each editor renders one toolbar item into an `HTMLElement` from a core
  * presenter view-model (button/toggle/select/segmented/slider/stepper/stars/
- * status/commandBox/drawer). Presentation only: all reads go through core
+ * status/theme/commandBox/drawer). Presentation only: all reads go through core
  * presenters, all writes through `core.run(spec)` / `core.values.set`.
  * Mirrors the svelte default head (`head/editors/*.svelte`) + the demo
  * overrides (`DemoSlider` value badge, `StarsEditor` rating row).
@@ -13,6 +13,7 @@ import {
 	type AnyPoint,
 	axisForRegion,
 	buttonPresenter,
+	canonicalItemTool,
 	filterCommandEntries,
 	isActionPoint,
 	isDrawerItem,
@@ -27,18 +28,29 @@ import {
 	statusPresenter,
 	type ToolbarItem,
 	type Track,
+	themePresenter,
 	togglePresenter,
 } from '@palettable/core'
 
 import {
+	buttonShellTemplate,
 	commandBoxShellTemplate,
 	commandEmptyTemplate,
 	commandResultRowTemplate,
 	drawerPopupShellTemplate,
 	drawerTriggerShellTemplate,
 	elementFromHtml,
-	subElementFromHtml,
+	segmentedOptionShellTemplate,
+	segmentedShellTemplate,
+	sel,
+	selectOptionShellTemplate,
+	selectShellTemplate,
+	sliderShellTemplate,
+	starsShellTemplate,
+	statusShellTemplate,
+	stepperShellTemplate,
 } from './templates.js'
+import { applyThemeSetting } from './theme.js'
 
 export type HeadContext = {
 	readonly core: PaletteCore
@@ -61,22 +73,18 @@ export type HeadContext = {
 	) => HTMLElement
 }
 
-function el(tag: string, className: string): HTMLElement {
-	return elementFromHtml(`<${tag} class="${className}"></${tag}>`)
+/** Fill a shelled icon node: show + set glyph, or hide when absent. */
+function fillIcon(node: HTMLElement | undefined, icon: string | undefined): void {
+	if (node === undefined) return
+	if (icon === undefined) {
+		node.hidden = true
+		return
+	}
+	node.hidden = false
+	node.textContent = icon
 }
 
-function iconSpan(icon: string | undefined): HTMLElement | null {
-	if (icon === undefined) return null
-	const span = elementFromHtml(`<span class="palette-default-icon"></span>`)
-	span.textContent = icon
-	return span
-}
-
-function toneClass(tone: 'neutral' | 'accent'): string {
-	return `palette-default-tone-${tone}`
-}
-
-function boundOf(
+export function boundOf(
 	core: PaletteCore,
 	pointId: string | undefined
 ): {
@@ -86,23 +94,28 @@ function boundOf(
 } {
 	const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
 	const bags = core.resolveBags(point?.uses)
-	const rootValue =
-		point !== undefined && isValuedPoint(point) ? core.values.get(point.id) : undefined
-	// Dual-source precedence (context-display): first non-root used bag holding
-	// this point id wins, else the root value. Absent bag / absent key → root.
-	let value: unknown = rootValue
-	if (point !== undefined && isValuedPoint(point)) {
-		for (const bag of bags) {
-			if (bag === undefined) continue
-			if (bag === (core.values as unknown as typeof bag)) continue
-			const selected: unknown = bag.get(point.id as never)
-			if (selected !== undefined) {
-				value = selected
-				break
-			}
+	return { point, value: liveValue(core, point), bags }
+}
+
+/**
+ * Read the live value for a bound point: dual-source precedence
+ * (context-display) — first non-root used bag holding the id wins, else
+ * the root value. Absent bag / absent key → root. Shared by initial
+ * render (`boundOf`) and in-place updates (`ide.ts:updateToolNode`).
+ */
+export function liveValue(core: PaletteCore, point: AnyPoint | undefined): unknown {
+	if (point === undefined || !isValuedPoint(point)) return undefined
+	let value: unknown = core.values.get(point.id)
+	for (const bag of core.resolveBags(point.uses)) {
+		if (bag === undefined) continue
+		if (bag === (core.values as unknown as typeof bag)) continue
+		const selected: unknown = bag.get(point.id as never)
+		if (selected !== undefined) {
+			value = selected
+			break
 		}
 	}
-	return { point, value, bags }
+	return value
 }
 
 function toolOf(item: ToolbarItem): string | undefined {
@@ -113,8 +126,8 @@ function toolOf(item: ToolbarItem): string | undefined {
 function pointIdOf(item: ToolbarItem): string | undefined {
 	const spec = toolOf(item)
 	if (spec === undefined) return undefined
-	const cut = spec.search(/[=|:]/)
-	return cut < 0 ? spec : spec.slice(0, cut)
+	const id = canonicalItemTool(item)
+	return id === '' ? undefined : id
 }
 
 /** Render a `button` (action) item. */
@@ -124,18 +137,18 @@ export function renderButton(context: HeadContext): HTMLElement {
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
 	const view = buttonPresenter(item, { point, value: undefined, bags }, spec, can)
-	const button = document.createElement('button')
-	button.type = 'button'
-	button.className = `palette-default-tool ${toneClass(view.tone)}`
-	button.disabled = !view.can
-	button.title = view.title
-	const icon = iconSpan(view.icon)
-	if (icon) button.append(icon)
-	const label = el('span', '')
+	const [button, icon, label] = sel(
+		buttonShellTemplate({ tone: view.tone }),
+		'.palette-default-icon',
+		'.palette-default-choice'
+	)
+	const btn = button as HTMLButtonElement
+	btn.disabled = !view.can
+	btn.title = view.title
+	fillIcon(icon, view.icon)
 	label.textContent = view.label
-	button.append(label)
-	button.addEventListener('click', () => core.run(view.run))
-	return button
+	btn.addEventListener('click', () => core.run(view.run))
+	return btn
 }
 
 /** Render a `toggle` (boolean) item. Skeleton (`pressed === undefined`) renders unpressed + `aria-pressed="mixed"`. */
@@ -143,18 +156,15 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = togglePresenter(item, { point, value, bags })
-	const button = document.createElement('button')
-	button.type = 'button'
-	button.className = `palette-default-tool palette-default-tool-compact ${toneClass(view.tone)}${view.pressed ? ' is-selected' : ''}`
-	button.title = view.title
-	const icon = iconSpan(view.icon)
-	if (icon) button.append(icon)
-	button.setAttribute(
-		'aria-pressed',
-		view.pressed === undefined ? 'mixed' : view.pressed ? 'true' : 'false'
+	const [button, icon] = sel(
+		buttonShellTemplate({ tone: view.tone, compact: true, pressed: view.pressed }),
+		'.palette-default-icon'
 	)
-	button.addEventListener('click', () => core.run(view.toggle))
-	return button
+	const btn = button as HTMLButtonElement
+	btn.title = view.title
+	fillIcon(icon, view.icon)
+	btn.addEventListener('click', () => core.run(view.toggle))
+	return btn
 }
 
 /** Render a `select` (enum dropdown) item.
@@ -172,69 +182,40 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
 	const closedLabel = selectClosedLabel(view)
-	const box = el(
-		'div',
-		`palette-default-select ${toneClass(view.tone)} palette-default-layout-${view.direction} palette-default-region-${view.region ?? 'top'}`
+	const [box, trigger, _chip, toolIcon, valueIcon, label] = sel(
+		selectShellTemplate({
+			tone: view.tone,
+			direction: view.direction,
+			region: view.region ?? 'top',
+			iconOnly: closedLabel === undefined,
+		}),
+		'.palette-default-select-trigger',
+		'.palette-default-select-value',
+		'.palette-default-tool-icon',
+		'.palette-default-value-icon',
+		'.palette-default-choice'
 	)
 	box.title = view.title
-	const trigger = document.createElement('button')
-	trigger.type = 'button'
-	trigger.className = 'palette-default-select-trigger'
-	trigger.setAttribute('aria-haspopup', 'listbox')
-	trigger.setAttribute('aria-expanded', 'false')
-	const chip = el(
-		'span',
-		`palette-default-select-value${closedLabel === undefined ? ' is-icon-only' : ''}`
-	)
+	const triggerBtn = trigger as HTMLButtonElement
 	// Tool icon first (when declared), then the value icon — icon+value, like
 	// numerics. The icons are tagged so in-place sync can tell them apart.
-	if (view.toolIcon !== undefined) {
-		const toolIcon = el('span', 'palette-default-icon palette-default-tool-icon')
-		toolIcon.textContent = view.toolIcon
-		chip.append(toolIcon)
-	}
-	const icon = iconSpan(view.icon)
-	if (icon) {
-		icon.classList.add('palette-default-value-icon')
-		chip.append(icon)
-	}
-	// Vertical: the closed label is a direct child of the trigger, sibling of
-	// the icon chip — the segmented overlay pattern (`button > icon + label`).
-	// Horizontal keeps the label inside the chip (inline icon + text).
-	if (closedLabel !== undefined) {
-		const text = el('span', 'palette-default-choice')
-		text.textContent = closedLabel
-		if (view.direction === 'vertical') {
-			trigger.append(chip, text)
-		} else {
-			chip.append(text)
-			trigger.append(chip)
-		}
-	} else {
-		trigger.append(chip)
-	}
-	const list = el('div', 'palette-default-select-list')
-	list.setAttribute('role', 'listbox')
-	list.hidden = true
+	fillIcon(toolIcon, view.toolIcon)
+	fillIcon(valueIcon, view.icon)
+	if (closedLabel === undefined) label.remove()
+	else label.textContent = closedLabel
+	const list = box.querySelector('.palette-default-select-list') as HTMLElement
 	for (const option of view.listOptions) {
-		const row = document.createElement('button')
-		row.type = 'button'
-		row.className = `palette-default-select-option${view.value === option.value ? ' is-selected' : ''}`
-		row.setAttribute('role', 'option')
-		row.setAttribute('aria-selected', view.value === option.value ? 'true' : 'false')
-		row.disabled = !option.can
-		// `data-value` is the stable identity for in-place updates (same as
-		// segmented): rows always render full text, so matching on rendered
-		// text is not reliable.
-		row.dataset.value = option.value
-		if (option.icon !== undefined) {
-			const rowIcon = el('span', 'palette-default-choice-icon')
-			rowIcon.textContent = option.icon
-			row.append(rowIcon)
-		}
-		const rowText = el('span', 'palette-default-choice')
+		const [row, rowIcon, rowText] = sel(
+			selectOptionShellTemplate({
+				value: option.value,
+				selected: view.value === option.value,
+				can: option.can,
+			}),
+			'.palette-default-choice-icon',
+			'.palette-default-choice'
+		)
+		fillIcon(rowIcon, option.icon)
 		rowText.textContent = option.label
-		row.append(rowText)
 		row.addEventListener('click', (event) => {
 			event.stopPropagation()
 			void core.run(view.select(option.value))
@@ -244,9 +225,9 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	}
 	const closeList = (): void => {
 		list.hidden = true
-		trigger.setAttribute('aria-expanded', 'false')
+		triggerBtn.setAttribute('aria-expanded', 'false')
 	}
-	trigger.addEventListener('click', (event) => {
+	triggerBtn.addEventListener('click', (event) => {
 		event.stopPropagation()
 		// Single-open: close any other open select list first.
 		for (const other of document.querySelectorAll('.palette-default-select-list:not([hidden])')) {
@@ -258,7 +239,7 @@ export function renderSelect(context: HeadContext): HTMLElement {
 		}
 		const open = list.hidden
 		list.hidden = !open
-		trigger.setAttribute('aria-expanded', open ? 'true' : 'false')
+		triggerBtn.setAttribute('aria-expanded', open ? 'true' : 'false')
 	})
 	// Clicking anywhere outside the box closes the list; Escape closes it and
 	// returns focus to the trigger.
@@ -269,14 +250,13 @@ export function renderSelect(context: HeadContext): HTMLElement {
 		},
 		{ capture: true }
 	)
-	trigger.addEventListener('keydown', (event) => {
+	triggerBtn.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape' && !list.hidden) {
 			event.stopPropagation()
 			closeList()
-			trigger.focus()
+			triggerBtn.focus()
 		}
 	})
-	box.append(trigger, list)
 	return box
 }
 
@@ -288,37 +268,38 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
-	const group = el(
-		'div',
-		`palette-default-segmented ${toneClass(view.tone)} palette-default-layout-${view.direction} palette-default-region-${view.region ?? 'top'}`
+	const [group] = sel(
+		segmentedShellTemplate({
+			tone: view.tone,
+			direction: view.direction,
+			region: view.region ?? 'top',
+		})
 	)
 	group.title = view.title
 	for (const option of view.options) {
-		const button = document.createElement('button')
-		button.type = 'button'
-		button.className = `palette-default-tool palette-default-tool-compact${view.value === option.value ? ' is-selected' : ''}`
-		button.disabled = !option.can || view.value === option.value
+		const [button, icon, text] = sel(
+			segmentedOptionShellTemplate({
+				value: option.value,
+				selected: view.value === option.value,
+				can: option.can,
+			}),
+			'.palette-default-choice-icon',
+			'.palette-default-choice'
+		)
 		button.title = option.text
-		// `data-value` is the stable identity for in-place updates: the label
-		// node is split (icon + text) and may be hidden per axis, so matching
-		// on rendered text is no longer reliable.
-		button.dataset.value = option.value
-		if (option.icon !== undefined) {
-			const icon = el('span', 'palette-default-choice-icon')
-			icon.textContent = option.icon
-			button.append(icon)
-		}
+		fillIcon(icon, option.icon)
 		// `showText: false` hides the label (icon-only on both axes); an
 		// option with no icon keeps its label as a fallback so the button
 		// is never empty.
-		if (view.showText && option.label !== undefined) {
-			const text = el('span', 'palette-default-choice')
-			text.textContent = option.label
-			button.append(text)
-		} else if (!view.showText && option.icon === undefined) {
-			const text = el('span', 'palette-default-choice')
-			text.textContent = option.label ?? option.value
-			button.append(text)
+		const label = view.showText
+			? option.label
+			: option.icon === undefined
+				? (option.label ?? option.value)
+				: undefined
+		if (label === undefined) text.remove()
+		else {
+			text.hidden = false
+			text.textContent = label
 		}
 		button.addEventListener('click', () => core.run(view.select(option.value)))
 		group.append(button)
@@ -335,50 +316,32 @@ export function renderSlider(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
-	const label = document.createElement('label')
-	label.className = [
-		'palette-default-slider',
-		`palette-default-slider-${view.variant}`,
-		toneClass(view.tone),
-		`palette-default-layout-${view.direction}`,
-		`palette-default-region-${view.region}`,
-		`palette-default-range-${view.rangeAxis}`,
-	]
-		.filter(Boolean)
-		.join(' ')
+	const [label, icon, input] = sel(
+		sliderShellTemplate({
+			variant: view.variant,
+			tone: view.tone,
+			direction: view.direction,
+			region: view.region,
+			rangeAxis: view.rangeAxis,
+			iconOnly: !view.showValue,
+		}),
+		'.palette-default-slider-value > .palette-default-icon',
+		'input[type="range"]'
+	)
 	label.title = view.title
 	// The readout mirrors the stepper readout exactly: the icon nests inside
-	// the value chip (icon + text), so both read as one bordered chip. A
-	// drawer trigger wraps that chip so the two read as one rounded button,
-	// with the revealed range as the second segment of the group. With
-	// `showValue: false` the chip keeps the icon only (no text node). The
-	// range itself always sits inside a `slider-track` pill half: the readout
-	// (or trigger) is the first half, the track the second — visible chrome,
-	// outer corners rounded, input filling 100% of it.
-	const icon = iconSpan(view.icon)
-	const readout = el('span', `palette-default-slider-value${view.showValue ? '' : ' is-icon-only'}`)
-	if (icon) readout.append(icon)
-	if (view.showValue) readout.append(document.createTextNode(view.text))
-	if (view.variant === 'drawer') {
-		const trigger = el('span', 'palette-default-slider-trigger')
-		trigger.append(readout)
-		label.append(trigger)
-	} else {
-		label.append(readout)
-	}
-	const track = el('span', 'palette-default-slider-track')
-	const input = document.createElement('input')
-	input.type = 'range'
-	input.min = String(view.min)
-	input.max = String(view.max)
-	input.step = String(view.step)
-	input.value = String(view.value ?? view.min)
-	input.setAttribute('aria-label', view.title)
-	input.addEventListener('input', () => {
-		core.values.set((point?.id ?? '') as never, Number(input.value) as never)
+	// the value chip (icon + text), so both read as one bordered chip.
+	fillIcon(icon, view.icon)
+	if (view.showValue) label.querySelector('.palette-default-slider-value')?.append(view.text)
+	const range = input as HTMLInputElement
+	range.min = String(view.min)
+	range.max = String(view.max)
+	range.step = String(view.step)
+	range.value = String(view.value ?? view.min)
+	range.setAttribute('aria-label', view.title)
+	range.addEventListener('input', () => {
+		core.values.set((point?.id ?? '') as never, Number(range.value) as never)
 	})
-	track.append(input)
-	label.append(track)
 	return label
 }
 
@@ -387,34 +350,28 @@ export function renderStepper(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
-	const group = el(
-		'div',
-		`palette-default-stepper ${toneClass(view.tone)} palette-default-layout-${view.direction}`
+	const [group, minus, icon, readout, plus] = sel(
+		stepperShellTemplate({ tone: view.tone, direction: view.direction }),
+		'button:first-of-type',
+		'.palette-default-stepper-value > .palette-default-icon',
+		'.palette-default-stepper-value',
+		'button:last-of-type'
 	)
 	group.title = view.title
-	const minus = document.createElement('button')
-	minus.type = 'button'
-	minus.className = 'palette-default-tool palette-default-tool-compact'
-	minus.disabled = view.value === undefined || view.value - view.step < view.min
-	minus.textContent = '−'
-	minus.addEventListener('click', () => {
+	;(minus as HTMLButtonElement).disabled =
+		view.value === undefined || view.value - view.step < view.min
+	;(minus as HTMLButtonElement).addEventListener('click', () => {
 		if (view.value === undefined) return
 		core.values.set((point?.id ?? '') as never, Math.max(view.min, view.value - view.step) as never)
 	})
-	const readout = el('span', 'palette-default-stepper-value')
-	const icon = iconSpan(view.icon)
-	if (icon) readout.append(icon)
-	readout.append(document.createTextNode(String(view.value)))
-	const plus = document.createElement('button')
-	plus.type = 'button'
-	plus.className = 'palette-default-tool palette-default-tool-compact'
-	plus.disabled = view.value === undefined || view.value + view.step > view.max
-	plus.textContent = '+'
-	plus.addEventListener('click', () => {
+	fillIcon(icon, view.icon)
+	readout.append(String(view.value))
+	;(plus as HTMLButtonElement).disabled =
+		view.value === undefined || view.value + view.step > view.max
+	;(plus as HTMLButtonElement).addEventListener('click', () => {
 		if (view.value === undefined) return
 		core.values.set((point?.id ?? '') as never, Math.min(view.max, view.value + view.step) as never)
 	})
-	group.append(minus, readout, plus)
 	return group
 }
 
@@ -423,42 +380,84 @@ export function renderStars(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
-	const group = el(
-		'div',
-		`palette-default-stars ${toneClass(view.tone)} palette-default-layout-${view.direction}`
+	const [group, icon] = sel(
+		starsShellTemplate({ tone: view.tone, direction: view.direction, max: view.max }),
+		':scope > .palette-default-icon'
 	)
 	group.title = view.title
-	const icon = iconSpan(view.icon)
-	if (icon) group.append(icon)
-	const row = el('span', `palette-default-stars-row palette-default-layout-${view.direction}`)
-	row.setAttribute('role', 'radiogroup')
-	for (let index = 1; index <= view.max; index += 1) {
-		const button = document.createElement('button')
-		button.type = 'button'
-		button.className = `palette-default-arrow${view.value !== undefined && index <= view.value ? ' is-selected' : ''}`
-		button.setAttribute('role', 'radio')
+	fillIcon(icon, view.icon)
+	const buttons = [...group.querySelectorAll('.palette-default-arrow')] as HTMLButtonElement[]
+	buttons.forEach((button, offset) => {
+		const index = offset + 1
+		const filled = view.value !== undefined && index <= view.value
+		button.classList.toggle('is-selected', filled)
 		button.setAttribute('aria-checked', index === view.value ? 'true' : 'false')
 		button.title = `${view.title} ${index}`
-		button.textContent = view.value !== undefined && index <= view.value ? '▶' : '▷'
+		button.textContent = filled ? '▶' : '▷'
 		button.addEventListener('click', () => {
 			core.values.set((point?.id ?? '') as never, index as never)
 		})
-		row.append(button)
-	}
-	group.append(row)
+	})
 	return group
+}
+
+/** Render a `theme` (pointless cycle) item. Binds the `theme` enum point
+ * (`light`/`dark`/`system`) and applies the resolved theme to the document
+ * root on render + every click — the standard `<html>` class toggle
+ * (`head-light.css` keys off `.palette-default-theme-light`, so
+ * body-portaled drawer popups follow the same switch). Icon-value only
+ * (current option icon, no text — like the toggle): the button is a compact
+ * icon square. Skeleton renders the tool icon only. */
+export function renderTheme(context: HeadContext): HTMLElement {
+	const { core, item } = context
+	const { point, value, bags } = boundOf(core, pointIdOf(item))
+	const view = themePresenter(item, { point, value, bags })
+	const [button, icon, label] = sel(
+		buttonShellTemplate({ tone: view.tone, compact: true }),
+		'.palette-default-icon',
+		'.palette-default-choice'
+	)
+	const btn = button as HTMLButtonElement
+	btn.title = view.title
+	btn.dataset.testid = 'theme-tool'
+	fillIcon(icon, view.valueIcon)
+	label.remove()
+	if (point === undefined) {
+		btn.disabled = true
+		return btn
+	}
+	if (typeof document !== 'undefined') {
+		applyThemeSetting(document.documentElement, view.value)
+	}
+	btn.addEventListener('click', () => {
+		// Recompute the cycle at click time: `view.cycle` is captured from
+		// render and goes stale after the first click (system→light would
+		// replay forever). Fresh read → fresh `theme=<next>` spec.
+		const fresh = boundOf(core, pointIdOf(item))
+		const next = themePresenter(item, fresh)
+		core.run(next.cycle)
+		if (typeof document !== 'undefined') {
+			const { value: applied } = boundOf(core, pointIdOf(item))
+			applyThemeSetting(
+				document.documentElement,
+				typeof applied === 'string' ? (applied as 'light' | 'dark' | 'system') : undefined
+			)
+		}
+	})
+	return btn
 }
 
 /** Render a `status` (pointless readout) item. */
 export function renderStatus(context: HeadContext): HTMLElement {
 	const view = statusPresenter(context.item)
-	const span = el('span', `palette-default-status ${toneClass(view.tone)}`)
+	const [span, icon, value] = sel(
+		statusShellTemplate(view.tone),
+		'.palette-default-icon',
+		'.palette-default-status-value'
+	)
 	span.title = view.title
-	const icon = iconSpan(view.icon)
-	if (icon) span.append(icon)
-	const value = el('span', 'palette-default-status-value')
+	fillIcon(icon, view.icon)
 	value.textContent = view.value
-	span.append(value)
 	return span
 }
 
@@ -468,7 +467,7 @@ export function renderStatus(context: HeadContext): HTMLElement {
 export function renderCommandBox(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const meta = (item as { config?: Record<string, unknown> }).config ?? {}
-	const [box, input, popover, results, openButton, text] = subElementFromHtml(
+	const [box, input, popover, results, openButton, text] = sel(
 		commandBoxShellTemplate({
 			hint: typeof meta.hint === 'string' ? meta.hint : 'Search and run a command',
 			icon: typeof meta.icon === 'string' ? meta.icon : '⌘',
@@ -669,6 +668,8 @@ export function renderHeadItem(context: HeadContext): HTMLElement | null {
 			return renderStars(context)
 		case 'status':
 			return renderStatus(context)
+		case 'theme':
+			return renderTheme(context)
 		case 'commandBox':
 			return renderCommandBox(context)
 		case 'drawer':

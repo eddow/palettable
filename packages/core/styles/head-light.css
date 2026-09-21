@@ -1,0 +1,39 @@
+/* `@palettable/core` default head — light theme.
+ * Import after `styles/head-default.css` (instead of `head-dark.css`).
+ * The demo syncs `palette-default-theme-light` onto `<html>` so this also
+ * covers body-portaled drawer popups, which live outside the IDE subtree. */
+
+.palette-default-theme-light {
+	--pd-border: rgba(148, 163, 184, 0.9);
+	--pd-border-soft: rgba(148, 163, 184, 0.9);
+	--pd-field-border: rgba(148, 163, 184, 0.9);
+	--pd-surface: rgba(241, 245, 249, 0.96);
+	--pd-surface-soft: #ffffff;
+	--pd-surface-ghost: rgba(241, 245, 249, 0.96);
+	--pd-status-bg: rgba(241, 245, 249, 0.96);
+	--pd-track-bg: #ffffff;
+	--pd-panel: rgba(255, 255, 255, 0.98);
+	--pd-panel-solid: rgba(255, 255, 255, 0.98);
+	--pd-tool-bg: rgba(241, 245, 249, 0.96);
+	--pd-muted: #475569;
+	--pd-ink: #0f172a;
+	--pd-icon: #475569;
+	--pd-status-fg: #1d4ed8;
+	--pd-r-s: 9px;
+	--pd-r-m: 10px;
+	--pd-r-l: 12px;
+	--pd-r-xl: 14px;
+	--pd-r-xxl: 18px;
+	--pd-ease: 120ms ease;
+	--pd-slide: 140ms ease;
+	color: var(--pd-ink);
+}
+
+/* Drawer popup shell lives in `palette.css` (headless layout); themed here
+ * so a head swap re-skins it. */
+.palette-default-theme-light.palettable-drawer__popup,
+.palette-default-theme-light .palettable-drawer__popup {
+	border-color: var(--pd-border);
+	background: var(--pd-surface);
+	color: var(--pd-ink);
+}

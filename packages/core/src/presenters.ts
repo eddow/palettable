@@ -250,6 +250,59 @@ export function statusPresenter(item: ToolbarItem): StatusPresenter {
 	}
 }
 
+// ── Theme (pointless) ───────────────────────────────────────────────────────
+
+/** Resolved UI theme: explicit `light`/`dark`, or `system` (adapter resolves via media query). */
+export type ThemeValue = 'light' | 'dark' | 'system'
+
+export type ThemePresenter = {
+	readonly label: string
+	readonly icon: string | undefined
+	readonly title: string
+	readonly tone: 'neutral' | 'accent'
+	/** Current setting (`config.value`); `undefined` = skeleton (no value yet). */
+	readonly value: ThemeValue | undefined
+	/** Icon of the current option (`light` → ☀️ …), resolved from the bound enum point; falls back to the tool icon. */
+	readonly valueIcon: string | undefined
+	/** Spec string cycling to the next theme (`id=next`). */
+	readonly cycle: string
+}
+
+const THEME_ORDER: readonly ThemeValue[] = ['light', 'dark', 'system']
+
+/** View-model for a pointless theme tool: cycles light → dark → system.
+ * Skeleton: no `config.value` → `value: undefined` (adapters render unset).
+ * Like `status`, it binds no point — the adapter applies the resolved theme
+ * to the document root (standard `<html>` class toggle) itself. `valueIcon`
+ * carries the current option's icon (icon-value, no text needed). */
+export function themePresenter(item: ToolbarItem, bound: BoundDisplay): ThemePresenter {
+	const meta = headMeta(item)
+	const raw =
+		typeof bound.value === 'string'
+			? bound.value
+			: (item as { config?: unknown }).config !== undefined
+				? ((item as { config?: unknown }).config as { value?: unknown }).value
+				: undefined
+	const value = raw === 'light' || raw === 'dark' || raw === 'system' ? raw : undefined
+	const options =
+		bound.point !== undefined && isValuedPoint(bound.point) && bound.point.type === 'enum'
+			? (((bound.point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
+					?.options ?? []) as readonly EnumOption[])
+			: []
+	const current = options.find((option) => option.value === value)
+	const valueIcon = typeof current?.icon === 'string' ? current.icon : meta.icon
+	const next = THEME_ORDER[(THEME_ORDER.indexOf(value ?? 'system') + 1) % THEME_ORDER.length]!
+	return {
+		label: meta.label,
+		icon: meta.icon,
+		title: headTooltip(item, meta.hint),
+		tone: meta.tone,
+		value,
+		valueIcon,
+		cycle: `${bound.point?.id ?? ''}=${next}`,
+	}
+}
+
 // ── Select (enum) ───────────────────────────────────────────────────────────
 
 export type SelectOption = {

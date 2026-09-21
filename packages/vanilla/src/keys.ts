@@ -7,9 +7,9 @@
  * `keys.ts` normalization (which stays adapter-owned until Phase 12).
  */
 
-export type Keystroke = string
+import type { KeyBindings, Keystroke } from '@palettable/core'
 
-export type KeyBindings = Record<Keystroke, string>
+export type { KeyBindings, Keystroke }
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const
 

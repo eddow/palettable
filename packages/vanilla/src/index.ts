@@ -6,7 +6,6 @@
  * re-renders plain DOM on change. Pointer math, drag sessions and head
  * components live here — never in core.
  */
-export * from './adapter.js'
 export * from './add-item.js'
 export * from './drag-session.js'
 export * from './head.js'
@@ -17,4 +16,5 @@ export * from './nodes.js'
 export * from './outside.js'
 export * from './slide.js'
 export * from './templates.js'
+export * from './theme.js'
 export * from './value-proxy.js'

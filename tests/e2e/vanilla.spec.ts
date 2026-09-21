@@ -171,6 +171,34 @@ test('horizontal command box hides its input until hover', async ({ page }) => {
 	await expect(text).toBeHidden()
 })
 
+// ── Theme tool (pointless cycle) ──────────────────────────────────────────
+
+test('theme tool cycles the value and toggles the light class on <html>', async ({ page }) => {
+	// The top border's single track hosts the `theme` tool (bound to the
+	// `theme` point) in every demo configuration — icon-value only (current
+	// option icon, no text).
+	const top = page.locator('.toolbar-border[data-region="top"]')
+	const tool = top.locator('[data-testid="theme-tool"]')
+	await expect(tool).toBeVisible()
+	// Single track: exactly one toolbar up top, holding the theme tool.
+	const topToolbars = top.locator(':scope > .toolbar, :scope .toolbar-track-slot .toolbar')
+	await expect(topToolbars).toHaveCount(1)
+	const html = page.locator('html')
+	const icon = tool.locator('.palette-default-icon')
+	// Default is `system` (resolves via `prefers-color-scheme` — light in
+	// headless CI, so no assumption about the initial class here).
+	await expect(icon).toContainText('💻')
+	expect(await tool.locator('.palette-default-choice').count()).toBe(0)
+
+	await tool.click()
+	await expect(icon).toContainText('☀️')
+	await expect(html).toHaveClass(/palette-default-theme-light/)
+
+	await tool.click()
+	await expect(icon).toContainText('🌙')
+	await expect(html).not.toHaveClass(/palette-default-theme-light/)
+})
+
 // ── Select (custom listbox) ───────────────────────────────────────────────
 
 test('horizontal select shows icon + label and opens a full-text list on click', async ({

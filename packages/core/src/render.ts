@@ -21,6 +21,7 @@ import { PaletteError } from './errors.js'
 import type { KeyBindings } from './keys.js'
 import { findKeystrokesFor, findKeystrokesForTarget } from './keys.js'
 import type {
+	AnySerializedLayout,
 	PaletteLayout,
 	PaletteRegion,
 	SerializedLayout,
@@ -103,7 +104,7 @@ export type PaletteSnapshot = {
 export type RenderInput = {
 	readonly points: readonly AnyPoint[]
 	readonly virtuals?: readonly VirtualPoint[]
-	readonly layout: SerializedLayout | PaletteLayout
+	readonly layout: AnySerializedLayout | PaletteLayout
 	readonly values: Readonly<Record<string, unknown>>
 	readonly keys?: KeyBindings
 	readonly editors?: EditorRegistry
@@ -129,12 +130,13 @@ export type RenderInput = {
  */
 export function snapshotPalette(input: {
 	readonly virtuals?: readonly VirtualPoint[]
-	readonly layout: SerializedLayout | PaletteLayout
+	readonly layout: AnySerializedLayout | PaletteLayout
 	readonly values: Readonly<Record<string, unknown>>
 	readonly configuration?: PaletteConfiguration
 }): PaletteSnapshot {
+	const version = (input.layout as { version?: unknown }).version
 	const layout: SerializedLayout =
-		(input.layout as SerializedLayout).version === 1
+		version === 1 || version === 2
 			? structuredCloneLayout(input.layout as SerializedLayout)
 			: liveToSnapshot(input.layout as PaletteLayout)
 	return {
@@ -456,9 +458,10 @@ type LiveSlots = {
 	readonly parking: readonly (readonly ToolbarItem[])[]
 }
 
-function toLiveSlots(layout: SerializedLayout | PaletteLayout): LiveSlots {
-	if ((layout as SerializedLayout).version === 1) {
-		const serialized = layout as SerializedLayout
+function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
+	const version = (layout as { version?: unknown }).version
+	if (version === 1 || version === 2) {
+		const serialized = layout as AnySerializedLayout
 		let validated = false
 		try {
 			validated = validateSerializedLayout(serialized)
@@ -472,7 +475,13 @@ function toLiveSlots(layout: SerializedLayout | PaletteLayout): LiveSlots {
 			{ readonly space: number; readonly toolbar: readonly ToolbarItem[] }[]
 		>
 		for (const region of regions) {
-			borders[region] = serialized.borders[region].map((slot) => ({
+			// v2 regions are track lists (boundaries preserved); v1 regions
+			// are flat slot lists (each slot = its own single-slot track).
+			const border =
+				version === 2
+					? (serialized as SerializedLayout).borders[region].flat()
+					: (serialized as import('./layout.js').SerializedLayoutV1).borders[region]
+			borders[region] = border.map((slot) => ({
 				space: slot.space,
 				toolbar: slot.toolbar.map((item) => serializedItemToLive(item)),
 			}))
@@ -484,6 +493,8 @@ function toLiveSlots(layout: SerializedLayout | PaletteLayout): LiveSlots {
 			),
 		}
 	}
+	if (version !== undefined)
+		throw new PaletteError(`resolveRenderTree: unknown layout version ${String(version)}`)
 	const live = layout as PaletteLayout
 	const regions = ['top', 'right', 'bottom', 'left'] as const
 	const borders = {} as LiveSlots['borders']

@@ -5,8 +5,9 @@ layout — e.g. the fact *alert* can be `green`/`yellow`/`red`); **tools** are
 the toolbar-bound controls that modify a point (`{ tool: spec, editor?,
 config? }` items resolved to a presenter + head component); **editors** are the
 configuration panels (`BaseConfigurator`, rendered in the console *Details*
-panel). `status`, `commandBox`, and `drawer` are **pointless tools** (no bound
-value). See `docs/core-concepts.md` for the full glossary.
+panel). `status`, `commandBox`, `drawer`, and `theme` are **pointless tools**
+(`theme` binds the `theme` enum point but owns no layout — it writes the
+resolved theme onto `<html>` directly). See `docs/core-concepts.md` for the full glossary.
 
 The default head (`src/lib/head/`) is the standard minimal presentation for the
 palette: a small set of variants per tool family, dumb components bound to
@@ -31,6 +32,7 @@ lacks — a play/rating row). Together they prove both replacement and extension
 | item (pointless tool, no bound value) | `commandBox` | `commandBoxPresenter` | `head/editors/CommandBoxEditor.svelte` | `BaseConfigurator` |
 | item (pointless tool, no bound value) | `drawer` | — (core portal) | `palette/components/DrawerEditor.svelte` (reused, not duplicated) | `BaseConfigurator` |
 | item (pointless tool, no bound value) | `status` | `statusPresenter` | `head/editors/StatusEditor.svelte` | `BaseConfigurator` |
+| item (pointless cycle tool, binds the `theme` enum point) | `theme` | `themePresenter` | vanilla `renderTheme` (svelte `ThemeEditor` pending — svelte frozen until Phase 7) | `BaseConfigurator` |
 
 Notes:
 
@@ -40,6 +42,14 @@ Notes:
 - The `status` tool is a **pointless read-only readout** (a `<span>`, no interaction): it
   displays the item `config` (`value`, falling back to `label`). It modifies nothing and is
   never bound to a point.
+- The `theme` tool is a **pointless cycle button** bound to the `theme` enum
+  point (`light` → `dark` → `system`): each click runs the next `theme=<value>`
+  spec and applies the resolved theme to `<html>`
+  (`.palette-default-theme-light` class + `data-theme` + `color-scheme`), so
+  body-portaled drawer popups follow the same switch. It renders icon-value
+  only (the current option's icon — ☀️/🌙/💻 — no text, like the toggle), so
+  it sits as a compact square on the top bar's single track. `system` follows
+  the OS `prefers-color-scheme` media query.
 
 - `segmented` is the "radio-button" idiom: joined buttons where the selected one
   reads as pushed-in. `select` is the compact dropdown (custom button +

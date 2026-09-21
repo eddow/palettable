@@ -342,6 +342,16 @@ const rwComboboxLayout: Borders = {
 					},
 				],
 			},
+			{
+				space: 0.9,
+				toolbar: [
+					{
+						tool: 'theme',
+						editor: 'theme',
+						config: { icon: '🎨', label: 'Theme', hint: 'Pointless theme cycle' },
+					},
+				],
+			},
 		],
 	],
 	left: [

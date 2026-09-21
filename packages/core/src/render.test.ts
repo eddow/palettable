@@ -176,13 +176,17 @@ describe('golden render model', () => {
 	it('resolves drawers recursively with children', () => {
 		const core = new PaletteCore(points())
 		const layout: SerializedLayout = {
-			version: 1,
+			version: 2,
 			borders: {
 				top: [
-					{
-						space: 1,
-						toolbar: [{ editor: 'drawer', toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }] }],
-					},
+					[
+						{
+							space: 1,
+							toolbar: [
+								{ editor: 'drawer', toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }] },
+							],
+						},
+					],
 				],
 				right: [],
 				bottom: [],
@@ -210,9 +214,9 @@ describe('golden render model', () => {
 			toolbar = [{ editor: 'drawer', toolbar: [{ space: 1, toolbar }] }]
 		}
 		const layout: SerializedLayout = {
-			version: 1,
+			version: 2,
 			borders: {
-				top: [{ space: 1, toolbar }],
+				top: [[{ space: 1, toolbar }]],
 				right: [],
 				bottom: [],
 				left: [],
@@ -246,8 +250,8 @@ describe('golden render model', () => {
 	it('rejects unknown versions and unknown points loudly', () => {
 		const core = new PaletteCore(points())
 		const badVersion = {
-			...defaultLayoutFromPoints(['theme']),
-			version: 2,
+			version: 3,
+			borders: { top: [], right: [], bottom: [], left: [] },
 		} as unknown as SerializedLayout
 		expect(() =>
 			resolveRenderTree({ points: core.points, layout: badVersion, values: {} })
@@ -327,7 +331,7 @@ describe('configuration pinning', () => {
 			...layout,
 			borders: {
 				...layout.borders,
-				top: [{ ...layout.borders.top[0]!, space: 0 }],
+				top: [[{ ...layout.borders.top[0]![0]!, space: 0 }]],
 			},
 		}
 		const pinned = { ...configuration, trackGapMinGrow: 0.5 }

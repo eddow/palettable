@@ -77,7 +77,7 @@ describe('PaletteCore construction', () => {
 			'mode',
 			'save',
 		])
-		expect(core.layout.getSnapshot().borders.top[0]?.toolbar).toHaveLength(5)
+		expect(core.layout.getSnapshot().borders.top[0]?.[0]?.toolbar).toHaveLength(5)
 		expect(core.keys).toEqual(keys)
 		expect(core.keys).not.toBe(keys)
 	})
@@ -558,7 +558,7 @@ describe('subscriptions / dispose', () => {
 			{ tool: 'extra' }
 		)
 		expect(listener).toHaveBeenCalledTimes(1)
-		expect(listener.mock.calls[0]?.[0].version).toBe(1)
+		expect(listener.mock.calls[0]?.[0].version).toBe(2)
 	})
 
 	it('dispose drops value and layout listeners', () => {

@@ -1,0 +1,42 @@
+/* `@palettable/core` default head — dark theme.
+ * Import after `styles/head-default.css` (or instead of `head-light.css`).
+ * Re-asserts the dark tokens explicitly so the file pair reads as
+ * symmetric theme choices, not base + override. */
+
+:root {
+	--pd-border: rgba(71, 85, 105, 0.95);
+	--pd-border-soft: rgba(71, 85, 105, 0.9);
+	--pd-border-faint: rgba(71, 85, 105, 0.55);
+	--pd-field-border: rgba(71, 85, 105, 0.92);
+	--pd-surface: rgba(15, 23, 42, 0.88);
+	--pd-surface-soft: rgba(15, 23, 42, 0.84);
+	--pd-surface-ghost: rgba(15, 23, 42, 0.42);
+	--pd-status-bg: rgba(15, 23, 42, 0.64);
+	--pd-track-bg: rgba(15, 23, 42, 0.88);
+	--pd-panel: rgba(2, 6, 23, 0.98);
+	--pd-panel-solid: #020617;
+	--pd-tool-bg: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+	--pd-muted: #94a3b8;
+	--pd-faint: #64748b;
+	--pd-icon: #93c5fd;
+	--pd-status-fg: #bfdbfe;
+	--pd-accent: rgba(96, 165, 250, 0.9);
+	--pd-accent-ring: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+	--pd-hover-border: #93c5fd;
+	--pd-selected-bg: #1d4ed8;
+	--pd-selected-border: #60a5fa;
+	--pd-selected-fg: #eff6ff;
+	--pd-option-ring: inset 0 0 0 1px rgba(96, 165, 250, 0.4);
+	--pd-pop-shadow: 0 16px 32px rgba(2, 6, 23, 0.35);
+	--pd-panel-shadow: 0 22px 44px rgba(2, 6, 23, 0.42);
+	--pd-star: #facc15;
+	--pd-star-on: #f59e0b;
+	--pd-drag-border: rgba(96, 165, 250, 0.55);
+	--pd-r-s: 9px;
+	--pd-r-m: 10px;
+	--pd-r-l: 12px;
+	--pd-r-xl: 14px;
+	--pd-r-xxl: 18px;
+	--pd-ease: 120ms ease;
+	--pd-slide: 140ms ease;
+}

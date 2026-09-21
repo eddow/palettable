@@ -1,7 +1,9 @@
 import { ConsoleStore, PaletteCore, validateSerializedLayout } from '@palettable/core'
-import { createIDE, createValueProxy } from '@palettable/vanilla'
+import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
 import '../../core/styles/palette.css'
-import '../../core/theme/head-default.css'
+import '../../core/styles/head-default.css'
+import '../../core/styles/head-dark.css'
+import '../../core/styles/head-light.css'
 import {
 	bindConsoleToggle,
 	bindDemoLens,
@@ -48,16 +50,12 @@ const initial = demoLayoutFor('rw-combobox')
 // all reads/writes go through the `demo` proxy below.
 const core = new PaletteCore(demoPoints(), {
 	keys: demoKeys,
-	initialLayout: {
-		version: 1,
-		borders: {
-			top: initial.borders.top.flat(),
-			right: initial.borders.right.flat(),
-			bottom: initial.borders.bottom.flat(),
-			left: initial.borders.left.flat(),
-		},
-		parking: initial.parking,
-	},
+	// Preset layouts are live `Borders` (tracks preserved): pass them
+	// directly — never via `.flat()`/serialized, which drops track
+	// boundaries (each slot would reload as its own single-slot track).
+	// `demoLayoutFor` returns a fresh clone and the tree clones again,
+	// so no extra copy is needed here.
+	initialLayout: { borders: initial.borders, parking: initial.parking },
 })
 
 function hasCommandBoxTool(): boolean {
@@ -115,7 +113,7 @@ const ide = createIDE(ideHost, {
 	core,
 	consoleStore,
 	isEditable: () => editable,
-	itemEditors: ['commandBox', 'drawer', 'status'],
+	itemEditors: ['commandBox', 'drawer', 'status', 'theme'],
 	paletteId: 'demo',
 })
 
@@ -165,21 +163,14 @@ function renderPills(): void {
 }
 
 function applyTheme(): void {
-	const setting = demo.theme
-	const prefersLight =
-		typeof window.matchMedia === 'function' &&
-		window.matchMedia('(prefers-color-scheme: light)').matches
-	const resolved = setting === 'system' ? (prefersLight ? 'light' : 'dark') : setting
-	document.documentElement.classList.toggle('palette-default-theme-light', resolved === 'light')
-	document.documentElement.dataset.theme = resolved
-	document.documentElement.style.colorScheme = resolved
+	applyThemeSetting(document.documentElement, demo.theme)
 }
 
 // Per-tool DOM updates are owned by the IDE's own bindings; chrome
 // (pills/grid/theme/last-action) renders only via the proxy `onChange`.
 consoleStore.subscribe(() => renderLastAction())
 
-function readStoredLayout(): import('@palettable/core').SerializedLayout | undefined {
+function readStoredLayout(): import('@palettable/core').AnySerializedLayout | undefined {
 	try {
 		const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
 		if (!raw) return undefined
@@ -203,16 +194,9 @@ function persistLayout(): void {
 function loadPreset(id: DemoMode): void {
 	const layout = demoLayoutFor(id)
 	editable = (['rw-combobox', 'rw-command-first'] as DemoMode[]).includes(id)
-	core.layout.setLayout({
-		version: 1,
-		borders: {
-			top: layout.borders.top.flat(),
-			right: layout.borders.right.flat(),
-			bottom: layout.borders.bottom.flat(),
-			left: layout.borders.left.flat(),
-		},
-		parking: layout.parking,
-	})
+	// Live layout (tracks preserved) — same rule as the initial load above.
+	// `demoLayoutFor` returns a fresh clone; the tree clones again.
+	core.layout.setLayout({ borders: layout.borders, parking: layout.parking })
 	restoredBadge.hidden = true
 	const labels: Record<DemoMode, string> = {
 		'rw-combobox': 'R/W + command box',
@@ -253,11 +237,7 @@ window.setInterval(() => {
 	chip.textContent = `⏱ ${demo.missionElapsed}`
 }, 1000)
 
-const stored = readStoredLayout()
-if (stored) {
-	core.layout.setLayout(stored)
-	restoredBadge.hidden = false
-	ide.refresh()
-}
-
+// Demo always boots on "R/W + command box" (`initial` above): a stored
+// layout never auto-applies (explicit Load only), so every configuration
+// ships its right-most top toolbar — the `theme` tool — on first paint.
 renderChrome()

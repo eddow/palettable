@@ -1,0 +1,1516 @@
+/* `@palettable/core` default head — structural chrome.
+ * Adapters may override or replace. Import once per app alongside
+ * `styles/palette.css` (skeleton) plus one theme file
+ * (`styles/head-dark.css` or `styles/head-light.css`). Never injected at runtime.
+ *
+ * Layout:  1 buttons · 2 icon/choice/status · 3 shared panel ·
+ *          4 command box · 5 overlay/panel · 6 editor groups · 7 select ·
+ *          8 slider · 9 stepper/stars · 10 vertical · 11 joined-box ·
+ *          12 configurator/add-panel
+ * Tokens live in `head-dark.css` / `head-light.css` (§0) — no raw colors here. */
+
+/* ── 1. Buttons ── */
+/* Shared clickable chrome: border + fill + inherited text. Display, padding
+ * and radius stay per-component (§4 results, §6 readouts). */
+
+.palette-default-tool,
+.palette-default-command-chip,
+.palette-default-command-suggestion,
+.palette-default-command-result {
+	border: 1px solid var(--pd-border);
+	background: var(--pd-tool-bg);
+	color: inherit;
+}
+
+.palette-default-tool {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	line-height: 1;
+	padding: 7px 10px;
+	border-radius: var(--pd-r-m);
+	cursor: pointer;
+	/* Items fill the standardized perpendicular size so a toolbar at rest is
+	 * exactly `--palette-toolbar-perpendicular` on both axes. */
+	block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+	transition:
+		border-color var(--pd-ease),
+		background var(--pd-ease),
+		transform var(--pd-ease);
+}
+
+.palette-default-tool-compact {
+	min-width: 2.35rem;
+	padding-inline: 8px;
+}
+
+.palette-default-tool:hover:not(:disabled) {
+	border-color: var(--pd-hover-border);
+	transform: translateY(-1px);
+}
+
+/* Inside a toolbar the lift would fight the toolbar's own hover padding and
+ * stretch `align-items: center` siblings, so buttons stay put there. The
+ * toolbar root is `.toolbar` (no `.palette-default-toolbar` wrapper). */
+.toolbar .palette-default-tool:hover:not(:disabled) {
+	transform: none;
+}
+
+.palette-default-tool:disabled {
+	cursor: default;
+	opacity: 0.72;
+}
+
+/* One selected/hover triple for every blue fill: tools, command results
+ * (§4), and the square open/close buttons (§4/§5). */
+.palette-default-tool.is-selected,
+.palette-default-command-result:hover:not(:disabled),
+.palette-default-command-result.is-selected,
+.palette-default-command-open:hover,
+.palette-default-command-open:focus-visible,
+.palette-default-command-close:hover {
+	background: var(--pd-selected-bg);
+	border-color: var(--pd-selected-border);
+	color: var(--pd-selected-fg);
+}
+
+.palette-default-tone-accent .palette-default-tool {
+	border-color: var(--pd-accent);
+	box-shadow: var(--pd-accent-ring);
+}
+
+/* ── 2. Icon / choice / status ── */
+
+.palette-default-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 1rem;
+	color: var(--pd-icon);
+}
+
+.palette-default-choice {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+/* Pointless read-only tool: readout only, no interaction. */
+.palette-default-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 10px;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-m);
+	background: var(--pd-status-bg);
+	color: inherit;
+	font-variant-numeric: tabular-nums;
+}
+
+.palette-default-status-value {
+	font-weight: 600;
+	color: var(--pd-status-fg);
+}
+
+/* ── 3. Shared floating panel ── */
+/* One chrome for every popout: command popover, select list, drawer track,
+ * vertical text overlays. Positioned per-component in §4/§7/§8/§10. */
+
+.palette-default-command-popover,
+.palette-default-select-list,
+.palette-default-slider-drawer > .palette-default-slider-track,
+.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice,
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	border: 1px solid var(--pd-border-soft);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-panel);
+	box-shadow: var(--pd-pop-shadow);
+}
+
+:is(
+	.palette-default-command-popover,
+	.palette-default-select-list,
+	.palette-default-slider-drawer > .palette-default-slider-track
+)[hidden] {
+	display: none;
+}
+
+/* ── 4. Command box ── */
+
+.palette-default-command-box {
+	position: relative;
+	inline-size: 12rem;
+	max-inline-size: min(22rem, calc(100vw - 8rem));
+	transition: inline-size var(--pd-slide);
+}
+
+.palette-default-command-box.is-expanded {
+	inline-size: 100%;
+}
+
+.palette-default-command-box.is-floating {
+	z-index: 5;
+}
+
+.palette-default-command-shell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-inline-size: 0;
+	padding: 6px 10px;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface);
+	box-sizing: border-box;
+}
+
+.palette-default-command-box.is-expanded .palette-default-command-shell {
+	border-color: var(--pd-accent);
+	box-shadow: var(--pd-accent-ring);
+}
+
+.palette-default-command-tokens {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-inline-size: 0;
+}
+
+/* Rest-state readout: current text while non-empty. Hidden when empty (the
+ * input placeholder covers that) and once the input is revealed. */
+.palette-default-command-text {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 1 auto;
+	min-inline-size: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.palette-default-command-text.is-hint {
+	color: var(--pd-muted);
+}
+
+.palette-default-command-box.is-floating[data-has-text='false']
+	.palette-default-command-text {
+	display: none;
+}
+
+/* Toolbar box stays on one line (console chips may wrap); input revealed on
+ * hover/focus only. Flex sizing intact so the box never collapses. */
+.palette-default-command-box.is-floating .palette-default-command-tokens {
+	flex-wrap: nowrap;
+}
+
+.palette-default-command-box.is-floating .palette-default-command-input {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--pd-ease);
+}
+
+.palette-default-command-box.is-floating:hover .palette-default-command-input,
+.palette-default-command-box.is-floating:focus-within .palette-default-command-input {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.palette-default-command-box.is-floating:hover .palette-default-command-text,
+.palette-default-command-box.is-floating:focus-within .palette-default-command-text {
+	display: none;
+}
+
+/* Pills (svelte-only: CommandBoxView chips + suggestions). */
+.palette-default-command-chip,
+.palette-default-command-suggestion {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0.2rem 0.52rem;
+	border-radius: 999px;
+	cursor: pointer;
+}
+
+.palette-default-command-input {
+	flex: 1 1 7rem;
+	min-inline-size: 4rem;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+}
+
+/* Square button opening the console from the toolbar box. Plain button, not
+ * a check-button; hover joins the shared selected triple (§1). */
+.palette-default-command-open {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 1.75rem;
+	block-size: 1.75rem;
+	flex: 0 0 auto;
+	margin: -2px;
+	padding: 0;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-m);
+	background: var(--pd-surface);
+	color: var(--pd-muted);
+	cursor: pointer;
+	font-size: 0.9rem;
+	line-height: 1;
+	transition:
+		border-color var(--pd-ease),
+		background var(--pd-ease),
+		color var(--pd-ease);
+}
+
+.palette-default-command-input::placeholder {
+	color: var(--pd-muted);
+}
+
+.palette-default-command-popover {
+	position: relative;
+	margin-top: 6px;
+	display: grid;
+	gap: 8px;
+	inline-size: 100%;
+	padding: 8px;
+	border-radius: var(--pd-r-xl);
+	z-index: 3;
+	box-sizing: border-box;
+}
+
+.palette-default-command-box.is-floating .palette-default-command-popover {
+	position: absolute;
+	inset-inline: 0;
+	top: calc(100% + 6px);
+	inline-size: max(18rem, 100%);
+}
+
+.palette-default-command-suggestions,
+.palette-default-command-results {
+	display: grid;
+	gap: 6px;
+}
+
+.palette-default-command-suggestions {
+	grid-template-columns: repeat(auto-fit, minmax(4.75rem, max-content));
+}
+
+.palette-default-command-result {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	inline-size: 100%;
+	padding: 8px 10px;
+	border-radius: var(--pd-r-m);
+	cursor: pointer;
+	text-align: left;
+}
+
+.palette-default-command-result-copy,
+.palette-default-command-result-label {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-command-result-label {
+	grid-auto-flow: column;
+	justify-content: start;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.palette-default-command-result-meta,
+.palette-default-command-empty {
+	color: var(--pd-muted);
+	font-size: 0.82rem;
+}
+
+/* ── 5. Command overlay (console modal) ── */
+/* Non-blocking backdrop: work-zone dimming + `pointer-events: none` already
+ * disable it; borders stay interactive in edit mode. Only the panel captures. */
+
+.palette-default-command-overlay {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	background: transparent;
+	pointer-events: none;
+	z-index: 40;
+	box-sizing: border-box;
+}
+
+.palette-default-command-panel {
+	inline-size: 100%;
+	max-inline-size: 48rem;
+	max-block-size: calc(100vh - 2rem);
+	padding: 10px;
+	border: 1px solid var(--pd-field-border);
+	border-radius: var(--pd-r-xxl);
+	background: var(--pd-panel-solid);
+	box-shadow: var(--pd-panel-shadow);
+	box-sizing: border-box;
+	position: relative;
+	overflow: auto;
+	pointer-events: auto;
+}
+
+.palette-default-command-top {
+	display: grid;
+	gap: 14px;
+	padding-top: 1rem;
+}
+
+.palette-default-command-bottom {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 14px;
+	align-items: start;
+	inline-size: 100%;
+	min-inline-size: 0;
+}
+
+.palette-default-command-main {
+	display: grid;
+	gap: 12px;
+	inline-size: 100%;
+	max-inline-size: 100%;
+	min-inline-size: 0;
+}
+
+.palette-default-details-panel {
+	min-inline-size: 0;
+	min-width: min(16rem, 100%);
+}
+
+@media (min-width: 980px) {
+	.palette-default-command-bottom:has(.palette-default-details-panel) {
+		grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+		align-items: start;
+	}
+}
+
+.palette-default-command-parking {
+	display: flex;
+	flex-direction: column;
+	min-inline-size: 0;
+	min-block-size: 0;
+}
+
+.palette-default-command-close {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 1px solid var(--pd-border);
+	border-radius: 999px;
+	background: var(--pd-surface);
+	color: var(--pd-muted);
+	cursor: pointer;
+	font-size: 1rem;
+	line-height: 1;
+	transition:
+		border-color var(--pd-ease),
+		background var(--pd-ease),
+		color var(--pd-ease);
+}
+
+/* ── 6. Editor groups ── */
+/* All editors are gapless inline groups; §11 collapses the shared edges.
+ * `stepper`/`stars` carry the group chrome; `slider`/`select`/`segmented`
+ * are transparent wrappers whose children carry it. */
+
+.palette-default-select,
+.palette-default-slider,
+.palette-default-slider-inline,
+.palette-default-slider-drawer,
+.palette-default-stepper,
+.palette-default-stars,
+.palette-default-segmented {
+	display: inline-flex;
+	align-items: center;
+	gap: 0;
+	position: relative;
+}
+
+.palette-default-stepper,
+.palette-default-stars {
+	padding: 3px;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface);
+}
+
+/* Value readout chip shared by slider/stepper/select: icon + text, never a
+ * bare floating number. One rule so all three read as the same control. */
+.palette-default-slider-value,
+.palette-default-stepper-value,
+.palette-default-select-value {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-inline-size: 3.2rem;
+	min-block-size: 2rem;
+	padding-inline: 0.72rem;
+	border: 1px solid var(--pd-border);
+	background: var(--pd-surface);
+	font-weight: 600;
+}
+
+:is(.palette-default-slider-value, .palette-default-stepper-value, .palette-default-select-value)
+	> .palette-default-icon {
+	min-inline-size: 0;
+	padding-inline: 0;
+}
+
+/* Icon-only chip (`showValue: false`): shrink to the icon. */
+.palette-default-slider-value.is-icon-only,
+.palette-default-select-value.is-icon-only {
+	min-inline-size: 0;
+}
+
+/* ── 7. Select (custom listbox) ── */
+/* Closed box mirrors the drawer-slider trigger: trigger wraps a value chip
+ * (icon nested inside, like the slider/stepper readout). List is a
+ * click-opened popout (never hover); rows always icon + full text. */
+.palette-default-select {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	overflow: visible;
+}
+
+.palette-default-select-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 0.72rem;
+	min-inline-size: 3.2rem;
+	min-block-size: 2rem;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface);
+	color: inherit;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	box-sizing: border-box;
+}
+
+.palette-default-select-trigger::after {
+	content: '▾';
+	font-size: 0.7rem;
+	color: var(--pd-muted);
+	margin-inline-start: auto;
+}
+
+/* Inside the trigger the value is bare text — the trigger provides chrome. */
+.palette-default-select-trigger > .palette-default-select-value {
+	min-inline-size: 0;
+	min-block-size: 0;
+	padding-inline: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-select-list {
+	position: absolute;
+	z-index: 2;
+	margin: 0;
+	min-inline-size: 100%;
+	inline-size: max-content;
+	max-inline-size: 16rem;
+	display: grid;
+	gap: 2px;
+	padding: 4px;
+	box-sizing: border-box;
+}
+
+.palette-default-select-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0.42rem 0.72rem;
+	border: 1px solid transparent;
+	border-radius: var(--pd-r-s);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	text-align: start;
+	white-space: nowrap;
+}
+
+.palette-default-select-option:hover:not(:disabled),
+.palette-default-select-option:focus-visible:not(:disabled) {
+	border-color: var(--pd-accent);
+}
+
+.palette-default-select-option.is-selected {
+	border-color: var(--pd-accent);
+	box-shadow: var(--pd-option-ring);
+}
+
+.palette-default-select-option:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+/* Horizontal: list drops below (above on bottom-docked toolbars). */
+.palette-default-select.palette-default-layout-horizontal > .palette-default-select-list {
+	top: calc(100% + 4px);
+	inset-inline-start: 0;
+}
+
+.palette-default-select.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-select-list {
+	top: auto;
+	bottom: calc(100% + 4px);
+}
+
+/* Vertical: square icon stack at rest; label overlays beside the toolbar
+ * (segmented pattern, §10); list opens sideways like the drawer track. */
+.palette-default-select.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+	justify-content: center;
+	position: relative;
+	overflow: visible;
+	/* Borderless wrapper (drawer pattern): chip + label carry the chrome,
+	 * so the overlay positions against a borderless box — no 1px miss. */
+	padding: 0;
+	border: 0;
+	background: transparent;
+	border-radius: var(--pd-r-l);
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger:has(> .palette-default-choice) {
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+}
+
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger:has(> .palette-default-choice) {
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger::after {
+	content: none;
+}
+
+/* Chip = visible trigger at rest (icon stack in flow, bordered chrome).
+ * Label = direct child of the trigger, sibling of the chip (§10 overlay). */
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
+	> .palette-default-select-value {
+	flex-direction: column;
+	gap: 1px;
+	line-height: 1;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	overflow: visible;
+	inline-size: 100%;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	padding: 0.3rem 0;
+	box-sizing: border-box;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface);
+}
+
+/* Text on board: chip squares its joint side to meet the overlay. */
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger:has(> .palette-default-choice)
+	> .palette-default-select-value {
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+}
+
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger:has(> .palette-default-choice)
+	> .palette-default-select-value {
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+}
+
+.palette-default-select.palette-default-layout-vertical
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 100%;
+	z-index: 2;
+	display: inline-flex;
+	align-items: center;
+	inline-size: max-content;
+	padding-inline: 0.72rem;
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	white-space: nowrap;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(-0.4rem);
+	transition:
+		transform var(--pd-slide),
+		opacity var(--pd-ease);
+}
+
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	inset-inline-start: auto;
+	inset-inline-end: 100%;
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	transform: translateX(0.4rem);
+}
+
+/* Hover-only (never focus): at rest the label ignores the pointer; on hover
+ * it catches it, so moving across the text keeps `:hover` alive. */
+.palette-default-select.palette-default-layout-vertical:hover
+	> .palette-default-select-trigger
+	> .palette-default-choice {
+	opacity: 1;
+	transform: translateX(0);
+	pointer-events: auto;
+}
+
+.palette-default-select.palette-default-layout-vertical > .palette-default-select-list {
+	inset-block-start: 0;
+	inset-inline-start: calc(100% + 4px);
+}
+
+.palette-default-select.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-select-list {
+	inset-inline-start: auto;
+	inset-inline-end: calc(100% + 4px);
+}
+
+/* ── 8. Slider, by variant ── */
+/* `inline` keeps the range in flow along the toolbar axis. `drawer` is an
+ * input group: trigger + revealed range share one border, outer corners
+ * rounded, range on the perpendicular axis (opposite of inline). */
+
+.palette-default-slider input[type='range'] {
+	inline-size: clamp(64px, 9vw, 110px);
+}
+
+.palette-default-slider-inline {
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+/* Readout = first pill half; track = visible second half around the range. */
+.palette-default-slider-inline > .palette-default-slider-value {
+	border-radius: var(--pd-r-s) 0 0 var(--pd-r-s);
+	margin-inline-start: 0;
+}
+
+.palette-default-slider-inline > .palette-default-slider-track {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-block-size: 2rem;
+	padding-inline: 0.72rem;
+	border: 1px solid var(--pd-border);
+	background: var(--pd-track-bg);
+	border-radius: 0 var(--pd-r-s) var(--pd-r-s) 0;
+	margin-inline-start: -1px;
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	min-inline-size: 0;
+}
+
+.palette-default-slider-inline > .palette-default-slider-track > input[type='range'] {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	inline-size: 100%;
+	block-size: 100%;
+	min-inline-size: 0;
+}
+
+.palette-default-slider-drawer {
+	overflow: visible;
+	border: 0;
+	background: transparent;
+	padding: 0;
+}
+
+/* Trigger = always-visible segment wrapping the value chip. */
+.palette-default-slider-drawer > .palette-default-slider-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 0.72rem;
+	min-block-size: 2rem;
+	position: relative;
+	z-index: 1;
+	border: 1px solid var(--pd-border);
+	background: var(--pd-surface);
+	font-weight: 600;
+}
+
+.palette-default-slider-drawer
+	> .palette-default-slider-trigger
+	> .palette-default-slider-value {
+	min-inline-size: 0;
+	min-block-size: 0;
+	padding-inline: 0;
+	border: 0;
+	background: transparent;
+}
+
+/* Range = revealed segment. Input fills the track; track carries chrome. */
+.palette-default-slider-drawer > .palette-default-slider-track {
+	position: absolute;
+	z-index: 2;
+	margin: 0;
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		transform var(--pd-slide),
+		opacity var(--pd-ease);
+}
+
+.palette-default-slider-drawer > .palette-default-slider-track > input[type='range'] {
+	inline-size: 100%;
+	block-size: 100%;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-slider-drawer:hover > .palette-default-slider-track,
+.palette-default-slider-drawer:focus-within > .palette-default-slider-track {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translate(0);
+}
+
+/* Horizontal toolbar: group runs perpendicular — trigger above, range below. */
+
+.palette-default-slider-drawer.palette-default-layout-horizontal {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal
+	> .palette-default-slider-trigger {
+	border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+	justify-content: center;
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal > .palette-default-slider-track {
+	top: 100%;
+	left: 0;
+	right: 0;
+	border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+	/* `writing-mode` swaps logical axes — physical sizes keep full width. */
+	width: 100%;
+	height: 6.5rem;
+	padding: 0.72rem 0;
+	box-sizing: border-box;
+	transform: translateY(-0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: vertical-lr;
+	direction: rtl;
+}
+
+/* Vertical toolbar: trigger inline-start, range beside it, horizontal track. */
+
+.palette-default-slider-drawer.palette-default-layout-vertical {
+	flex-direction: row;
+	block-size: var(--palette-toolbar-perpendicular);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-trigger {
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 1px;
+	padding: 0.3rem 0;
+	justify-content: center;
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical > .palette-default-slider-track {
+	inset-block: 0;
+	inset-inline-start: 100%;
+	inline-size: 6.5rem;
+	block-size: 100%;
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	padding: 0 0.72rem 0 0.9rem;
+	box-sizing: border-box;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: horizontal-tb;
+}
+
+/* Region mirrors the group into the workspace; trigger keeps the
+ * toolbar-outer half-rounding, range takes the workspace half. */
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-slider-trigger {
+	border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+}
+
+.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
+	> .palette-default-slider-track {
+	top: auto;
+	bottom: 100%;
+	border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+	transform: translateY(0.4rem);
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-slider-trigger {
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
+	> .palette-default-slider-track {
+	inset-inline-start: auto;
+	inset-inline-end: 100%;
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	padding: 0 0.9rem 0 0.72rem;
+	transform: translateX(0.4rem);
+}
+
+:is(
+	.palette-default-slider-drawer.palette-default-layout-horizontal:hover,
+	.palette-default-slider-drawer.palette-default-layout-horizontal:focus-within,
+	.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:hover,
+	.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:focus-within
+) > .palette-default-slider-track {
+	transform: translateY(0);
+}
+
+:is(
+	.palette-default-slider-drawer.palette-default-layout-vertical:hover,
+	.palette-default-slider-drawer.palette-default-layout-vertical:focus-within,
+	.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:hover,
+	.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:focus-within
+) > .palette-default-slider-track {
+	transform: translateX(0);
+}
+
+/* ── 9. Stepper / stars ── */
+
+.palette-default-stars-row {
+	display: inline-flex;
+	gap: 2px;
+	align-items: center;
+}
+
+.palette-default-arrow {
+	padding: 0 1px;
+	border: 0;
+	background: transparent;
+	color: var(--pd-star);
+	line-height: 1;
+	font-size: 1rem;
+}
+
+.palette-default-arrow.is-selected {
+	color: var(--pd-star-on);
+}
+
+.palette-default-stepper {
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+/* Horizontal stepper readout stretches to the buttons' block size so
+ * minus/value/plus share one edge at rest height. Drawer popups are
+ * horizontal tracks too (`.is-horizontal`) whatever the host axis. */
+.palette-default-stepper:not(.palette-default-layout-vertical)
+	> .palette-default-stepper-value,
+.palettable-drawer__popup.is-horizontal .palette-default-stepper-value {
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
+}
+
+/* Drawer ("More") trigger: always icon-only. Label survives as accessible
+ * name + tooltip; no axis-scoped hiding needed. */
+.palette-default-tool.palettable-drawer__trigger {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	block-size: var(--palette-toolbar-perpendicular);
+	padding: 0;
+	justify-content: center;
+}
+
+/* ── 10. Vertical axis ── */
+/* Perpendicular width stays standardized; content grows along the toolbar.
+ * Text beside icons is a hover overlay so the toolbar never resizes.
+ * Overlays open into the workspace: left by default, right on
+ * `region-left` (segmented) / `region-right` (select, command).
+ * Vertical groups use `column-reverse`, so DOM order is visually inverted
+ * (§11 accounts for it). */
+
+.palette-default-segmented.palette-default-layout-vertical,
+.palette-default-stepper.palette-default-layout-vertical,
+.palette-default-stars.palette-default-layout-vertical,
+.palette-default-stars-row.palette-default-layout-vertical {
+	flex-direction: column-reverse;
+}
+
+/* Square tools in vertical toolbars. */
+.palette-vertical .palette-default-tool {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	padding-inline: 0;
+}
+
+/* Command box: icon-only square; shell grows sideways, toolbar width fixed. */
+.palette-default-command-box.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	max-inline-size: none;
+	block-size: var(--palette-toolbar-perpendicular);
+	position: relative;
+	overflow: visible;
+}
+
+.palette-default-command-box.palette-default-layout-vertical .palette-default-command-shell {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 0;
+	inline-size: var(--palette-toolbar-perpendicular);
+	padding: 0;
+	justify-content: center;
+	overflow: hidden;
+	z-index: 1;
+	transition:
+		inline-size var(--pd-slide),
+		box-shadow var(--pd-ease);
+}
+
+.palette-default-command-box.palette-default-layout-vertical:hover
+	.palette-default-command-shell,
+.palette-default-command-box.palette-default-layout-vertical:focus-within
+	.palette-default-command-shell {
+	inline-size: 14rem;
+	background: var(--pd-panel);
+	border-color: var(--pd-accent);
+	box-shadow: var(--pd-pop-shadow);
+	justify-content: flex-start;
+	padding-inline: 0.6rem;
+}
+
+.palette-default-command-box.palette-default-layout-vertical
+	.palette-default-command-tokens {
+	flex-wrap: nowrap;
+	overflow: hidden;
+	opacity: 0;
+	transition: opacity var(--pd-ease);
+}
+
+.palette-default-command-box.palette-default-layout-vertical:hover
+	.palette-default-command-tokens,
+.palette-default-command-box.palette-default-layout-vertical:focus-within
+	.palette-default-command-tokens {
+	opacity: 1;
+}
+
+.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
+	.palette-default-command-shell {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
+}
+
+.palette-default-command-box.palette-default-layout-vertical
+	.palette-default-command-popover {
+	position: absolute;
+	inset-inline-start: 0;
+	top: calc(100% + 6px);
+	inline-size: 18rem;
+	z-index: 6;
+}
+
+.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
+	.palette-default-command-popover {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
+}
+
+/* Inline slider grows along the toolbar; range runs vertically below chip. */
+.palette-default-slider-inline.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+	padding: 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 0;
+	border: 0;
+	background: transparent;
+}
+
+.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-value {
+	min-inline-size: 100%;
+	min-block-size: 1.6rem;
+	padding: 0.35rem 0;
+	margin-inline-start: 0;
+	margin-block-start: 0;
+	border-radius: var(--pd-r-s) var(--pd-r-s) 0 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1;
+}
+
+.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-track {
+	width: 100%;
+	height: 3.5rem;
+	margin: 0;
+	margin-block-start: -1px;
+	padding: 0.35rem 0;
+	border-radius: 0 0 var(--pd-r-s) var(--pd-r-s);
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+}
+
+.palette-default-slider-inline.palette-default-layout-vertical
+	> .palette-default-slider-track
+	> input[type='range'] {
+	writing-mode: vertical-lr;
+	direction: rtl;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	max-width: 100%;
+	margin: 0;
+	padding: 0;
+	flex: 0 0 auto;
+	border: 0;
+	background: transparent;
+	border-radius: 0;
+}
+
+/* Stars row stacks; constrained so it never widens the toolbar. */
+.palette-default-stars.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.palette-default-stars.palette-default-layout-vertical > .palette-default-stars-row {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	flex-direction: column-reverse;
+	align-items: center;
+	justify-content: center;
+}
+
+/* Stepper readout + square vertical triggers stack icon above value. */
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	padding: 0.35rem 0;
+	box-sizing: border-box;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1;
+}
+
+.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value > .palette-default-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-inline-size: 0;
+	padding-inline: 0;
+}
+
+.palette-default-slider-drawer.palette-default-layout-vertical
+	> .palette-default-slider-trigger
+	> .palette-default-slider-value {
+	flex-direction: column;
+	gap: 1px;
+	line-height: 1;
+}
+
+/* Segmented at rest: icons only; labels overlay beside them on group hover.
+ * Bordered anchor (unlike the borderless select wrapper): span the border
+ * box (-1px block), start past the outer face (+1px inline). */
+.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon) {
+	position: relative;
+	overflow: visible;
+}
+
+.palette-default-segmented.palette-default-layout-vertical
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	position: absolute;
+	inset-block: -1px;
+	inset-inline-end: calc(100% + 1px);
+	display: inline-flex;
+	align-items: center;
+	inline-size: max-content;
+	padding-inline: 0.72rem;
+	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	white-space: nowrap;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateX(0.4rem);
+	transition:
+		transform var(--pd-slide),
+		opacity var(--pd-ease);
+}
+
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	inset-inline-end: auto;
+	inset-inline-start: calc(100% + 1px);
+	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	transform: translateX(-0.4rem);
+}
+
+.palette-default-segmented.palette-default-layout-vertical:hover
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice,
+.palette-default-segmented.palette-default-layout-vertical:focus-within
+	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-choice {
+	opacity: 1;
+	transform: translateX(0);
+}
+
+/* ── 11. Joined-box collapsing ── */
+/* Horizontal: shared edges collapse via -1px; only outer corners round.
+ * Vertical groups are `column-reverse` (DOM first = visual bottom), so
+ * `:first-child` rounds the bottom and `:last-child` the top. With text on
+ * board the joint side squares to meet the overlay; exterior keeps round. */
+
+:is(
+	.palette-default-segmented > .palette-default-tool,
+	.palette-default-stepper > .palette-default-tool,
+	.palette-default-stepper-value,
+	.palette-default-select-trigger,
+	.palette-default-stars > :is(.palette-default-icon, .palette-default-stars-row)
+) {
+	margin-inline-start: -1px;
+}
+
+:is(
+	.palette-default-segmented > :first-child,
+	.palette-default-stepper > :first-child,
+	.palette-default-stars > :first-child
+) {
+	margin-inline-start: 0;
+}
+
+:is(.palette-default-stepper, .palette-default-stars) > :first-child {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+:is(.palette-default-stepper, .palette-default-stars) > :last-child {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+:is(.palette-default-stepper, .palette-default-stars) > :not(:first-child):not(:last-child) {
+	border-radius: 0;
+}
+
+.palette-default-segmented > :not(:first-child) {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.palette-default-segmented > :not(:last-child) {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+:is(
+	.palette-default-segmented.palette-default-layout-vertical > .palette-default-tool,
+	.palette-default-stepper.palette-default-layout-vertical > .palette-default-tool,
+	.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value,
+	.palette-default-stars.palette-default-layout-vertical > :is(.palette-default-icon, .palette-default-stars-row)
+) {
+	margin-inline-start: 0;
+	margin-block-start: -1px;
+}
+
+:is(
+	.palette-default-segmented.palette-default-layout-vertical,
+	.palette-default-stepper.palette-default-layout-vertical,
+	.palette-default-stars.palette-default-layout-vertical
+) > :first-child {
+	margin-block-start: 0;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-left-radius: var(--pd-r-s);
+	border-bottom-right-radius: var(--pd-r-s);
+}
+
+:is(
+	.palette-default-segmented.palette-default-layout-vertical,
+	.palette-default-stepper.palette-default-layout-vertical,
+	.palette-default-stars.palette-default-layout-vertical
+) > :last-child {
+	border-top-left-radius: var(--pd-r-s);
+	border-top-right-radius: var(--pd-r-s);
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-stepper.palette-default-layout-vertical > :not(:first-child):not(:last-child),
+.palette-default-stars.palette-default-layout-vertical > :not(:first-child):not(:last-child) {
+	border-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+/* Text on board: square joint, round exterior. Gate mirrors the overlay —
+ * only buttons with icon + label square the joint. Default opens left
+ * (exterior right); `region-left` mirrors. */
+.palette-default-segmented.palette-default-layout-vertical
+	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: var(--pd-r-s);
+}
+
+.palette-default-segmented.palette-default-layout-vertical
+	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: 0;
+	border-top-right-radius: var(--pd-r-s);
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-left-radius: var(--pd-r-s);
+	border-bottom-right-radius: 0;
+}
+
+.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
+	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	border-top-left-radius: var(--pd-r-s);
+	border-top-right-radius: 0;
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+/* ── 12. Configurator / add-item panel ── */
+
+.palette-default-config-table,
+.palette-default-config-stack {
+	display: grid;
+	gap: 10px;
+}
+
+.palette-default-config-header {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-config-header strong {
+	font-size: 0.97rem;
+	font-weight: 600;
+}
+
+.palette-default-config-header span {
+	font-size: 0.78rem;
+	color: var(--pd-muted);
+}
+
+.palette-default-config-row {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 10px;
+	align-items: center;
+	min-inline-size: 0;
+}
+
+.palette-default-config-key {
+	display: grid;
+	gap: 2px;
+}
+
+.palette-default-config-key strong {
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: var(--pd-muted);
+}
+
+.palette-default-config-key span {
+	font-size: 0.72rem;
+	color: var(--pd-faint);
+}
+
+.palette-default-config-value {
+	min-inline-size: 0;
+}
+
+.palette-default-config-value :is(input, select),
+.palette-default-add-inline-value > :is(input, select) {
+	inline-size: 100%;
+	min-inline-size: 0;
+	padding: 0.42rem 0.62rem;
+	border: 1px solid var(--pd-field-border);
+	border-radius: var(--pd-r-m);
+	background: var(--pd-surface-soft);
+	color: inherit;
+	box-sizing: border-box;
+	font: inherit;
+}
+
+.palette-default-config-value input::placeholder,
+.palette-default-add-inline-value > input::placeholder {
+	color: var(--pd-faint);
+}
+
+.palette-default-config-empty {
+	padding: 1.2rem 0.65rem;
+	border: 1px dashed var(--pd-border-faint);
+	border-radius: var(--pd-r-l);
+	color: var(--pd-muted);
+	font-size: 0.82rem;
+	text-align: center;
+}
+
+.palette-default-config-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.palette-default-panel-title {
+	font-size: 0.82rem;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--pd-muted);
+}
+
+.palette-default-add-panel {
+	min-inline-size: 0;
+	inline-size: 100%;
+	max-inline-size: 100%;
+	max-block-size: min(38rem, calc(100vh - 6rem));
+	overflow: auto;
+}
+
+.palette-default-add-variant {
+	display: grid;
+	gap: 10px;
+	padding: 10px;
+	border: 1px solid var(--pd-border-faint);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface-ghost);
+}
+
+.palette-default-add-variant-trigger {
+	display: grid;
+	gap: 4px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.palette-default-add-variant-trigger.is-disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.palette-default-add-inline-value {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 10px;
+	align-items: center;
+	min-inline-size: 0;
+}
+
+.palette-default-add-inline-value > strong {
+	font-size: 0.82rem;
+	color: var(--pd-muted);
+}
+
+.palette-default-add-drag-note {
+	padding: 8px;
+	border: 1px dashed var(--pd-drag-border);
+	border-radius: var(--pd-r-m);
+	color: var(--pd-muted);
+	font-size: 0.78rem;
+	text-align: center;
+}
+
+.palette-default-add-drag-source {
+	display: grid;
+	gap: 6px;
+	justify-items: center;
+}
+
+.palette-default-add-drag-toolbar {
+	pointer-events: none;
+}

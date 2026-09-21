@@ -1,5 +1,5 @@
 /**
- * `@palettable/vanilla` — static HTML templates (plans/html.md probe).
+ * `@palettable/vanilla` — static HTML templates.
  *
  * Locks the template contract: every shell parses to the exact classes /
  * datasets / roles / testids the e2e suite asserts, and every interpolated
@@ -7,37 +7,16 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-	addInlineValueShellTemplate,
-	addInsertTemplate,
-	addPanelShellTemplate,
-	addVariantShellTemplate,
-	borderShellTemplate,
 	commandBoxShellTemplate,
 	commandEmptyTemplate,
 	commandResultRowTemplate,
-	configEmptyTemplate,
-	configRowShellTemplate,
-	consoleOverlayShellTemplate,
-	detailsPanelShellTemplate,
-	detailsTitleTemplate,
 	drawerPopupShellTemplate,
 	drawerTriggerShellTemplate,
+	el,
 	elementFromHtml,
-	elementsFromHtml,
 	escapeHtml,
-	ideSkeletonTemplate,
-	itemSpaceTemplate,
-	parkingGapTemplate,
-	parkingRemoveTemplate,
-	parkingRowTemplate,
-	parkingStackTemplate,
-	stackSpaceTemplate,
-	toolbarItemGuardTemplate,
-	toolbarItemShellTemplate,
-	toolbarShellTemplate,
-	trackShellTemplate,
-	trackSlotShellTemplate,
-	trackSpaceTemplate,
+	iconSpan,
+	sel,
 } from './templates.js'
 
 describe('escapeHtml', () => {
@@ -48,129 +27,26 @@ describe('escapeHtml', () => {
 	})
 })
 
-describe('ide skeleton', () => {
-	it('parses to layout-transparent hosts + middle/center with console host last', () => {
-		const nodes = elementsFromHtml(ideSkeletonTemplate())
-		expect(nodes.map((node) => node.className)).toEqual(['', 'palette-ide-middle', '', ''])
-		// Border hosts are `display: contents` so borders are direct flex
-		// participants (track gaps distribute); the trailing console host
-		// stays a real block (it is moved inside the center by the caller).
-		expect([nodes[0]!, nodes[2]!].map((node) => node.style.display)).toEqual([
-			'contents',
-			'contents',
-		])
-		expect(nodes[3]!.style.display).toBe('')
-		const middle = nodes[1]!
-		expect(middle.children[1]?.className).toBe('palette-ide-center')
-		expect((middle.children[0] as HTMLElement).style.display).toBe('contents')
-		expect((middle.children[2] as HTMLElement).style.display).toBe('contents')
+describe('sel', () => {
+	it('returns root plus queried sub-elements in order', () => {
+		const [box, input, results] = sel(
+			commandBoxShellTemplate({ hint: 'Search', icon: '⌘' }),
+			'.palette-default-command-input',
+			'.palette-default-command-results'
+		)
+		expect(box?.dataset.testid).toBe('command-box-combobox')
+		expect(input?.className).toContain('palette-default-command-input')
+		expect(results?.dataset.testid).toBe('command-box-results')
+	})
+
+	it('el + iconSpan build the shared primitives', () => {
+		expect(el('div', 'toolbar-item-content').className).toBe('toolbar-item-content')
+		expect(iconSpan(undefined)).toBeNull()
+		expect(iconSpan('⌘')?.textContent).toBe('⌘')
 	})
 })
 
-describe('layout shells', () => {
-	it('border shell carries direction classes + region + editing', () => {
-		const horizontal = elementFromHtml(
-			borderShellTemplate({
-				paletteId: 'demo',
-				region: 'top',
-				direction: 'horizontal',
-				editing: true,
-			})
-		)
-		expect(horizontal.className).toContain('toolbar-border')
-		expect(horizontal.className).toContain('palette-horizontal')
-		expect(horizontal.dataset.region).toBe('top')
-		expect(horizontal.dataset.editing).toBe('true')
-		const vertical = elementFromHtml(
-			borderShellTemplate({
-				paletteId: 'demo',
-				region: 'left',
-				direction: 'vertical',
-				editing: false,
-			})
-		)
-		expect(vertical.className).toContain('palette-vertical')
-		expect(vertical.dataset.editing).toBeUndefined()
-	})
-
-	it('toolbar item shell nests content + guard with datasets', () => {
-		const wrapper = elementFromHtml(
-			toolbarItemShellTemplate({
-				itemIndex: 2,
-				tool: 'lamp',
-				editor: 'toggle',
-				inspected: true,
-				editing: true,
-			})
-		)
-		expect(wrapper.className).toBe('toolbar-item')
-		expect(wrapper.dataset.itemIndex).toBe('2')
-		expect(wrapper.dataset.tool).toBe('lamp')
-		expect(wrapper.dataset.editor).toBe('toggle')
-		expect(wrapper.dataset.inspected).toBe('true')
-		expect(wrapper.querySelector(':scope > .toolbar-item-content')).not.toBeNull()
-		expect(wrapper.querySelector(':scope > .toolbar-item-guard')).not.toBeNull()
-	})
-
-	it('gap shells carry drop-zone classes + indices', () => {
-		expect(elementFromHtml(stackSpaceTemplate(1, 'demo')).dataset.stackIndex).toBe('1')
-		expect(elementFromHtml(trackSpaceTemplate(2, 'demo')).dataset.trackSpaceIndex).toBe('2')
-		expect(elementFromHtml(itemSpaceTemplate(3, 'demo')).dataset.itemSpaceIndex).toBe('3')
-		expect(elementFromHtml(trackShellTemplate(0, 'demo')).dataset.trackIndex).toBe('0')
-		expect(elementFromHtml(trackSlotShellTemplate(1)).dataset.toolbarSlotIndex).toBe('1')
-		expect(
-			elementFromHtml(
-				toolbarShellTemplate({ paletteId: 'demo', container: 'parking', editing: false })
-			).dataset.container
-		).toBe('parking')
-		expect(elementFromHtml(toolbarItemGuardTemplate('demo')).getAttribute('aria-hidden')).toBe(
-			'true'
-		)
-	})
-})
-
-describe('parking shells', () => {
-	it('stack + row + gap + remove carry e2e datasets', () => {
-		const stack = elementFromHtml(parkingStackTemplate('demo'))
-		expect(stack.dataset.container).toBe('parking')
-		expect(elementFromHtml(parkingRowTemplate(2)).dataset.parkingRowIndex).toBe('2')
-		expect(elementFromHtml(parkingGapTemplate(1, 'demo')).dataset.parkingGapIndex).toBe('1')
-		const remove = elementFromHtml(parkingRemoveTemplate())
-		expect(remove.getAttribute('aria-label')).toBe('Delete toolbar')
-	})
-})
-
-describe('console overlay shell', () => {
-	it('carries overlay/input/results testids + placeholder + query', () => {
-		const overlay = elementFromHtml(
-			consoleOverlayShellTemplate({
-				placeholder: 'Add to toolbar…',
-				query: 'li',
-				canToggle: true,
-				isEditing: true,
-			})
-		)
-		expect(overlay.dataset.testid).toBe('console-overlay')
-		expect(overlay.getAttribute('role')).toBe('dialog')
-		const input = overlay.querySelector('.palette-default-command-input')
-		expect(input?.getAttribute('placeholder')).toBe('Add to toolbar…')
-		expect((input as HTMLInputElement).value).toBe('li')
-		expect(overlay.querySelector('[data-testid="console-results"]')).not.toBeNull()
-		expect(overlay.querySelector('[data-testid="console-mode-toggle"]')).not.toBeNull()
-	})
-
-	it('omits the mode toggle when edit-only', () => {
-		const overlay = elementFromHtml(
-			consoleOverlayShellTemplate({
-				placeholder: 'Add to toolbar…',
-				query: '',
-				canToggle: false,
-				isEditing: true,
-			})
-		)
-		expect(overlay.querySelector('[data-testid="console-mode-toggle"]')).toBeNull()
-	})
-
+describe('command shells', () => {
 	it('result rows escape label/meta/icon and honor disabled', () => {
 		const row = elementFromHtml(
 			commandResultRowTemplate({ label: '<Life>', meta: 'a&b', icon: '"i"', disabled: true })
@@ -184,23 +60,8 @@ describe('console overlay shell', () => {
 		expect(row.innerHTML).not.toContain('<Life>')
 	})
 
-	it('details + config + add shells carry testids', () => {
-		expect(elementFromHtml(detailsPanelShellTemplate()).dataset.testid).toBe(
-			'console-details-panel'
-		)
-		expect(elementFromHtml(detailsTitleTemplate('Inspect')).textContent).toBe('Inspect')
+	it('empty shell carries escaped text', () => {
 		expect(elementFromHtml(commandEmptyTemplate('Nope')).textContent).toBe('Nope')
-		expect(elementFromHtml(configEmptyTemplate('Empty')).textContent).toBe('Empty')
-		const row = elementFromHtml(configRowShellTemplate('Label'))
-		expect(row.querySelector('.palette-default-config-value')).not.toBeNull()
-		const panel = elementFromHtml(addPanelShellTemplate({ label: 'Life', meta: 'm' }))
-		expect(panel.dataset.testid).toBe('console-add-panel')
-		const variant = elementFromHtml(
-			addVariantShellTemplate({ label: 'V', meta: 'm', icon: 'i', isSet: true, selected: true })
-		)
-		expect(variant.querySelector('[aria-pressed="true"]')).not.toBeNull()
-		expect(elementFromHtml(addInsertTemplate()).dataset.testid).toBe('console-add-insert')
-		expect(elementFromHtml(addInlineValueShellTemplate()).textContent).toContain('Value')
 	})
 })
 

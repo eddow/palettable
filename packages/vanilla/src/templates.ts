@@ -1,12 +1,10 @@
 /**
  * `@palettable/vanilla` — static HTML templates for structural shells.
  *
- * Implements `plans/html.md` (Phase 1 + Step 2): the most static DOM in
- * `ide.ts` / `head.ts` (IDE skeleton, border/track/toolbar/item shells,
- * console overlay shell, drawer popup shell, command result rows) lives
- * here as escaped HTML strings. Callers parse them with `elementFromHtml`
- * and attach only data bindings + event listeners afterwards — no object
- * building for static structure, no `innerHTML` with unescaped data.
+ * Every static DOM chunk lives here as an escaped multiline HTML string.
+ * Callers parse them with `elementFromHtml` / `sel` and attach only data
+ * bindings + event listeners afterwards — no `document.createElement`
+ * chains for static structure, no `innerHTML` with unescaped data.
  *
  * Rules:
  * - Every interpolated string goes through `escapeHtml` (attribute or
@@ -27,6 +25,12 @@ export function escapeHtml(value: string): string {
 		.replace(/'/g, '&#39;')
 }
 
+/** Parse one HTML string into its root plus the queried sub-elements, in order. */
+export function sel(html: string, ...queries: string[]): HTMLElement[] {
+	const root = elementFromHtml(html)
+	return [root, ...queries.map((query) => root.querySelector(query) as HTMLElement)]
+}
+
 /** Parse one HTML string into its first element child. */
 export function elementFromHtml(html: string): HTMLElement {
 	const template = document.createElement('template')
@@ -36,198 +40,151 @@ export function elementFromHtml(html: string): HTMLElement {
 	return node
 }
 
-export function subElementFromHtml(html: string, ...queries: string[]): HTMLElement[] {
-	const el = elementFromHtml(html)
-	return [el, ...(queries.map((query) => el.querySelector(query)) as HTMLElement[])]
+/** Generic element builder (tag + class only — data/listeners stay with the caller). */
+export function el(tag: string, className: string): HTMLElement {
+	return elementFromHtml(`<${tag} class="${className}"></${tag}>`)
 }
 
-/** Parse one HTML string into all top-level elements. */
-export function elementsFromHtml(html: string): HTMLElement[] {
-	const template = document.createElement('template')
-	template.innerHTML = html.trim()
-	return [...template.content.children].filter(
-		(child): child is HTMLElement => child instanceof HTMLElement
-	)
+/** Icon glyph span (`null` when the view carries no icon). */
+export function iconSpan(icon: string | undefined): HTMLElement | null {
+	if (icon === undefined) return null
+	const span = elementFromHtml(`<span class="palette-default-icon"></span>`)
+	span.textContent = icon
+	return span
 }
 
-// ── IDE skeleton ────────────────────────────────────────────────────────────
-// Mirrors `ide.ts` container setup exactly: layout-transparent hosts
-// (`display: contents`, so borders are direct flex participants) referenced
-// by closure, never by selector + `palette-ide-middle` / `palette-ide-center`
-// classes, with the console host last inside the center so the overlay
-// never steals the work-zone's position. Returns seven top-level nodes in
-// order: top, middle, bottom — the middle holds left, center, right, and
-// the caller appends the console host into the center.
+// ── Head editor shells ────────────────────────────────────────────────────
+// Live: `head.ts` renderers parse these, then attach data + listeners.
 
-export function ideSkeletonTemplate(): string {
+export function buttonShellTemplate(options: {
+	tone: 'neutral' | 'accent'
+	compact?: boolean
+	pressed?: boolean
+}): string {
+	const pressed =
+		options.pressed === undefined
+			? ' aria-pressed="mixed"'
+			: ` aria-pressed="${options.pressed ? 'true' : 'false'}"`
 	return (
-		`<div style="display: contents"></div>` +
-		`<div class="palette-ide-middle">` +
-		`<div style="display: contents"></div>` +
-		`<div class="palette-ide-center"></div>` +
-		`<div style="display: contents"></div>` +
-		`</div>` +
-		`<div style="display: contents"></div>` +
-		`<div></div>`
+		`<button type="button" class="palette-default-tool${options.compact === true ? ' palette-default-tool-compact' : ''} palette-default-tone-${options.tone}${options.pressed === true ? ' is-selected' : ''}"` +
+		`${pressed}>` +
+		`<span class="palette-default-icon" hidden=""></span>` +
+		`<span class="palette-default-choice"></span></button>`
 	)
 }
 
-// ── Border / track / toolbar / item shells ──────────────────────────────────
-
-export function borderShellTemplate(options: {
-	paletteId: string
-	region: string
+export function selectShellTemplate(options: {
+	tone: 'neutral' | 'accent'
 	direction: 'horizontal' | 'vertical'
-	editing: boolean
+	region: string
+	iconOnly: boolean
 }): string {
-	const directionClass =
-		options.direction === 'horizontal'
-			? 'palette-horizontal stack-vertical'
-			: 'palette-vertical stack-horizontal'
-	const editing = options.editing ? ' data-editing="true"' : ''
 	return (
-		`<div class="toolbar-border ${directionClass}" data-palette-id="${escapeHtml(options.paletteId)}"` +
-		` data-region="${escapeHtml(options.region)}"${editing}></div>`
+		`<div class="palette-default-select palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${options.region}">` +
+		`<button type="button" class="palette-default-select-trigger" aria-haspopup="listbox" aria-expanded="false">` +
+		`<span class="palette-default-select-value${options.iconOnly ? ' is-icon-only' : ''}">` +
+		`<span class="palette-default-icon palette-default-tool-icon" hidden=""></span>` +
+		`<span class="palette-default-icon palette-default-value-icon" hidden=""></span>` +
+		(options.direction === 'horizontal' ? `<span class="palette-default-choice"></span>` : '') +
+		`</span>` +
+		(options.direction === 'vertical' ? `<span class="palette-default-choice"></span>` : '') +
+		`</button>` +
+		`<div class="palette-default-select-list" role="listbox" hidden=""></div></div>`
 	)
 }
 
-export function trackShellTemplate(trackIndex: number, paletteId: string): string {
-	return (
-		`<div class="toolbar-track" data-track-index="${trackIndex}"` +
-		` data-palette-id="${escapeHtml(paletteId)}"></div>`
-	)
-}
-
-export function trackSlotShellTemplate(slotIndex: number): string {
-	return `<div class="toolbar-track-slot" data-toolbar-slot-index="${slotIndex}"></div>`
-}
-
-export function stackSpaceTemplate(stackIndex: number, paletteId: string): string {
-	return (
-		`<div class="toolbar-stack-space toolbar-drop-zone" data-palette-id="${escapeHtml(paletteId)}"` +
-		` data-stack-index="${stackIndex}"></div>`
-	)
-}
-
-export function trackSpaceTemplate(trackSpaceIndex: number, paletteId: string): string {
-	return (
-		`<div class="toolbar-track-space toolbar-drop-zone" data-palette-id="${escapeHtml(paletteId)}"` +
-		` data-track-space-index="${trackSpaceIndex}"></div>`
-	)
-}
-
-export function itemSpaceTemplate(itemSpaceIndex: number, paletteId: string): string {
-	return (
-		`<div class="toolbar-item-space toolbar-drop-zone" data-palette-id="${escapeHtml(paletteId)}"` +
-		` data-item-space-index="${itemSpaceIndex}"></div>`
-	)
-}
-
-export function toolbarShellTemplate(options: {
-	paletteId: string
-	container: 'border' | 'parking'
-	editing: boolean
+export function selectOptionShellTemplate(options: {
+	value: string
+	selected: boolean
+	can: boolean
 }): string {
-	const editing = options.editing ? ' data-editing="true"' : ''
 	return (
-		`<div class="toolbar" data-palette-id="${escapeHtml(options.paletteId)}"` +
-		` data-container="${options.container}"${editing}></div>`
+		`<button type="button" class="palette-default-select-option${options.selected ? ' is-selected' : ''}" role="option"` +
+		` aria-selected="${options.selected ? 'true' : 'false'}" data-value="${escapeHtml(options.value)}"` +
+		`${options.can ? '' : ' disabled=""'}>` +
+		`<span class="palette-default-choice-icon" hidden=""></span>` +
+		`<span class="palette-default-choice"></span></button>`
 	)
 }
 
-export function toolbarItemShellTemplate(options: {
-	itemIndex: number
-	tool?: string
-	editor?: string
-	inspected?: boolean
-	editing?: boolean
+export function segmentedShellTemplate(options: {
+	tone: 'neutral' | 'accent'
+	direction: 'horizontal' | 'vertical'
+	region: string
 }): string {
-	const tool = options.tool !== undefined ? ` data-tool="${escapeHtml(options.tool)}"` : ''
-	const editor = options.editor !== undefined ? ` data-editor="${escapeHtml(options.editor)}"` : ''
-	const inspected = options.inspected === true ? ' data-inspected="true"' : ''
-	const inert = options.editing === true ? ' inert=""' : ''
-	return (
-		`<div class="toolbar-item" data-item-index="${options.itemIndex}"${tool}${editor}${inspected}>` +
-		`<div class="toolbar-item-content"${inert}></div>` +
-		(options.editing === true ? `<div class="toolbar-item-guard" aria-hidden="true"></div>` : '') +
-		`</div>`
-	)
+	return `<div class="palette-default-segmented palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${options.region}"></div>`
 }
 
-export function toolbarItemGuardTemplate(paletteId: string): string {
-	return (
-		`<div class="toolbar-item-guard" data-palette-id="${escapeHtml(paletteId)}"` +
-		` aria-hidden="true"></div>`
-	)
-}
-
-// ── Parking shells ──────────────────────────────────────────────────────────
-
-export function parkingStackTemplate(paletteId: string): string {
-	return (
-		`<div class="palette-parking palette-horizontal stack-vertical"` +
-		` data-palette-id="${escapeHtml(paletteId)}" data-container="parking"></div>`
-	)
-}
-
-export function parkingGapTemplate(gapIndex: number, paletteId: string): string {
-	return (
-		`<div class="toolbar-stack-space toolbar-drop-zone" data-palette-id="${escapeHtml(paletteId)}"` +
-		` data-parking-gap-index="${gapIndex}"></div>`
-	)
-}
-
-export function parkingRowTemplate(rowIndex: number): string {
-	return `<div class="palette-parking-row" data-parking-row-index="${rowIndex}"></div>`
-}
-
-export function parkingRemoveTemplate(): string {
-	return (
-		`<button type="button" class="palette-parking-remove" aria-label="Delete toolbar"` +
-		` title="Delete toolbar"><span class="palette-parking-remove-icon"` +
-		` aria-hidden="true">🗑</span></button>`
-	)
-}
-
-// ── Console overlay shell (Phase 1) ─────────────────────────────────────────
-// Static skeleton only: overlay + panel + close + top + bottom/main/box/
-// shell/tokens/input(+mode toggle) + popover/results. The caller fills the
-// parking host, binds the input listeners, and renders results + details.
-
-export function consoleOverlayShellTemplate(options: {
-	placeholder: string
-	query: string
-	canToggle: boolean
-	isEditing: boolean
+export function segmentedOptionShellTemplate(options: {
+	value: string
+	selected: boolean
+	can: boolean
 }): string {
-	const toggle = options.canToggle
-		? `<button type="button" class="palette-default-command-mode" data-testid="console-mode-toggle"` +
-			` aria-pressed="${options.isEditing ? 'true' : 'false'}"` +
-			` aria-label="${options.isEditing ? 'Done editing' : 'Edit toolbars'}"` +
-			` title="${options.isEditing ? 'Done editing' : 'Edit toolbars'}">` +
-			`${options.isEditing ? '✓' : '✎'}</button>`
-		: ''
 	return (
-		`<div class="palette-default-command-overlay" data-testid="console-overlay"` +
-		` role="dialog" aria-label="Palette console" tabindex="-1">` +
-		`<div class="palette-default-command-panel" role="presentation">` +
-		`<button type="button" class="palette-default-command-close"` +
-		` aria-label="Close console">×</button>` +
-		`<div class="palette-default-command-top"></div>` +
-		`<div class="palette-default-command-bottom">` +
-		`<div class="palette-default-command-main">` +
-		`<div class="palette-default-command-box is-expanded">` +
-		`<div class="palette-default-command-shell" title="Console command box">` +
-		`<span class="palette-default-icon">⌘</span>` +
-		`<div class="palette-default-command-tokens">` +
-		`<input class="palette-default-command-input" data-testid="console-input"` +
-		` placeholder="${escapeHtml(options.placeholder)}" value="${escapeHtml(options.query)}">` +
-		`${toggle}</div></div>` +
-		`<div class="palette-default-command-popover">` +
-		`<div class="palette-default-command-results" data-testid="console-results"></div>` +
-		`</div></div></div></div></div></div>`
+		`<button type="button" class="palette-default-tool palette-default-tool-compact${options.selected ? ' is-selected' : ''}"` +
+		`${options.selected || !options.can ? ' disabled=""' : ''} data-value="${escapeHtml(options.value)}">` +
+		`<span class="palette-default-choice-icon" hidden=""></span>` +
+		`<span class="palette-default-choice" hidden=""></span></button>`
 	)
 }
+
+export function sliderShellTemplate(options: {
+	variant: 'inline' | 'drawer'
+	tone: 'neutral' | 'accent'
+	direction: 'horizontal' | 'vertical'
+	region: string | undefined
+	rangeAxis: string
+	iconOnly: boolean
+}): string {
+	const region = options.region ?? 'top'
+	const readout = `<span class="palette-default-slider-value${options.iconOnly ? ' is-icon-only' : ''}"><span class="palette-default-icon" hidden=""></span></span>`
+	return (
+		`<label class="palette-default-slider palette-default-slider-${options.variant} palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${region} palette-default-range-${options.rangeAxis}">` +
+		(options.variant === 'drawer'
+			? `<span class="palette-default-slider-trigger">${readout}</span>`
+			: readout) +
+		`<span class="palette-default-slider-track"><input type="range"></span></label>`
+	)
+}
+
+export function stepperShellTemplate(options: {
+	tone: 'neutral' | 'accent'
+	direction: 'horizontal' | 'vertical'
+}): string {
+	return (
+		`<div class="palette-default-stepper palette-default-tone-${options.tone} palette-default-layout-${options.direction}">` +
+		`<button type="button" class="palette-default-tool palette-default-tool-compact">−</button>` +
+		`<span class="palette-default-stepper-value"><span class="palette-default-icon" hidden=""></span></span>` +
+		`<button type="button" class="palette-default-tool palette-default-tool-compact">+</button></div>`
+	)
+}
+
+export function starsShellTemplate(options: {
+	tone: 'neutral' | 'accent'
+	direction: 'horizontal' | 'vertical'
+	max: number
+}): string {
+	let buttons = ''
+	for (let index = 1; index <= options.max; index += 1) {
+		buttons += `<button type="button" class="palette-default-arrow" role="radio" aria-checked="false">▷</button>`
+	}
+	return (
+		`<div class="palette-default-stars palette-default-tone-${options.tone} palette-default-layout-${options.direction}">` +
+		`<span class="palette-default-icon" hidden=""></span>` +
+		`<span class="palette-default-stars-row palette-default-layout-${options.direction}" role="radiogroup">${buttons}</span></div>`
+	)
+}
+
+export function statusShellTemplate(tone: 'neutral' | 'accent'): string {
+	return (
+		`<span class="palette-default-status palette-default-tone-${tone}">` +
+		`<span class="palette-default-icon" hidden=""></span>` +
+		`<span class="palette-default-status-value"></span></span>`
+	)
+}
+
+// ── Command result rows ─────────────────────────────────────────────────────
+// Live: `head.ts` command-box `refresh()` builds rows from these.
 
 export function commandResultRowTemplate(options: {
 	label: string
@@ -253,70 +210,7 @@ export function commandEmptyTemplate(text: string): string {
 	return `<div class="palette-default-command-empty">${escapeHtml(text)}</div>`
 }
 
-export function detailsPanelShellTemplate(): string {
-	return (
-		`<div class="palette-default-panel palette-default-details-panel"` +
-		` data-testid="console-details-panel"></div>`
-	)
-}
-
-export function detailsTitleTemplate(title: string): string {
-	return `<div class="palette-default-panel-title">${escapeHtml(title)}</div>`
-}
-
-export function configEmptyTemplate(text: string): string {
-	return `<div class="palette-default-config-empty">${escapeHtml(text)}</div>`
-}
-
-export function configRowShellTemplate(key: string): string {
-	return (
-		`<div class="palette-default-config-row">` +
-		`<div class="palette-default-config-key"><strong>${escapeHtml(key)}</strong></div>` +
-		`<div class="palette-default-config-value"></div></div>`
-	)
-}
-
-export function addPanelShellTemplate(options: { label: string; meta: string }): string {
-	return (
-		`<div class="palette-default-config-stack" data-testid="console-add-panel">` +
-		`<div class="palette-default-config-header"><strong>${escapeHtml(options.label)}</strong>` +
-		`<span>${escapeHtml(options.meta)}</span></div></div>`
-	)
-}
-
-export function addVariantShellTemplate(options: {
-	label: string
-	meta: string
-	icon?: string
-	isSet?: boolean
-	selected?: boolean
-}): string {
-	const icon =
-		options.icon !== undefined
-			? `<span class="palette-default-icon">${escapeHtml(options.icon)}</span>`
-			: ''
-	return (
-		`<div class="palette-default-add-variant${options.isSet === true ? ' is-set' : ''}">` +
-		`<button type="button" class="palette-default-config-header palette-default-add-variant-trigger` +
-		`${options.selected === true ? ' is-selected' : ''}"` +
-		` aria-pressed="${options.selected === true ? 'true' : 'false'}">` +
-		`<strong>${icon}${escapeHtml(options.label)}</strong>` +
-		`<span>${escapeHtml(options.meta)}</span></button></div>`
-	)
-}
-
-export function addInsertTemplate(): string {
-	return (
-		`<button type="button" class="palette-default-add-insert"` +
-		` data-testid="console-add-insert">Add to toolbar</button>`
-	)
-}
-
-export function addInlineValueShellTemplate(): string {
-	return `<div class="palette-default-add-inline-value"><strong>Value</strong></div>`
-}
-
-// ── Drawer popup shell (Step 2 / Phase E) ───────────────────────────────────
+// ── Drawer shells ───────────────────────────────────────────────────────────
 // Static trigger + overlay + popup skeleton. The caller renders the child
 // track into the popup and owns open/close + repositioning.
 

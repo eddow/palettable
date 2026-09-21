@@ -62,7 +62,8 @@ Interactions to try:
    save/load button group round-trips the layout through `localStorage`
    (`palettable-demo-layout-v1`).
 
-Theme control: the `theme` tool (`light`/`dark`/`system`) resolves via
+Theme control: the `theme` tool (`light`/`dark`/`system`) renders icon-value
+only (current option icon, no text) on the top bar's single track, resolves via
 `prefers-color-scheme` and syncs `.palette-default-theme-light` + `data-theme` +
 `color-scheme` onto `<html>` (see `docs/theming.md`).
 

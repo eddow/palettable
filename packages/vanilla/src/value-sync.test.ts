@@ -418,6 +418,65 @@ describe('per-tool value sync', () => {
 		expect(input?.value).toBe('4')
 		ide.dispose()
 	})
+
+	it('theme cycles the bound value + document-root class in place (same node)', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', icon: '☀️', label: 'Light' },
+							{ value: 'dark', icon: '🌙', label: 'Dark' },
+							{ value: 'system', icon: '💻', label: 'System' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'dark' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'theme', editor: 'theme', config: { icon: '🎨' } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const button = host.querySelector('[data-testid="theme-tool"]') as HTMLButtonElement | null
+		expect(button).not.toBe(null)
+		// Icon-value only: the current option icon, no text label.
+		expect(button?.querySelector('.palette-default-icon')?.textContent).toBe('🌙')
+		expect(button?.querySelector('.palette-default-choice')).toBe(null)
+		button?.click()
+		expect(core.values.get('theme' as never)).toBe('system')
+		expect(host.querySelector('[data-testid="theme-tool"]')).toBe(button)
+		expect(button?.querySelector('.palette-default-icon')?.textContent).toBe('💻')
+		// External value change syncs the icon in place too.
+		core.values.set('theme' as never, 'light' as never)
+		expect(host.querySelector('[data-testid="theme-tool"]')).toBe(button)
+		expect(button?.querySelector('.palette-default-icon')?.textContent).toBe('☀️')
+		expect(document.documentElement.classList.contains('palette-default-theme-light')).toBe(true)
+		core.values.set('theme' as never, 'dark' as never)
+		expect(document.documentElement.classList.contains('palette-default-theme-light')).toBe(false)
+		ide.dispose()
+		document.documentElement.classList.remove('palette-default-theme-light')
+	})
 })
 
 describe('editing chrome without rebuild', () => {
