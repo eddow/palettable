@@ -18,8 +18,11 @@ export type SlideBounds = {
  * Pixel bounds for sliding a toolbar along its track. The toolbar's
  * `.toolbar-track-slot` parent sits between the leading gap
  * (`space[slot]`) and trailing gap (`space[slot + 1]`) elements; their
- * edges are fixed during the slide, so the free span is the trailing-gap
- * end minus the leading-gap start minus the toolbar span.
+ * live edges bound the free span, so the available slide is the
+ * trailing-gap end minus the leading-gap start minus the dragged
+ * toolbar's own live span. Neighbour growth (a lit merge DZ widening
+ * its toolbar) moves those edges, so it is already in the measurement —
+ * never predicted or subtracted separately.
  */
 export function toolbarSlideBounds(
 	toolbarElement: HTMLElement,

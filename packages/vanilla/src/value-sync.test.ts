@@ -6,7 +6,7 @@
  * in place — no structural re-render, same `HTMLElement` identity —
  * and that editing/inspecting transitions flip chrome without rebuilds.
  */
-import { ConsoleStore, PaletteCore, PaletteStateStore } from '@palettable/core'
+import { ConsoleStore, PaletteCore, PaletteStateStore, ValuesBag } from '@palettable/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createIDE } from './ide.js'
 
@@ -64,6 +64,19 @@ describe('per-tool value sync', () => {
 		expect(again).toBe(button)
 		expect(again?.getAttribute('aria-pressed')).toBe('true')
 		expect(again?.classList.contains('is-selected')).toBe(true)
+		ide.dispose()
+	})
+
+	it('toggle click toggles on then off (no stale spec)', () => {
+		const { core, ide, host } = setup()
+		const button = host.querySelector('.toolbar-item-content button') as HTMLButtonElement
+		expect(button?.getAttribute('aria-pressed')).toBe('false')
+		button.click()
+		expect(core.values.get('lamp' as never)).toBe(true)
+		expect(button.getAttribute('aria-pressed')).toBe('true')
+		button.click()
+		expect(core.values.get('lamp' as never)).toBe(false)
+		expect(button.getAttribute('aria-pressed')).toBe('false')
 		ide.dispose()
 	})
 
@@ -155,6 +168,177 @@ describe('per-tool value sync', () => {
 		expect(group).not.toBe(null)
 		expect(group?.querySelector('.palette-default-choice')).toBe(null)
 		expect(group?.querySelectorAll('.palette-default-choice-icon')).toHaveLength(2)
+		ide.dispose()
+	})
+
+	it('icon-less select reserves no icon space (label only, zero icon nodes)', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light' },
+							{ value: 'dark', label: 'Dark' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector('.palette-default-select-trigger')
+		expect(trigger?.querySelectorAll('.palette-default-icon')).toHaveLength(0)
+		expect(trigger?.querySelector('.palette-default-choice')?.textContent).toBe('Light')
+		// List rows are icon-less too, but keep full text.
+		const rows = [...(host.querySelectorAll('.palette-default-select-option') ?? [])]
+		expect(rows).toHaveLength(2)
+		expect(rows[0]?.querySelector('.palette-default-choice-icon')).toBe(null)
+		expect(rows[0]?.querySelector('.palette-default-choice')?.textContent).toBe('Light')
+		ide.dispose()
+	})
+
+	it('tool-icon-less select keeps exactly the value icon', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const chip = host.querySelector('.palette-default-select-value')
+		expect(chip?.querySelector('.palette-default-tool-icon')).toBe(null)
+		expect(chip?.querySelectorAll('.palette-default-icon')).toHaveLength(1)
+		expect(chip?.querySelector('.palette-default-value-icon')?.textContent).toBe('☀️')
+		ide.dispose()
+	})
+
+	it('skeleton select renders a `?` watermark, swapped for the label on value arrival', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector('.palette-default-select-trigger')
+		expect(trigger?.querySelector('.palette-default-value-icon')).toBe(null)
+		expect(trigger?.querySelector('.palette-default-choice')).toBe(null)
+		expect(trigger?.querySelector('.palette-default-select-watermark')?.textContent).toBe('?')
+		// Value arrival swaps watermark → label in the same trigger node.
+		core.values.set('theme' as never, 'dark' as never)
+		expect(host.querySelector('.palette-default-select-trigger')).toBe(trigger)
+		expect(trigger?.querySelector('.palette-default-select-watermark')).toBe(null)
+		expect(trigger?.querySelector('.palette-default-value-icon')?.textContent).toBe('🌙')
+		expect(trigger?.querySelector('.palette-default-choice')?.textContent).toBe('Dark')
+		ide.dispose()
+	})
+
+	it('icon-less segmented option keeps its label with zero icon nodes', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light' },
+							{ value: 'dark', label: 'Dark' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'segmented' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const group = host.querySelector('.palette-default-segmented')
+		expect(group?.querySelectorAll('.palette-default-choice-icon')).toHaveLength(0)
+		const labels = [...(group?.querySelectorAll('.palette-default-choice') ?? [])].map(
+			(node) => node.textContent
+		)
+		expect(labels).toEqual(['Light', 'Dark'])
 		ide.dispose()
 	})
 
@@ -409,6 +593,200 @@ describe('per-tool value sync', () => {
 		ide.dispose()
 	})
 
+	it('select reconciles rows on defineEnumOptions with the list open', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light', icon: '☀️' },
+							{ value: 'dark', label: 'Dark', icon: '🌙' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector(
+			'.palette-default-select-trigger'
+		) as HTMLButtonElement | null
+		trigger?.click()
+		const list = host.querySelector('.palette-default-select-list') as HTMLElement | null
+		expect(list?.hidden).toBe(false)
+		core.defineEnumOptions('theme', [
+			{ value: 'light', label: 'Light', icon: '☀️' },
+			{ value: 'dusk', label: 'Dusk', icon: '🌇' },
+		])
+		expect(list?.hidden).toBe(false)
+		expect(host.querySelector('.palette-default-select-trigger')).toBe(trigger)
+		expect(list?.querySelector('[data-value="dark"]')).toBe(null)
+		expect(list?.querySelector('[data-value="dusk"] .palette-default-choice')?.textContent).toBe(
+			'Dusk'
+		)
+		ide.dispose()
+	})
+
+	it('segmented reconciles buttons on defineEnumOptions', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light' },
+							{ value: 'dark', label: 'Dark' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'segmented' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const group = host.querySelector('.palette-default-segmented')
+		expect(group?.querySelectorAll('button')).toHaveLength(2)
+		core.defineEnumOptions('theme', [
+			{ value: 'light', label: 'Light' },
+			{ value: 'dusk', label: 'Dusk' },
+		])
+		expect(host.querySelector('.palette-default-segmented')).toBe(group)
+		expect(group?.querySelector('[data-value="dark"]')).toBe(null)
+		expect(group?.querySelector('[data-value="dusk"]')).not.toBe(null)
+		ide.dispose()
+	})
+
+	it('select with showFilter renders a filter input that narrows rows', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light' },
+							{ value: 'dark', label: 'Dark' },
+							{ value: 'dusk', label: 'Dusk' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [{ tool: 'theme', editor: 'select', config: { showFilter: true } }],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const trigger = host.querySelector(
+			'.palette-default-select-trigger'
+		) as HTMLButtonElement | null
+		trigger?.click()
+		const input = host.querySelector(
+			'[data-testid="select-filter-input"]'
+		) as HTMLInputElement | null
+		expect(input).not.toBe(null)
+		input!.value = 'dusk'
+		input!.dispatchEvent(new Event('input', { bubbles: true }))
+		const rows = [...host.querySelectorAll('.palette-default-select-option')] as HTMLElement[]
+		expect(rows.find((row) => row.dataset.value === 'dusk')?.hidden).toBe(false)
+		expect(rows.find((row) => row.dataset.value === 'dark')?.hidden).toBe(true)
+		expect(rows.find((row) => row.dataset.value === 'light')?.hidden).toBe(true)
+		// Enter runs the first visible row and closes the list.
+		input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+		expect(core.values.get('theme')).toBe('dusk')
+		expect((host.querySelector('.palette-default-select-list') as HTMLElement)?.hidden).toBe(true)
+		ide.dispose()
+	})
+
+	it('select without showFilter renders no filter input', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: {
+						options: [
+							{ value: 'light', label: 'Light' },
+							{ value: 'dark', label: 'Dark' },
+						],
+					},
+				},
+			],
+			{
+				initialValues: { theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [{ space: 1, toolbar: [{ tool: 'theme', editor: 'select' }] }],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		expect(host.querySelector('[data-testid="select-filter-input"]')).toBe(null)
+		ide.dispose()
+	})
+
 	it('focused slider is not clobbered mid-drag', () => {
 		const { core, ide, host } = setup()
 		const input = host.querySelector('input[type="range"]') as HTMLInputElement | null
@@ -492,21 +870,47 @@ describe('editing chrome without rebuild', () => {
 		ide.dispose()
 	})
 
-	it('guard pointerdown stamps core-decided data-dragged (vanilla applies only)', () => {
-		const { consoleStore, ide, host } = setup(true)
+	it('guard pointerdown stamps no data-dragged for a subset drag (nothing moves yet)', () => {
+		const core = new PaletteCore(
+			[
+				{ id: 'lamp', label: 'Lamp', type: 'boolean' },
+				{ id: 'speed', label: 'Speed', type: 'number' },
+			],
+			{
+				initialValues: { lamp: false, speed: 1 },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [
+									{ tool: 'lamp', editor: 'toggle' },
+									{ tool: 'speed', editor: 'slider' },
+								],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
 		consoleStore.open('edit')
-		const bars = [...host.querySelectorAll('.toolbar')] as HTMLElement[]
-		expect(bars.length).toBeGreaterThanOrEqual(2)
 		expect(host.querySelector('.toolbar[data-dragged="true"]')).toBe(null)
 		const first = host.querySelectorAll('.toolbar-item')[0] as HTMLElement
 		first
 			.querySelector('.toolbar-item-guard')
 			?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
-		// Core decided the dragged toolbar at grab time; vanilla stamped
-		// exactly one node — the grabbed toolbar, not its neighbour.
-		const dragged = [...host.querySelectorAll('.toolbar[data-dragged="true"]')] as HTMLElement[]
-		expect(dragged).toHaveLength(1)
-		expect(dragged[0]).toBe(bars[0])
+		// Core decided: a subset drag moves nothing, so no toolbar owns the
+		// chrome — it appears only once the extraction promotes to a slide.
+		expect(host.querySelector('.toolbar[data-dragged="true"]')).toBe(null)
 		ide.dispose()
 	})
 
@@ -556,13 +960,14 @@ describe('editing chrome without rebuild', () => {
 		expect(first.dataset.inspected).toBe('true')
 		expect(host.querySelector('.palette-default-config-table')).not.toBe(null)
 		// Clicking an add source begins add: the inspector clears and the
-		// add panel for the selected entry renders instead.
+		// add panel for the selected entry renders instead (editor +
+		// preview directly — no variant picker in between).
 		const row = host.querySelector('.palette-default-command-result') as HTMLElement | null
 		expect(row).not.toBe(null)
 		row!.click()
 		expect(first.dataset.inspected).toBe(undefined)
 		expect(host.querySelector('[data-testid="console-add-panel"]')).not.toBe(null)
-		expect(host.querySelector('.palette-default-config-table')).toBe(null)
+		expect(host.querySelector('[data-testid="console-add-preview"]')).not.toBe(null)
 		ide.dispose()
 		void core
 	})
@@ -641,6 +1046,212 @@ describe('editing chrome without rebuild', () => {
 		const track = border!.querySelector('.toolbar-track') as HTMLElement | null
 		track!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
 		expect(host.querySelector('.toolbar-drop-zone.highlighted')).toBe(null)
+		ide.dispose()
+	})
+
+	it('selecting an entry shows the full configurator + a disconnected preview', () => {
+		const core = new PaletteCore(
+			[
+				{ id: 'lamp', label: 'Lamp', type: 'boolean' },
+				{
+					id: 'speed',
+					label: 'Speed',
+					type: 'number',
+					constraints: { min: 0, max: 10, step: 1 },
+				},
+			],
+			{
+				initialValues: { lamp: false, speed: 1 },
+				initialLayout: {
+					version: 1,
+					borders: { top: [], right: [], bottom: [], left: [] },
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:lamp' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		// Full configurator rows (same as the inspector, minus Delete —
+		// the draft is detached, so there is nothing to delete — and minus
+		// Editor: `lamp` is a single-editor boolean, so it binds silently).
+		const keys = [...panel!.querySelectorAll('.palette-default-config-key strong')].map(
+			(node) => node.textContent
+		)
+		expect(keys).toEqual(expect.arrayContaining(['Label', 'Icon', 'Hint', 'Tone']))
+		expect(keys).not.toContain('Editor')
+		expect(keys).not.toContain('Delete')
+		expect(panel!.querySelector('[data-testid="configurator-delete"]')).toBe(null)
+		// Preview below the configuration, carrying the tool.
+		const preview = panel!.querySelector('[data-testid="console-add-preview"]')
+		expect(preview).not.toBe(null)
+		expect(preview?.querySelector('.toolbar-item-content button')).not.toBe(null)
+		ide.dispose()
+	})
+
+	it('preview interactions never touch the live store', () => {
+		const core = new PaletteCore([{ id: 'lamp', label: 'Lamp', type: 'boolean' }], {
+			initialValues: { lamp: false },
+			initialLayout: {
+				version: 1,
+				borders: { top: [], right: [], bottom: [], left: [] },
+			},
+		})
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:lamp' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		const previewButton = panel!.querySelector(
+			'[data-testid="console-add-preview-content"] button'
+		) as HTMLButtonElement | null
+		expect(previewButton).not.toBe(null)
+		previewButton!.click()
+		expect(core.values.get('lamp' as never)).toBe(false)
+		// …but the preview re-rendered pressed in place (same node).
+		expect(previewButton!.getAttribute('aria-pressed')).toBe('true')
+		expect(panel!.querySelector('[data-testid="console-add-preview-content"] button')).toBe(
+			previewButton
+		)
+		ide.dispose()
+	})
+
+	it('configurator edits retarget the draft preview (label flows through)', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'speed',
+					label: 'Speed',
+					type: 'number',
+					constraints: { min: 0, max: 10, step: 1 },
+				},
+			],
+			{
+				initialValues: { speed: 1 },
+				initialLayout: {
+					version: 1,
+					borders: { top: [], right: [], bottom: [], left: [] },
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:speed' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		const labelInput = [...panel!.querySelectorAll('.palette-default-config-value input')][0] as
+			| HTMLInputElement
+			| undefined
+		expect(labelInput).not.toBe(undefined)
+		labelInput!.value = 'Velocity'
+		labelInput!.dispatchEvent(new Event('input', { bubbles: true }))
+		// The details panel re-rendered: the preview follows the edit —
+		// the slider's accessible title carries the new label.
+		const again = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(again).not.toBe(null)
+		const previewRange = again!.querySelector(
+			'[data-testid="console-add-preview-content"] input[type="range"]'
+		) as HTMLInputElement | null
+		expect(previewRange).not.toBe(null)
+		expect(previewRange!.getAttribute('aria-label')).toContain('Velocity')
+		ide.dispose()
+	})
+
+	it('selecting an entry opens the editor + preview directly (no variant picker)', () => {
+		const core = new PaletteCore([{ id: 'lamp', label: 'Lamp', type: 'boolean' }], {
+			initialValues: { lamp: false },
+			initialLayout: {
+				version: 1,
+				borders: { top: [], right: [], bottom: [], left: [] },
+			},
+		})
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:lamp' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		// No variant picker: one source = one variant, so the editor +
+		// preview render as soon as the entry is selected.
+		expect(panel!.querySelector('.palette-default-add-variant-trigger')).toBe(null)
+		expect(panel!.querySelector('.palette-default-config-table')).not.toBe(null)
+		expect(panel!.querySelector('[data-testid="console-add-preview"]')).not.toBe(null)
+		ide.dispose()
+	})
+
+	it('a nothing-point add panel binds 1:1 with no Editor row', () => {
+		const core = new PaletteCore(
+			[{ id: 'theme', label: 'Theme', type: 'nothing', editors: ['theme'] }],
+			{
+				initialLayout: {
+					version: 1,
+					borders: { top: [], right: [], bottom: [], left: [] },
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:theme' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		const keys = [...panel!.querySelectorAll('.palette-default-config-key strong')].map(
+			(node) => node.textContent
+		)
+		expect(keys).not.toContain('Editor')
+		expect(panel!.querySelector('[data-testid="console-add-preview"]')).not.toBe(null)
+		ide.dispose()
+	})
+
+	it('a multi-editor enum keeps its Editor row', () => {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'mode',
+					label: 'Mode',
+					type: 'enum',
+					constraints: { options: [{ value: 'a' }, { value: 'b' }] },
+				},
+			],
+			{
+				initialLayout: {
+					version: 1,
+					borders: { top: [], right: [], bottom: [], left: [] },
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => true })
+		consoleStore.open('edit')
+		consoleStore.patch({ selectedEntryId: 'tool:mode' })
+		const panel = host.querySelector('[data-testid="console-add-panel"]') as HTMLElement | null
+		expect(panel).not.toBe(null)
+		const keys = [...panel!.querySelectorAll('.palette-default-config-key strong')].map(
+			(node) => node.textContent
+		)
+		expect(keys).toContain('Editor')
 		ide.dispose()
 	})
 })
@@ -740,6 +1351,105 @@ describe('can flips', () => {
 		bag.set('armed' as never, true as never)
 		expect(host.querySelector('.toolbar-item-content button')).toBe(button)
 		expect(button.disabled).toBe(false)
+		ide.dispose()
+	})
+})
+
+describe('contextual value sync (ship selection pattern)', () => {
+	function shipSetup() {
+		const core = new PaletteCore(
+			[
+				{ id: 'shipShields', label: 'Ship Shields', type: 'boolean', uses: ['ship'] },
+				{
+					id: 'shipPower',
+					label: 'Ship Reactor',
+					type: 'number',
+					constraints: { min: 0.5, max: 5, step: 0.5 },
+					uses: ['ship'],
+				},
+				{
+					id: 'fireTorpedo',
+					label: 'Fire Torpedo',
+					type: 'action',
+					uses: ['ship'],
+					can: (bag) => bag?.get('shipId' as never) !== undefined,
+					run: () => {},
+				},
+			],
+			{
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{
+								space: 1,
+								toolbar: [
+									{ tool: 'shipShields', editor: 'toggle' },
+									{ tool: 'shipPower', editor: 'slider' },
+									{ tool: 'fireTorpedo', editor: 'button' },
+								],
+							},
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const bag = new ValuesBag<Record<string, unknown>>()
+		core.setContext('ship', bag)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		return { core, bag, ide, host }
+	}
+
+	it('no selection renders skeleton (mixed toggle, disabled fire)', () => {
+		const { ide, host } = shipSetup()
+		const toggle = host.querySelector('.toolbar-item-content button') as HTMLButtonElement
+		expect(toggle.getAttribute('aria-pressed')).toBe('mixed')
+		const buttons = [...host.querySelectorAll('.toolbar-item-content button')]
+		const fire = buttons[buttons.length - 1] as HTMLButtonElement
+		expect(fire.disabled).toBe(true)
+		ide.dispose()
+	})
+
+	it('selection hydrates tools; toolbar writes land in the bag, not root', () => {
+		const { core, bag, ide, host } = shipSetup()
+		bag.setTree({ shipId: 'aurora', shipShields: true, shipPower: 3 })
+		const toggle = host.querySelector('.toolbar-item-content button') as HTMLButtonElement
+		expect(toggle.getAttribute('aria-pressed')).toBe('true')
+		const input = host.querySelector('input[type="range"]') as HTMLInputElement
+		expect(input.value).toBe('3')
+		// Toolbar write routes to the context bag; root stays skeleton.
+		core.writeValue('shipShields', false)
+		expect(bag.get('shipShields')).toBe(false)
+		expect(core.values.has('shipShields')).toBe(false)
+		expect(toggle.getAttribute('aria-pressed')).toBe('false')
+		ide.dispose()
+	})
+
+	it('deselecting returns tools to skeleton without touching root', () => {
+		const { bag, ide, host } = shipSetup()
+		bag.setTree({ shipId: 'aurora', shipShields: true, shipPower: 3 })
+		expect(
+			(host.querySelector('.toolbar-item-content button') as HTMLButtonElement).getAttribute(
+				'aria-pressed'
+			)
+		).toBe('true')
+		bag.setTree({
+			shipId: undefined,
+			shipShields: undefined,
+			shipPower: undefined,
+		})
+		expect(
+			(host.querySelector('.toolbar-item-content button') as HTMLButtonElement).getAttribute(
+				'aria-pressed'
+			)
+		).toBe('mixed')
 		ide.dispose()
 	})
 })

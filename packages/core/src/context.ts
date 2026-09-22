@@ -50,6 +50,11 @@ export class ValuesBag<Shape extends Record<string, unknown> = Record<string, un
 		return freezeValue(this.values.get(key as string)) as Shape[K] | undefined
 	}
 
+	/** True when the bag holds a value for `key` (skeleton = `false`). */
+	has<K extends keyof Shape>(key: K): boolean {
+		return this.values.has(key as string)
+	}
+
 	/**
 	 * Write a key; no-op when `Object.is`-equal. Notifies global + key
 	 * listeners. Throws `PaletteWriteError` when the bag is locked.

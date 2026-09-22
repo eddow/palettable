@@ -76,7 +76,33 @@
 	color: var(--pd-selected-fg);
 }
 
+.palette-default-tool.palette-default-tone-accent,
 .palette-default-tone-accent .palette-default-tool {
+	border-color: var(--pd-accent);
+	box-shadow: var(--pd-accent-ring);
+}
+
+/* Accent tone on wrapper-stamped editors: the tone class sits on the
+ * wrapper while the visible chrome lives on children (or on the node
+ * itself for status). Each editor gets the same accent border + ring so
+ * accent reads clearly next to neutral on every control. Segmented
+ * options and stepper ± buttons are covered by the descendant rule
+ * above; the readout chips and group boxes below complete the set. */
+.palette-default-status.palette-default-tone-accent,
+.palette-default-select.palette-default-tone-accent:not(.palette-default-layout-vertical)
+	> .palette-default-select-trigger,
+.palette-default-select.palette-default-tone-accent
+	> .palette-default-select-trigger
+	> .palette-default-select-value,
+.palette-default-tone-accent > .palette-default-stepper-value,
+.palette-default-tone-accent > .palette-default-slider-value,
+.palette-default-slider-inline.palette-default-tone-accent
+	> .palette-default-slider-value,
+.palette-default-slider-inline.palette-default-tone-accent
+	> .palette-default-slider-track,
+.palette-default-slider-drawer.palette-default-tone-accent
+	> .palette-default-slider-trigger,
+.palette-default-stars.palette-default-tone-accent {
 	border-color: var(--pd-accent);
 	box-shadow: var(--pd-accent-ring);
 }
@@ -97,7 +123,22 @@
 	gap: 6px;
 }
 
-/* Pointless read-only tool: readout only, no interaction. */
+/* Skeleton watermark for a select with no matching option: a stylised `?`
+ * in the closed trigger. Own class (never `.palette-default-choice`) so
+ * label selectors and the overlay/joint `:has` rules never match it. */
+.palette-default-select-watermark {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--pd-icon);
+	opacity: 0.55;
+	font-style: italic;
+}
+
+/* Pointless read-only tool: readout only, no interaction.
+ * Horizontal fills the bar block-size like every other default-head root
+ * (generic fill rule below); vertical is a pinned square stacking icon
+ * above minutes above seconds (see §10). */
 .palette-default-status {
 	display: inline-flex;
 	align-items: center;
@@ -108,11 +149,42 @@
 	background: var(--pd-status-bg);
 	color: inherit;
 	font-variant-numeric: tabular-nums;
+	box-sizing: border-box;
 }
 
 .palette-default-status-value {
 	font-weight: 600;
 	color: var(--pd-status-fg);
+}
+
+/* Generic toolbar fill: every default-head root inside a toolbar item
+ * fills the standardized perpendicular size on its bar axis, so no item
+ * (status, select, or future editors) renders shorter than the bar. Only
+ * the perpendicular dimension is pinned — longitudinal growth stays
+ * allowed, and vertical keeps `block-size: auto` with a fixed inline
+ * square (per-component §10 rules). */
+@container palette style(--layout: horizontal) {
+	.toolbar-item-content > :is(
+		.palette-default-status,
+		.palette-default-select-trigger,
+		.palette-default-select-value,
+		.palette-default-stepper-value,
+		.palette-default-slider-value
+	) {
+		min-block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+	}
+}
+
+.toolbar-item-content > :is(
+	.palette-default-status,
+	.palette-default-select-trigger,
+	.palette-default-select-value,
+	.palette-default-stepper-value,
+	.palette-default-slider-value
+).palette-default-layout-horizontal {
+	min-block-size: var(--palette-toolbar-perpendicular);
+	box-sizing: border-box;
 }
 
 /* ── 3. Shared floating panel ── */
@@ -123,7 +195,7 @@
 .palette-default-select-list,
 .palette-default-slider-drawer > .palette-default-slider-track,
 .palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
 	> .palette-default-choice,
 .palette-default-select.palette-default-layout-vertical
 	> .palette-default-select-trigger
@@ -134,11 +206,32 @@
 	box-shadow: var(--pd-pop-shadow);
 }
 
+/* Live-var overlay chrome: same panel, queried from the container. */
+@container palette style(--layout: vertical) {
+	.palette-default-segmented
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice,
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		border: 1px solid var(--pd-border-soft);
+		border-radius: var(--pd-r-l);
+		background: var(--pd-panel);
+		box-shadow: var(--pd-pop-shadow);
+	}
+}
+
 :is(
 	.palette-default-command-popover,
 	.palette-default-select-list,
 	.palette-default-slider-drawer > .palette-default-slider-track
 )[hidden] {
+	display: none;
+}
+
+/* Filtered-out select rows stay hidden (the list is a grid — the `hidden`
+ * attribute alone does not override grid-item display). */
+.palette-default-select-option[hidden] {
 	display: none;
 }
 
@@ -575,10 +668,48 @@
 	cursor: default;
 }
 
+/* Opt-in listbox filter (`config.showFilter === true`): input row pinned at
+ * the top of the list, reusing the command-input chrome. The row is a plain
+ * block so option rows keep their grid layout below it. */
+.palette-default-select-filter {
+	display: block;
+	padding: 2px 2px 4px;
+}
+
+.palette-default-select-filter-input {
+	inline-size: 100%;
+	box-sizing: border-box;
+	padding: 0.42rem 0.72rem;
+	border: 1px solid var(--pd-border);
+	border-radius: var(--pd-r-s);
+	background: var(--pd-surface);
+	color: inherit;
+	font: inherit;
+}
+
+.palette-default-select-filter-input:focus-visible {
+	border-color: var(--pd-accent);
+	outline: none;
+}
+
 /* Horizontal: list drops below (above on bottom-docked toolbars). */
 .palette-default-select.palette-default-layout-horizontal > .palette-default-select-list {
 	top: calc(100% + 4px);
 	inset-inline-start: 0;
+}
+
+@container palette style(--layout: horizontal) {
+	.palette-default-select > .palette-default-select-list {
+		top: calc(100% + 4px);
+		inset-inline-start: 0;
+	}
+}
+
+@container palette style(--region: bottom) {
+	.palette-default-select > .palette-default-select-list {
+		top: auto;
+		bottom: calc(100% + 4px);
+	}
 }
 
 .palette-default-select.palette-default-layout-horizontal.palette-default-region-bottom
@@ -589,6 +720,43 @@
 
 /* Vertical: square icon stack at rest; label overlays beside the toolbar
  * (segmented pattern, §10); list opens sideways like the drawer track. */
+@container palette style(--layout: vertical) {
+	.palette-default-select {
+		inline-size: var(--palette-toolbar-perpendicular);
+		block-size: auto;
+	}
+
+	.palette-default-select > .palette-default-select-trigger {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		block-size: auto;
+		min-block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+		justify-content: center;
+		position: relative;
+		overflow: visible;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		border-radius: var(--pd-r-l);
+	}
+
+	.palette-default-select > .palette-default-select-trigger:has(> .palette-default-choice) {
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	}
+
+	.palette-default-select > .palette-default-select-trigger::after {
+		content: none;
+	}
+}
+
+@container palette style(--region: right) {
+	.palette-default-select
+		> .palette-default-select-trigger:has(> .palette-default-choice) {
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	}
+}
+
 .palette-default-select.palette-default-layout-vertical {
 	inline-size: var(--palette-toolbar-perpendicular);
 	block-size: auto;
@@ -629,6 +797,89 @@
 
 /* Chip = visible trigger at rest (icon stack in flow, bordered chrome).
  * Label = direct child of the trigger, sibling of the chip (§10 overlay). */
+@container palette style(--layout: vertical) {
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-select-value {
+		flex-direction: column;
+		gap: 1px;
+		line-height: 1;
+		align-items: center;
+		justify-content: center;
+		position: relative;
+		overflow: visible;
+		inline-size: 100%;
+		min-block-size: var(--palette-toolbar-perpendicular);
+		padding: 0.3rem 0;
+		box-sizing: border-box;
+		border: 1px solid var(--pd-border);
+		border-radius: var(--pd-r-l);
+		background: var(--pd-surface);
+	}
+
+	.palette-default-select
+		> .palette-default-select-trigger:has(> .palette-default-choice)
+		> .palette-default-select-value {
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	}
+
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		position: absolute;
+		inset-block: 0;
+		inset-inline-start: 100%;
+		z-index: 2;
+		display: inline-flex;
+		align-items: center;
+		inline-size: max-content;
+		padding-inline: 0.72rem;
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		white-space: nowrap;
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(-0.4rem);
+		transition:
+			transform var(--pd-slide),
+			opacity var(--pd-ease);
+	}
+
+	.palette-default-select:hover
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		opacity: 1;
+		transform: translateX(0);
+		pointer-events: auto;
+	}
+
+	.palette-default-select > .palette-default-select-list {
+		inset-block-start: 0;
+		inset-inline-start: calc(100% + 4px);
+	}
+}
+
+@container palette style(--region: right) {
+	.palette-default-select
+		> .palette-default-select-trigger:has(> .palette-default-choice)
+		> .palette-default-select-value {
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	}
+
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		inset-inline-start: auto;
+		inset-inline-end: 100%;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		transform: translateX(0.4rem);
+	}
+
+	.palette-default-select > .palette-default-select-list {
+		inset-inline-start: auto;
+		inset-inline-end: calc(100% + 4px);
+	}
+}
+
 .palette-default-select.palette-default-layout-vertical
 	> .palette-default-select-trigger
 	> .palette-default-select-value {
@@ -819,6 +1070,54 @@
 }
 
 /* Horizontal toolbar: group runs perpendicular — trigger above, range below. */
+@container palette style(--layout: horizontal) {
+	.palette-default-slider-drawer {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-trigger {
+		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+		justify-content: center;
+		min-block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track {
+		top: 100%;
+		left: 0;
+		right: 0;
+		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+		width: 100%;
+		height: 6.5rem;
+		padding: 0.72rem 0;
+		box-sizing: border-box;
+		transform: translateY(-0.4rem);
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track > input[type='range'] {
+		writing-mode: vertical-lr;
+		direction: rtl;
+	}
+
+	.palette-default-slider-drawer:hover > .palette-default-slider-track,
+	.palette-default-slider-drawer:focus-within > .palette-default-slider-track {
+		transform: translateY(0);
+	}
+}
+
+@container palette style(--region: bottom) {
+	.palette-default-slider-drawer > .palette-default-slider-trigger {
+		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track {
+		top: auto;
+		bottom: 100%;
+		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+		transform: translateY(0.4rem);
+	}
+}
 
 .palette-default-slider-drawer.palette-default-layout-horizontal {
 	flex-direction: column;
@@ -854,6 +1153,57 @@
 }
 
 /* Vertical toolbar: trigger inline-start, range beside it, horizontal track. */
+@container palette style(--layout: vertical) {
+	.palette-default-slider-drawer {
+		flex-direction: row;
+		block-size: var(--palette-toolbar-perpendicular);
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-trigger {
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		inline-size: var(--palette-toolbar-perpendicular);
+		block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+		flex-direction: column;
+		gap: 1px;
+		padding: 0.3rem 0;
+		justify-content: center;
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track {
+		inset-block: 0;
+		inset-inline-start: 100%;
+		inline-size: 6.5rem;
+		block-size: 100%;
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		padding: 0 0.72rem 0 0.9rem;
+		box-sizing: border-box;
+		transform: translateX(-0.4rem);
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track > input[type='range'] {
+		writing-mode: horizontal-tb;
+	}
+
+	.palette-default-slider-drawer:hover > .palette-default-slider-track,
+	.palette-default-slider-drawer:focus-within > .palette-default-slider-track {
+		transform: translateX(0);
+	}
+}
+
+@container palette style(--region: right) {
+	.palette-default-slider-drawer > .palette-default-slider-trigger {
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	}
+
+	.palette-default-slider-drawer > .palette-default-slider-track {
+		inset-inline-start: auto;
+		inset-inline-end: 100%;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		padding: 0 0.9rem 0 0.72rem;
+		transform: translateX(0.4rem);
+	}
+}
 
 .palette-default-slider-drawer.palette-default-layout-vertical {
 	flex-direction: row;
@@ -890,7 +1240,9 @@
 }
 
 /* Region mirrors the group into the workspace; trigger keeps the
- * toolbar-outer half-rounding, range takes the workspace half. */
+ * toolbar-outer half-rounding, range takes the workspace half.
+ * (Live-var equivalents live above next to the layout rules; the stamped
+ * classes below stay as the no-container-query fallback.) */
 .palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
 	> .palette-default-slider-trigger {
 	border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
@@ -968,6 +1320,13 @@
 /* Horizontal stepper readout stretches to the buttons' block size so
  * minus/value/plus share one edge at rest height. Drawer popups are
  * horizontal tracks too (`.is-horizontal`) whatever the host axis. */
+@container palette style(--layout: horizontal) {
+	.palette-default-stepper > .palette-default-stepper-value {
+		min-block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+	}
+}
+
 .palette-default-stepper:not(.palette-default-layout-vertical)
 	> .palette-default-stepper-value,
 .palettable-drawer__popup.is-horizontal .palette-default-stepper-value {
@@ -976,13 +1335,27 @@
 }
 
 /* Drawer ("More") trigger: always icon-only. Label survives as accessible
- * name + tooltip; no axis-scoped hiding needed. */
+ * name + tooltip; no axis-scoped hiding needed. The attached popup adds its
+ * own 1px border around a full-size toolbar, so the trigger grows by the
+ * same 2px along the joint axis — both land at 42px and read as one
+ * group-field. Vertical toolbars share heights, horizontal share widths. */
 .palette-default-tool.palettable-drawer__trigger {
 	inline-size: var(--palette-toolbar-perpendicular);
 	min-inline-size: var(--palette-toolbar-perpendicular);
 	block-size: var(--palette-toolbar-perpendicular);
+	min-block-size: var(--palette-toolbar-perpendicular);
 	padding: 0;
 	justify-content: center;
+}
+.palettable-drawer.from-left .palettable-drawer__trigger,
+.palettable-drawer.from-right .palettable-drawer__trigger {
+	block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	min-block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+}
+.palettable-drawer.from-top .palettable-drawer__trigger,
+.palettable-drawer.from-bottom .palettable-drawer__trigger {
+	inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	min-inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
 }
 
 /* ── 10. Vertical axis ── */
@@ -991,7 +1364,21 @@
  * Overlays open into the workspace: left by default, right on
  * `region-left` (segmented) / `region-right` (select, command).
  * Vertical groups use `column-reverse`, so DOM order is visually inverted
- * (§11 accounts for it). */
+ * (§11 accounts for it).
+ *
+ * Orientation comes from the nearest `palette` container's `--layout` /
+ * `--region` vars (set on borders, parking, drawer popups). The stamped
+ * `palette-default-layout-*` / `palette-default-region-*` classes below
+ * stay as the no-container-query fallback. */
+
+@container palette style(--layout: vertical) {
+	.palette-default-segmented,
+	.palette-default-stepper,
+	.palette-default-stars,
+	.palette-default-stars-row {
+		flex-direction: column-reverse;
+	}
+}
 
 .palette-default-segmented.palette-default-layout-vertical,
 .palette-default-stepper.palette-default-layout-vertical,
@@ -1008,6 +1395,72 @@
 }
 
 /* Command box: icon-only square; shell grows sideways, toolbar width fixed. */
+@container palette style(--layout: vertical) {
+	.palette-default-command-box {
+		inline-size: var(--palette-toolbar-perpendicular);
+		max-inline-size: none;
+		block-size: var(--palette-toolbar-perpendicular);
+		position: relative;
+		overflow: visible;
+	}
+
+	.palette-default-command-box .palette-default-command-shell {
+		position: absolute;
+		inset-block: 0;
+		inset-inline-start: 0;
+		inline-size: var(--palette-toolbar-perpendicular);
+		padding: 0;
+		justify-content: center;
+		overflow: hidden;
+		z-index: 1;
+		transition:
+			inline-size var(--pd-slide),
+			box-shadow var(--pd-ease);
+	}
+
+	.palette-default-command-box:hover .palette-default-command-shell,
+	.palette-default-command-box:focus-within .palette-default-command-shell {
+		inline-size: 14rem;
+		background: var(--pd-panel);
+		border-color: var(--pd-accent);
+		box-shadow: var(--pd-pop-shadow);
+		justify-content: flex-start;
+		padding-inline: 0.6rem;
+	}
+
+	.palette-default-command-box .palette-default-command-tokens {
+		flex-wrap: nowrap;
+		overflow: hidden;
+		opacity: 0;
+		transition: opacity var(--pd-ease);
+	}
+
+	.palette-default-command-box:hover .palette-default-command-tokens,
+	.palette-default-command-box:focus-within .palette-default-command-tokens {
+		opacity: 1;
+	}
+
+	.palette-default-command-box .palette-default-command-popover {
+		position: absolute;
+		inset-inline-start: 0;
+		top: calc(100% + 6px);
+		inline-size: 18rem;
+		z-index: 6;
+	}
+}
+
+@container palette style(--region: right) {
+	.palette-default-command-box .palette-default-command-shell {
+		inset-inline-start: auto;
+		inset-inline-end: 0;
+	}
+
+	.palette-default-command-box .palette-default-command-popover {
+		inset-inline-start: auto;
+		inset-inline-end: 0;
+	}
+}
+
 .palette-default-command-box.palette-default-layout-vertical {
 	inline-size: var(--palette-toolbar-perpendicular);
 	max-inline-size: none;
@@ -1079,6 +1532,102 @@
 }
 
 /* Inline slider grows along the toolbar; range runs vertically below chip. */
+@container palette style(--layout: vertical) {
+	.palette-default-slider-inline {
+		inline-size: var(--palette-toolbar-perpendicular);
+		block-size: auto;
+		padding: 0;
+		box-sizing: border-box;
+		flex-direction: column;
+		gap: 0;
+		border: 0;
+		background: transparent;
+	}
+
+	.palette-default-slider-inline > .palette-default-slider-value {
+		min-inline-size: 100%;
+		min-block-size: 1.6rem;
+		padding: 0.35rem 0;
+		margin-inline-start: 0;
+		margin-block-start: 0;
+		border-radius: var(--pd-r-s) var(--pd-r-s) 0 0;
+		box-sizing: border-box;
+		flex-direction: column;
+		gap: 2px;
+		line-height: 1;
+	}
+
+	.palette-default-slider-inline > .palette-default-slider-track {
+		width: 100%;
+		height: 3.5rem;
+		margin: 0;
+		margin-block-start: -1px;
+		padding: 0.35rem 0;
+		border-radius: 0 0 var(--pd-r-s) var(--pd-r-s);
+		box-sizing: border-box;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+	}
+
+	.palette-default-slider-inline > .palette-default-slider-track > input[type='range'] {
+		writing-mode: vertical-lr;
+		direction: rtl;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		max-width: 100%;
+		margin: 0;
+		padding: 0;
+		flex: 0 0 auto;
+		border: 0;
+		background: transparent;
+		border-radius: 0;
+	}
+
+	.palette-default-stars {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		padding: 0;
+		box-sizing: border-box;
+	}
+
+	.palette-default-stars > .palette-default-stars-row {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		flex-direction: column-reverse;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.palette-default-stepper > .palette-default-stepper-value {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		padding: 0.35rem 0;
+		box-sizing: border-box;
+		flex-direction: column;
+		gap: 2px;
+		line-height: 1;
+	}
+
+	.palette-default-stepper > .palette-default-stepper-value > .palette-default-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-inline-size: 0;
+		padding-inline: 0;
+	}
+
+	.palette-default-slider-drawer
+		> .palette-default-slider-trigger
+		> .palette-default-slider-value {
+		flex-direction: column;
+		gap: 1px;
+		line-height: 1;
+	}
+}
+
 .palette-default-slider-inline.palette-default-layout-vertical {
 	inline-size: var(--palette-toolbar-perpendicular);
 	block-size: auto;
@@ -1161,6 +1710,54 @@
 	line-height: 1;
 }
 
+/* Vertical status: pinned square, icon above minutes above seconds.
+ * Tabular numerals keep mm/ss from jittering; the split pair and the
+ * non-time fallback toggle via `hidden` (renderer-owned), so the square
+ * is never empty and in-flow text never widens the toolbar. */
+@container palette style(--layout: vertical) {
+	.palette-default-status {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		block-size: auto;
+		flex-direction: column;
+		gap: 1px;
+		line-height: 1;
+		justify-content: center;
+		padding: 0.35rem 0;
+		box-sizing: border-box;
+	}
+
+	.palette-default-status > :is(
+		.palette-default-status-minutes,
+		.palette-default-status-seconds,
+		.palette-default-status-value
+	) {
+		font-weight: 600;
+		color: var(--pd-status-fg);
+	}
+}
+
+.palette-default-status.palette-default-layout-vertical {
+	inline-size: var(--palette-toolbar-perpendicular);
+	min-inline-size: var(--palette-toolbar-perpendicular);
+	block-size: auto;
+	flex-direction: column;
+	gap: 1px;
+	line-height: 1;
+	justify-content: center;
+	padding: 0.35rem 0;
+	box-sizing: border-box;
+}
+
+.palette-default-status.palette-default-layout-vertical > :is(
+	.palette-default-status-minutes,
+	.palette-default-status-seconds,
+	.palette-default-status-value
+) {
+	font-weight: 600;
+	color: var(--pd-status-fg);
+}
+
 .palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value > .palette-default-icon {
 	display: inline-flex;
 	align-items: center;
@@ -1180,14 +1777,63 @@
 /* Segmented at rest: icons only; labels overlay beside them on group hover.
  * Bordered anchor (unlike the borderless select wrapper): span the border
  * box (-1px block), start past the outer face (+1px inline). */
+@container palette style(--layout: vertical) {
+	.palette-default-segmented
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden])) {
+		position: relative;
+		overflow: visible;
+	}
+
+	.palette-default-segmented
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice {
+		position: absolute;
+		inset-block: -1px;
+		inset-inline-end: calc(100% + 1px);
+		display: inline-flex;
+		align-items: center;
+		inline-size: max-content;
+		padding-inline: 0.72rem;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		white-space: nowrap;
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(0.4rem);
+		transition:
+			transform var(--pd-slide),
+			opacity var(--pd-ease);
+	}
+
+	.palette-default-segmented:hover
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice,
+	.palette-default-segmented:focus-within
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@container palette style(--region: left) {
+	.palette-default-segmented
+		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice {
+		inset-inline-end: auto;
+		inset-inline-start: calc(100% + 1px);
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		transform: translateX(-0.4rem);
+	}
+}
+
 .palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon) {
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden])) {
 	position: relative;
 	overflow: visible;
 }
 
 .palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
 	> .palette-default-choice {
 	position: absolute;
 	inset-block: -1px;
@@ -1207,7 +1853,7 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
 	> .palette-default-choice {
 	inset-inline-end: auto;
 	inset-inline-start: calc(100% + 1px);
@@ -1216,10 +1862,10 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical:hover
-	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
 	> .palette-default-choice,
 .palette-default-segmented.palette-default-layout-vertical:focus-within
-	> .palette-default-tool:has(> .palette-default-choice-icon)
+	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
 	> .palette-default-choice {
 	opacity: 1;
 	transform: translateX(0);
@@ -1271,6 +1917,90 @@
 .palette-default-segmented > :not(:last-child) {
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
+}
+
+@container palette style(--layout: vertical) {
+	:is(
+		.palette-default-segmented > .palette-default-tool,
+		.palette-default-stepper > .palette-default-tool,
+		.palette-default-stepper > .palette-default-stepper-value,
+		.palette-default-stars > :is(.palette-default-icon, .palette-default-stars-row)
+	) {
+		margin-inline-start: 0;
+		margin-block-start: -1px;
+	}
+
+	:is(
+		.palette-default-segmented,
+		.palette-default-stepper,
+		.palette-default-stars
+	) > :first-child {
+		margin-block-start: 0;
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+		border-bottom-left-radius: var(--pd-r-s);
+		border-bottom-right-radius: var(--pd-r-s);
+	}
+
+	:is(
+		.palette-default-segmented,
+		.palette-default-stepper,
+		.palette-default-stars
+	) > :last-child {
+		border-top-left-radius: var(--pd-r-s);
+		border-top-right-radius: var(--pd-r-s);
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+
+	.palette-default-stepper > :not(:first-child):not(:last-child),
+	.palette-default-stars > :not(:first-child):not(:last-child) {
+		border-radius: 0;
+	}
+
+	.palette-default-segmented > :not(:last-child) {
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+	}
+
+	.palette-default-segmented > :not(:first-child) {
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+
+	.palette-default-segmented
+		> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: var(--pd-r-s);
+	}
+
+	.palette-default-segmented
+		> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
+		border-top-left-radius: 0;
+		border-top-right-radius: var(--pd-r-s);
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+}
+
+@container palette style(--region: left) {
+	.palette-default-segmented
+		> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+		border-bottom-left-radius: var(--pd-r-s);
+		border-bottom-right-radius: 0;
+	}
+
+	.palette-default-segmented
+		> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
+		border-top-left-radius: var(--pd-r-s);
+		border-top-right-radius: 0;
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+	}
 }
 
 :is(
@@ -1325,7 +2055,7 @@
  * only buttons with icon + label square the joint. Default opens left
  * (exterior right); `region-left` mirrors. */
 .palette-default-segmented.palette-default-layout-vertical
-	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 	border-bottom-left-radius: 0;
@@ -1333,7 +2063,7 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical
-	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
 	border-top-left-radius: 0;
 	border-top-right-radius: var(--pd-r-s);
 	border-bottom-left-radius: 0;
@@ -1341,7 +2071,7 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :first-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 	border-bottom-left-radius: var(--pd-r-s);
@@ -1349,7 +2079,7 @@
 }
 
 .palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :last-child:has(> .palette-default-choice-icon):has(> .palette-default-choice) {
+	> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
 	border-top-left-radius: var(--pd-r-s);
 	border-top-right-radius: 0;
 	border-bottom-left-radius: 0;
@@ -1458,31 +2188,6 @@
 	overflow: auto;
 }
 
-.palette-default-add-variant {
-	display: grid;
-	gap: 10px;
-	padding: 10px;
-	border: 1px solid var(--pd-border-faint);
-	border-radius: var(--pd-r-l);
-	background: var(--pd-surface-ghost);
-}
-
-.palette-default-add-variant-trigger {
-	display: grid;
-	gap: 4px;
-	padding: 0;
-	border: 0;
-	background: transparent;
-	color: inherit;
-	text-align: left;
-	cursor: pointer;
-}
-
-.palette-default-add-variant-trigger.is-disabled {
-	opacity: 0.55;
-	cursor: not-allowed;
-}
-
 .palette-default-add-inline-value {
 	display: grid;
 	grid-template-columns: auto minmax(0, 1fr);
@@ -1503,6 +2208,23 @@
 	color: var(--pd-muted);
 	font-size: 0.78rem;
 	text-align: center;
+}
+
+.palette-default-add-preview {
+	display: grid;
+	gap: 8px;
+	padding: 10px;
+	border: 1px solid var(--pd-border-faint);
+	border-radius: var(--pd-r-l);
+	background: var(--pd-surface-ghost);
+}
+
+.palette-default-add-preview-content {
+	cursor: grab;
+}
+
+.palette-default-add-preview-content:active {
+	cursor: grabbing;
 }
 
 .palette-default-add-drag-source {

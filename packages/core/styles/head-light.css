@@ -19,6 +19,8 @@
 	--pd-ink: #0f172a;
 	--pd-icon: #475569;
 	--pd-status-fg: #1d4ed8;
+	--pd-accent: #1d4ed8;
+	--pd-accent-ring: 0 0 0 1px rgba(29, 78, 216, 0.45), 0 0 12px rgba(29, 78, 216, 0.35);
 	--pd-r-s: 9px;
 	--pd-r-m: 10px;
 	--pd-r-l: 12px;

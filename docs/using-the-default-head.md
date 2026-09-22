@@ -36,11 +36,28 @@ lacks — a play/rating row). Together they prove both replacement and extension
 
 Notes:
 
+- The console add panel (vanilla `renderAddPanel`) differentiates *adding* from *editing*:
+  selecting an entry builds a detached draft item (one source = one variant, no picker;
+  nothing-points list by point name and bind 1:1 to their `editors` allowlist)
+  and shows the full configurator (same Label/Icon/Hint/Editor/Tone/showValue/showText
+  rows as the inspector, minus Delete, and minus Editor whenever a single choice
+  remains) bound to the draft, plus a disconnected preview
+  below it (`console-add-preview`, `PREVIEW_SURFACE` horizontal/top): real choices/options
+  from the point definitions with a local selected value seeded from the live store.
+  Preview writes go to the preview core only (never `core.values` / `core.run`); the
+  preview content is the sole drag source (pointerdown clones the draft into a `catalog`
+  session).
 - The `commandBox` tool is a real **commands-combo-box** (text input + results popup,
   Ctrl-Shift-P style): it runs commands inline on the toolbar. Running commands does *not*
   require the console; the console is a separate modal for edition (and command-first fallback).
 - The `status` tool is a **nothing-point read-only readout** (a `<span>`, no interaction): it
-  displays the first string value from its context bags (disabled + label placeholder when absent). It modifies nothing in `core.values`.
+  displays the first string value from its context bags (disabled + label placeholder when absent), or the
+  `config.statusKey`-named key when set (e.g. the fleet `shipStatus` reads `shipName` while the bag also
+  holds `shipId`). It modifies nothing in `core.values`.
+  Time formatting is demo-owned (the demo ticks `mm:ss` into the bag) — core is an opaque-string pass-through.
+  Horizontal fills the bar block-size via the generic toolbar-fill rule; **vertical** is a pinned `2.5rem` square
+  stacking icon above minutes above seconds (`splitStatusTime`, strict `mm:ss` only — other strings fall back to a
+  single value node so the square is never empty and the toolbar never widens).
 - The `theme` tool is a **nothing-point cycle button** presenting the `light` / `dark` / `system` options with adapter get/set on the document root
   point with adapter get/set on the document root (`readThemeSetting` / `applyThemeSetting`): each click applies the next value
   (`.palette-default-theme-light` class + `data-theme` + `color-scheme`), so
@@ -61,15 +78,33 @@ Notes:
   checkbox (`select` + `segmented`, checked by default).
 - The `select` closed box always shows the tool icon (when declared) *and*
   the value icon — icon+value like numerics (☀️ over 1.2): side by side on a
-  horizontal toolbar, stacked (tool above value) on a vertical one. The closed
-  label follows `showText` + `choiceDisplay` (an option with no icon keeps its
-  label so the trigger is never empty); the option list always renders icon
-  (when declared) + full text and opens on click only (never hover). With
-  `showText: false` the trigger is icons only and the list still carries the
-  text. In a **vertical** toolbar with text enabled the label is a hover/focus
-  overlay extending the icon stack into an icon+text select box beside the
-  toolbar (same pattern as the vertical segmented overlay) — the toolbar
-  never resizes.
+  horizontal toolbar, stacked (tool above value) on a vertical one. Absent
+  icons are **removed from the DOM** (never hidden placeholders), so an
+  icon-less tool reserves no space — the trigger is exactly its label wide.
+  The closed label follows `showText` + `choiceDisplay` (an option with no
+  icon keeps its label so the trigger is never empty); the option list always
+  renders icon (when declared) + full text and opens on click only (never
+  hover). With `showText: false` the trigger is icons only and the list still
+  carries the text. In a **vertical** toolbar with text enabled the label is a
+  hover/focus overlay extending the icon stack into an icon+text select box
+  beside the toolbar (same pattern as the vertical segmented overlay) — the
+  toolbar never resizes. Skeleton (no option matches the value) renders a
+  stylised `?` watermark (`.palette-default-select-watermark`, never the
+  label class) instead of the closed label, so the trigger is never an empty
+  box. The overlay/joint `:has(> .palette-default-choice-icon)` selectors are
+  gated on `:not([hidden])` so lingering hidden icon nodes never trigger
+  overlay chrome. `config.showFilter: true` adds a text-filter input pinned at
+  the top of the list (`select` only, default hidden — the tool editor exposes
+  it as a "Filter list" checkbox beside "Show text"): typing hides
+  non-matching rows by case-insensitive substring over label + value, Enter
+  runs the first visible row, Escape closes, and the query clears on close.
+  Enum option lists are live: `core.defineEnumOptions(id, options)` replaces
+  the list (validated — unknown id, non-enum, empty, or duplicate values
+  throw) and `defineVirtual`/`removeVirtual` cover `enum-from` virtuals; both
+  emit a per-point definition notification (`subscribeDefinitions`) that the
+  vanilla adapter reconciles in place (rows/buttons insert + remove, open
+  state + focus preserved, trigger patched text-node-only). A current value
+  with no matching option keeps rendering the `?` skeleton.
 - `stepper` is a ± button pair for integer/stepped values; `slider` is the
   continuous range. Both are number editors (they share `sliderPresenter`).
   A slider's range is `inline` by default, running along the toolbar axis;
@@ -204,6 +239,9 @@ component contract (bind a core presenter, never mutate tools directly).
 ## Tool config (`config:` payload)
 
 Tools read per-item `config`: `icon`, `label`, `hint`, `tone` (`neutral`/`accent`),
+plus enum-subset `values`/`keywords`/`choiceDisplay` (honored by `selectPresenter`).
+`accent` paints an accent border + outer glow on every editor (see
+`docs/theming.md` "Accent tone"); `neutral` (the default) renders standard chrome.
 plus enum-subset `values`/`keywords`/`choiceDisplay` (honored by `selectPresenter`).
 The console's *Details* panel renders the presentation-only inspector
 (`BaseConfigurator` via `renderConfigurator` + `resolveConfiguratorContext`),

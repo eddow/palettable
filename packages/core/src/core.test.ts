@@ -204,6 +204,60 @@ describe('defineVirtual / removeVirtual', () => {
 			})
 		).toThrow('unknown source point "missing"')
 	})
+
+	it('emits definition notifications on virtual (re)definition + removal', () => {
+		const core = new PaletteCore(points())
+		const seen: string[] = []
+		const stop = core.subscribeDefinitions((id) => seen.push(id))
+		core.defineVirtual({
+			id: 'pause',
+			label: 'Pause',
+			source: 'fontSize',
+			kind: 'stash',
+			stashedValue: 0,
+		})
+		core.removeVirtual('pause')
+		stop()
+		core.defineVirtual({
+			id: 'late',
+			label: 'Late',
+			source: 'fontSize',
+			kind: 'stash',
+			stashedValue: 0,
+		})
+		expect(seen).toEqual(['pause', 'pause'])
+	})
+})
+
+describe('defineEnumOptions', () => {
+	it('replaces the option list, invalidates the cache, and notifies', () => {
+		const core = new PaletteCore(points())
+		const before = core.points
+		const seen: string[] = []
+		core.subscribeDefinitions((id) => seen.push(id))
+		core.defineEnumOptions('mode', [{ value: 'c' }, { value: 'd', label: 'Dee' }])
+		expect(core.points).not.toBe(before)
+		expect(core.getDefinition('mode')).toMatchObject({
+			constraints: { options: [{ value: 'c' }, { value: 'd', label: 'Dee' }] },
+		})
+		expect(seen).toEqual(['mode'])
+	})
+
+	it('validates ids, families, emptiness, and duplicates', () => {
+		const core = new PaletteCore(points())
+		expect(() => core.defineEnumOptions('missing', [{ value: 'a' }])).toThrow(
+			'defineEnumOptions: unknown point "missing"'
+		)
+		expect(() => core.defineEnumOptions('theme', [{ value: 'a' }])).toThrow(
+			'defineEnumOptions: point "theme" is not an enum'
+		)
+		expect(() => core.defineEnumOptions('mode', [])).toThrow(
+			'defineEnumOptions: point "mode" needs at least one option'
+		)
+		expect(() => core.defineEnumOptions('mode', [{ value: 'a' }, { value: 'a' }])).toThrow(
+			'duplicate option value "a"'
+		)
+	})
 })
 
 describe('values (raw store)', () => {

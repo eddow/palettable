@@ -520,6 +520,7 @@ export class PaletteLayoutTree {
 			commitDraggedToParkingRow,
 			commitSlide,
 			stackFlanks,
+			parkingFlanks,
 			isItemSpaceFree,
 			insertToolbar: (track, index, toolbar) =>
 				insertToolbar(track, index, toolbar, configuration.trackGapSplit),
@@ -1371,7 +1372,10 @@ export function dragOver(
 				? [{ toolbar: element.toolbar, gaps: [...highlight.highlighted] }]
 				: []
 		// Dry side falls back to the flanking track gap — except while a
-		// whole toolbar is dragged (neighbour TB edges instead).
+		// whole toolbar is dragged (neighbour TB edges instead). Parking
+		// rows have no track: the flanking parking gaps arrive via the
+		// session's `parkingFlanks` merge (`addTrackFlanks`), so the
+		// item-space paint alone is the decision here.
 		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
 		if (at?.kind === 'border' && pointer.activeItem !== undefined) {
 			const slotIndex = at.track.findIndex((entry) => entry.toolbar === element.toolbar)
@@ -1407,9 +1411,14 @@ export function dragOver(
 		return { ...empty, itemHighlights }
 	}
 	// Hovering a toolbar body: same fallback, anchored on the pointer item.
+	// Parking rows have no track fallback — the decision is empty and the
+	// session's `parkingFlanks` merge paints the flanking parking gaps, so
+	// a parking bar-background hover (no active item) still lights flanks.
 	if (element.kind === 'toolbar') {
 		const at = locateToolbar(element.toolbar, layout.borders, layout.parking)
-		if (at?.kind !== 'border' || pointer.activeItem === undefined) return empty
+		if (at === undefined) return empty
+		if (at.kind === 'parking') return empty
+		if (pointer.activeItem === undefined) return empty
 		const slotIndex = at.track.findIndex((entry) => entry.toolbar === element.toolbar)
 		if (dragging.isWholeToolbar) {
 			return {
@@ -1464,20 +1473,28 @@ export function dragOver(
 	}
 	// Hovering a track gap: paint + commit when highlighted (not a slide flank).
 	// Direct hover only needs the flank veto, so the toolbar/slot are unused.
+	// The highlight decision must mirror the commit veto exactly: the commit
+	// (`commitDraggedToTrackSpace` → `isSlidingFlank`) vetoes only the two
+	// gaps flanking the moved toolbar, so the highlight must veto only those
+	// too — never the whole track. Vetoing the whole track (e.g. via a
+	// `slotIndex: 0` + `activeSlot: undefined` fallback call) would paint the
+	// gap dark while the commit still lands there: the adapter would move
+	// tools under a dark gap, breaking the paint/commit single-decision rule
+	// (vertical ABCD pop-A: the leading gap paints dark, the singleton still
+	// extracts, and the gap-before-B highlight is lost with it).
 	if (element.kind === 'track-gap') {
-		const highlight = trackSpaceHighlight({
-			track: element.track,
-			toolbar: [],
-			slotIndex: 0,
-			activeSlot: undefined,
-			hovered: element.gap,
-			editing: true,
-			dragging,
-		})
-		if (!highlight.highlighted.has(element.gap)) {
+		// Range check first (mirrors `trackSpaceHighlight`'s `add` guard):
+		// a stale gap index past the track end paints dark and never commits.
+		if (element.gap < 0 || element.gap > element.track.length) {
+			return { ...empty, trackHighlights: [] }
+		}
+		if (isSlidingFlank(dragging, element.track, element.gap)) {
 			return { ...empty, trackHighlights: [] }
 		}
 		const result = commitDraggedToTrackSpace(dragging, element.track, element.border, element.gap)
+		// The commit is the second half of the single decision: a refused
+		// landing (empty tools, pruned origin) paints dark, never lit.
+		if (!result.moved) return { ...empty, trackHighlights: [] }
 		return {
 			...empty,
 			trackHighlights: [{ track: element.track, gaps: [element.gap] }],
@@ -1577,6 +1594,11 @@ export function draggingEmptiesTrackIndex(
  * is dragged while the stack holds a single row. Returns `undefined` when no
  * such row exists in `parking` (partial drag, multi-row stack, or a border
  * drag — borders have no rows).
+ *
+ * Single-row scope is deliberate: with several rows the origin row survives
+ * beside its neighbours, so dropping next to it is a real reorder (unlike
+ * the emptied-track case, where the origin track vanishes and the flanking
+ * gaps collapse onto the same spot).
  */
 export function draggingEmptiesParkingRow(
 	dragging: DraggingState | undefined,
@@ -1588,6 +1610,29 @@ export function draggingEmptiesParkingRow(
 	const sole = parking[0]
 	if (sole && isDraggingWholeToolbar(dragging, sole)) return 0
 	return undefined
+}
+
+/**
+ * Index of the parking row a whole-row drag sits in (`undefined` for partial
+ * drags, border drags, or an origin row no longer in `parking`). Unlike
+ * `draggingEmptiesParkingRow` (single-row scope), this covers multi-row
+ * stacks: the two gaps touching the origin row are no-op destinations at any
+ * stack size — dropping there re-creates the same spot once the origin row
+ * is pruned and the indices shift back (mirrors the item-space rule: a DZ
+ * beside a dragged tool never highlights — and the track-gap sliding veto
+ * `isSlidingFlank`). With rows `[A, B]` and `A` dragged whole, gaps 0/1
+ * touch `A` and stay dark — only gap 2 (after `B`) paints.
+ */
+export function draggingWholeParkingRow(
+	dragging: DraggingState | undefined,
+	parking: Parking
+): number | undefined {
+	if (!dragging || dragging.tools.length === 0) return undefined
+	if (dragging.origin.kind !== 'parking') return undefined
+	const index = parking.indexOf(dragging.origin.toolbar)
+	if (index < 0) return undefined
+	if (!isDraggingWholeToolbar(dragging, dragging.origin.toolbar)) return undefined
+	return index
 }
 
 // ── Drop-zone highlight (pure, no DOM) ────────────────────────────────────
@@ -1683,8 +1728,38 @@ export function stackFlanks(
 }
 
 /**
- * Parking stack gaps (`parking.length + 1` of them): same protocol as border
- * stacks, with the would-be-emptied row veto.
+ * The two parking gaps flanking `rowIndex` (the "active row"
+ * fallback), with the whole-row neighbour veto applied — the paint every
+ * parking-row hover derives in addition to its own DZs (mirrors
+ * `stackFlanks` for borders). The two gaps touching the dragged whole row
+ * stay dark at any stack size (dropping there re-creates the same spot);
+ * partial drags flank normally. Hovering the dragged row itself paints
+ * nothing; hovering another row paints its far flank only — the same
+ * "past the direct neighbours" behaviour as tools in toolbars and toolbars
+ * in tracks.
+ */
+export function parkingFlanks(
+	dragging: DraggingState | undefined,
+	parking: Parking,
+	rowIndex: number
+): readonly number[] {
+	const whole = draggingWholeParkingRow(dragging, parking)
+	const out: number[] = []
+	for (const gap of [rowIndex, rowIndex + 1]) {
+		if (gap < 0 || gap > parking.length) continue
+		if (whole !== undefined && (gap === whole || gap === whole + 1)) continue
+		out.push(gap)
+	}
+	return out
+}
+
+/**
+ * Parking stack gaps (`parking.length + 1` of them): direct gap hover
+ * paints only the hovered gap, with the whole-row neighbour veto (the two
+ * gaps touching the dragged whole row stay dark at any stack size —
+ * mirrors the item-space rule). The `active` row-hover path is unused
+ * (flanks arrive via `parkingFlanks`); the emptied-row rule stays in the
+ * commit (`commitDraggedToParkingRow`).
  */
 export function parkingGapHighlight(options: {
 	parking: Parking
@@ -1700,7 +1775,7 @@ export function parkingGapHighlight(options: {
 		hovered: options.hovered,
 		editing: options.editing,
 		dragging: options.dragging,
-		emptied: draggingEmptiesParkingRow(options.dragging, options.parking),
+		emptied: draggingWholeParkingRow(options.dragging, options.parking),
 		maskActive: options.maskActive ?? false,
 		endGap: options.parking.length,
 	})
@@ -2002,7 +2077,10 @@ export function commitDraggedToStackSpace(
 /**
  * Commit the dragged tools into a parking stack gap, creating a new row at
  * that gap. Parking analogue of `commitDraggedToStackSpace` (no tracks, no
- * spacing to split). The emptied-row veto mirrors the highlight rule.
+ * spacing to split). The whole-row neighbour veto mirrors the highlight
+ * rule: the two gaps touching the dragged whole row are no-ops at any
+ * stack size (dropping there re-creates the same spot once the origin row
+ * is pruned and the indices shift back).
  * Returns the refreshed whole-toolbar flag (also stored on the session).
  */
 export function commitDraggedToParkingRow(
@@ -2013,8 +2091,8 @@ export function commitDraggedToParkingRow(
 	if (dragging.tools.length === 0) return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	const mode = dragging.isWholeToolbar ? 'slide' : 'restructure'
 	if (dragging.origin.kind === 'parking') {
-		const emptied = draggingEmptiesParkingRow(dragging, targetParking)
-		if (emptied !== undefined && (gapIndex === emptied || gapIndex === emptied + 1))
+		const whole = draggingWholeParkingRow(dragging, targetParking)
+		if (whole !== undefined && (gapIndex === whole || gapIndex === whole + 1))
 			return { moved: false, isWholeToolbar: dragging.isWholeToolbar }
 	}
 	const originParking = dragging.origin.kind === 'parking' ? dragging.origin.parking : undefined

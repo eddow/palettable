@@ -17,6 +17,8 @@ import {
 	escapeHtml,
 	iconSpan,
 	sel,
+	splitStatusTime,
+	statusShellTemplate,
 } from './templates.js'
 
 describe('escapeHtml', () => {
@@ -93,6 +95,8 @@ describe('drawer + command-box shells', () => {
 		expect(popup.classList.contains('is-horizontal')).toBe(true)
 		expect(popup.getAttribute('role')).toBe('dialog')
 		expect(popup.hasAttribute('hidden')).toBe(true)
+		expect(popup.style.getPropertyValue('--layout')).toBe('horizontal')
+		expect(popup.style.getPropertyValue('--region')).toBe('')
 	})
 
 	it('command-box shell carries combobox testids', () => {
@@ -101,5 +105,36 @@ describe('drawer + command-box shells', () => {
 		expect(box.querySelector('[data-testid="command-box-input"]')).not.toBeNull()
 		expect(box.querySelector('[data-testid="command-box-results"]')).not.toBeNull()
 		expect(box.querySelector('[data-testid="command-box-open-editor"]')).not.toBeNull()
+	})
+})
+
+describe('status shells', () => {
+	it('horizontal shell carries a single value node', () => {
+		const span = elementFromHtml(
+			statusShellTemplate({ tone: 'neutral', direction: 'horizontal', region: 'top' })
+		)
+		expect(span.classList.contains('palette-default-layout-horizontal')).toBe(true)
+		expect(span.classList.contains('palette-default-region-top')).toBe(true)
+		expect(span.querySelector('.palette-default-status-value')).not.toBe(null)
+		expect(span.querySelector('.palette-default-status-minutes')).toBe(null)
+	})
+
+	it('vertical shell stacks minutes above seconds with a hidden fallback', () => {
+		const span = elementFromHtml(
+			statusShellTemplate({ tone: 'neutral', direction: 'vertical', region: 'left' })
+		)
+		expect(span.classList.contains('palette-default-layout-vertical')).toBe(true)
+		expect(span.classList.contains('palette-default-region-left')).toBe(true)
+		expect(span.querySelector('.palette-default-status-minutes')).not.toBe(null)
+		expect(span.querySelector('.palette-default-status-seconds')).not.toBe(null)
+		expect(span.querySelector('.palette-default-status-value')?.hasAttribute('hidden')).toBe(true)
+	})
+
+	it('splitStatusTime splits strict mm:ss only', () => {
+		expect(splitStatusTime('04:37')).toEqual(['04', '37'])
+		expect(splitStatusTime('4:37')).toEqual(['4', '37'])
+		expect(splitStatusTime('ready')).toBe(undefined)
+		expect(splitStatusTime('12:345')).toBe(undefined)
+		expect(splitStatusTime('ab:cd')).toBe(undefined)
 	})
 })

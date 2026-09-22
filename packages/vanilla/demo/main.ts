@@ -1,4 +1,4 @@
-import { ConsoleStore, PaletteCore, validateSerializedLayout, ValuesBag } from '@palettable/core'
+import { ConsoleStore, PaletteCore, ValuesBag, validateSerializedLayout } from '@palettable/core'
 import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
 import '../../core/styles/palette.css'
 import '../../core/styles/head-default.css'
@@ -17,6 +17,10 @@ import {
 	demoPoints,
 	demoState,
 	resetColonyValues,
+	SHIP_ROSTER,
+	SHIP_VALUES,
+	type ShipId,
+	shipById,
 } from './palette.js'
 
 const LAYOUT_STORAGE_KEY = 'palettable-demo-layout-v1'
@@ -115,6 +119,112 @@ bindResetViaCore(() => {
 // paint instead of disabled + placeholder.
 const missionBag = new ValuesBag({ elapsed: '00:00' })
 core.setContext('mission', missionBag)
+
+// Host-owned `ship` context bag for the fleet demo (one-or-none selected).
+// Flat keys (`shipId` + per-ship props) so `liveValue` /
+// `changed.includes(point.id)` work with zero adapter changes. Starts
+// absent (no selection): ship tools render the core-contract fallback
+// (disabled + placeholder / skeleton) until the chrome selector picks one.
+// Ship point ids never enter the root bag / `CONSUMER_DEFAULTS` — there is
+// no colony-wide equivalent.
+const shipBag = new ValuesBag<Record<string, unknown>>()
+core.setContext('ship', shipBag)
+
+// Fleet selection state: one-or-none selected. Per-ship props live in
+// `shipState` (mutable copy of `SHIP_VALUES`); selection swaps a flat
+// `ship` bag (`shipId` + props) so `liveValue` /
+// `changed.includes(point.id)` work with zero adapter changes. Ship point
+// ids never enter the root bag / `CONSUMER_DEFAULTS` — there is no
+// colony-wide equivalent. No selection = cleared keys → tools fall back
+// to the core-contract skeleton (disabled + placeholder / `?` / mixed).
+let selectedShipId: ShipId | undefined
+const shipState: Record<ShipId, { shipShields: boolean; shipPower: number }> = {
+	aurora: { ...SHIP_VALUES.aurora },
+	borealis: { ...SHIP_VALUES.borealis },
+	cinder: { ...SHIP_VALUES.cinder },
+}
+
+function selectShip(id: string | undefined): void {
+	const entry = id !== undefined ? shipById(id) : undefined
+	if (entry === undefined) {
+		selectedShipId = undefined
+		// Bag stays registered — key change, per-tool in-place update;
+		// tools fall back to root skeleton.
+		shipBag.setTree({
+			shipId: undefined,
+			shipName: undefined,
+			shipShields: undefined,
+			shipPower: undefined,
+		})
+		demo.lastAction = 'No ship selected'
+		renderFleet()
+		return
+	}
+	selectedShipId = entry.id as ShipId
+	const props = shipState[selectedShipId]
+	shipBag.setTree({
+		shipId: entry.id,
+		shipName: `${entry.icon} ${entry.name}`,
+		shipShields: props.shipShields,
+		shipPower: props.shipPower,
+	})
+	demo.lastAction = `${entry.name} selected`
+	renderFleet()
+}
+
+// Fleet panels in the game center (work-zone): one card per ship showing
+// its icon + name + live prop values. Click toggles selection (click the
+// selected card again to deselect). Re-rendered on selection + on ship-bag
+// writes (toolbar edits flow back into the cards).
+function renderFleet(): void {
+	const fleet = document.querySelector('[data-testid="fleet"]')
+	if (!(fleet instanceof HTMLElement)) return
+	fleet.textContent = ''
+	for (const ship of SHIP_ROSTER) {
+		const props = shipState[ship.id as ShipId]
+		const card = document.createElement('button')
+		card.type = 'button'
+		card.className = 'demo-ship-card'
+		card.dataset.testid = `ship-card-${ship.id}`
+		card.setAttribute('aria-pressed', selectedShipId === ship.id ? 'true' : 'false')
+		if (selectedShipId === ship.id) card.classList.add('is-selected')
+		const name = document.createElement('span')
+		name.className = 'demo-ship-name'
+		name.textContent = `${ship.icon} ${ship.name}`
+		const values = document.createElement('span')
+		values.className = 'demo-ship-props'
+		values.textContent = `🛡️ ${props.shipShields ? 'up' : 'down'} · 🔋 ×${props.shipPower}`
+		card.append(name, values)
+		card.addEventListener('click', () => {
+			selectShip(selectedShipId === ship.id ? undefined : ship.id)
+		})
+		fleet.append(card)
+	}
+}
+
+// Toolbar edits write into the `ship` bag (context-routed `writeValue`);
+// mirror them back into `shipState` + the cards so the fleet stays live.
+shipBag.subscribe((changed) => {
+	if (selectedShipId === undefined) return
+	const state = shipState[selectedShipId]
+	let touched = false
+	if (changed.includes('shipShields')) {
+		const next = shipBag.get('shipShields')
+		if (typeof next === 'boolean' && next !== state.shipShields) {
+			state.shipShields = next
+			touched = true
+		}
+	}
+	if (changed.includes('shipPower')) {
+		const next = shipBag.get('shipPower')
+		if (typeof next === 'number' && next !== state.shipPower) {
+			state.shipPower = next
+			touched = true
+		}
+	}
+	if (touched) renderFleet()
+})
+renderFleet()
 
 const ide = createIDE(ideHost, {
 	core,

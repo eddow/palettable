@@ -112,7 +112,7 @@ token, not a light-override selector.
 | `--pd-panel*` (popovers, console panel) | `2,6,23,0.98` / `#020617` | `#ffffff`-ish |
 | `--pd-tool-bg` | slate gradient | flat `241,245,249,0.96` |
 | `--pd-muted` / `--pd-faint` / `--pd-icon` / `--pd-status-fg` | `#94a3b8` / `#64748b` / `#93c5fd` / `#bfdbfe` | `#475569` / `#64748b` / `#475569` / `#1d4ed8` |
-| `--pd-accent*` / `--pd-selected-*` / `--pd-option-ring` | blue `#1d4ed8` + `#60a5fa` | unchanged |
+| `--pd-accent*` / `--pd-selected-*` / `--pd-option-ring` | blue `#3b82f6` + outer glow | deep blue `#1d4ed8` + glow |
 | `--pd-star*` / `--pd-drag-border` | `#facc15` / `#f59e0b` / accent dashed | unchanged |
 | `--pd-r-*` / `--pd-ease` / `--pd-slide` | `9/10/12/14/18px`, `120/140ms` | unchanged |
 
@@ -144,6 +144,18 @@ reveal transition (opacity + pointer-events + translate), one vertical
 overlay pattern (§10: segmented + select). Joined boxes (§11) collapse
 shared edges via `-1px`; vertical groups use `column-reverse`, so
 `:first-child` rounds the visual bottom and `:last-child` the visual top.
+
+## Accent tone (`config.tone: 'accent'`)
+
+Accent paints an accent border + outer glow (`--pd-accent` /
+`--pd-accent-ring`) on every editor. Button, toggle, theme and drawer-trigger
+tools carry `palette-default-tone-accent` on the same node as
+`palette-default-tool` (same-element selector); segmented options and stepper
+± buttons match via the descendant selector; select trigger, slider readout +
+track, stepper readout, status and stars match via explicit wrapper rules in
+§1. Vertical select is excluded from the trigger rule — its chip carries the
+accent instead (the trigger itself is a borderless wrapper there). Neutral
+(the default) has no rule: it renders the standard chrome.
 
 ## Base (dark) theme
 

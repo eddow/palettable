@@ -112,6 +112,30 @@ describe('editorChoicesFor', () => {
 		expect(choices).toEqual([{ id: 'status', label: 'Status', selected: true }])
 	})
 
+	it('restricts nothing-points to their 1:1 editors subset', () => {
+		const full: EditorRegistry = {
+			item: {
+				status: { id: 'status', label: 'Status', families: ['item'] },
+				theme: { id: 'theme', label: 'Theme', families: ['item'] },
+			},
+		}
+		const themePoint: AnyPoint = {
+			id: 'theme',
+			label: 'Theme',
+			type: 'nothing',
+			editors: ['theme'],
+		}
+		const choices = editorChoicesFor(themePoint, { axis: 'horizontal' }, full, undefined, undefined)
+		expect(choices.map((choice) => choice.id)).toEqual(['theme'])
+		// Omitted `editors` = whole item family (legacy).
+		const legacy: AnyPoint = { id: 'legacy', label: 'Legacy', type: 'nothing' }
+		expect(
+			editorChoicesFor(legacy, { axis: 'horizontal' }, full, undefined, undefined).map(
+				(choice) => choice.id
+			)
+		).toEqual(['status', 'theme'])
+	})
+
 	it('returns an empty list without a registry entry', () => {
 		expect(
 			editorChoicesFor(booleanPoint, { axis: 'horizontal' }, undefined, undefined, undefined)

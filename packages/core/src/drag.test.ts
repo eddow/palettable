@@ -98,14 +98,28 @@ describe('createDrag session shell', () => {
 		const item = toolbar[0]
 		if (!item) throw new Error('expected item')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
-		// Decided by core at grab time — the adapter only applies it.
-		expect(session.draggedToolbar).toBe(toolbar)
+		// Decided by core: a subset drag moves nothing, so no toolbar owns
+		// the chrome until the extraction promotes to a whole-toolbar slide.
+		expect(session.draggedToolbar).toBe(undefined)
 		// It follows the origin across a restructure commit (extraction
 		// into a fresh singleton), and clears on `end()`.
 		const track = live.borders.top[1] ?? []
 		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
 		expect(session.draggedToolbar).not.toBe(toolbar)
 		expect(session.draggedToolbar).toBe(session.draggedToolbar)
+		session.end()
+		expect(session.draggedToolbar).toBe(undefined)
+	})
+
+	it('draggedToolbar is set at grab time for a whole-toolbar slide', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[1]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		// Lone tool in its toolbar: whole-toolbar slide from the start.
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		expect(session.draggedToolbar).toBe(toolbar)
 		session.end()
 		expect(session.draggedToolbar).toBe(undefined)
 	})
@@ -361,6 +375,53 @@ describe('slide geometry home (Phase 4)', () => {
 		expect(events.filter((event) => event.type === 'slide')).toHaveLength(3)
 		session.end()
 	})
+
+	it('slideLimit flips at the free-span extremes and draggedToolbar follows', () => {
+		const tree = new PaletteLayoutTree(wholeToolbarLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const session = tree.createDrag({ kind: 'tool', toolbar, item })
+		const { events } = collectEvents(session)
+		const frame = { axis: 'horizontal' as const, start: 0, available: 100, resting: 10, grab: 5 }
+		session.measure(frame)
+		// Free move: no limit event, chrome stays on the dragged toolbar.
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 60, clientY: 0 })
+		expect(events.some((event) => event.type === 'slideLimit')).toBe(false)
+		expect(session.draggedToolbar).toBe(toolbar)
+		// Past the trailing extreme (raw 110 > available 100): clamped
+		// slide + limit on — the toolbar loses its dragged status.
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 115, clientY: 0 })
+		const limited = events.filter((event) => event.type === 'slideLimit')
+		expect(limited).toHaveLength(1)
+		expect(limited[0]).toMatchObject({ toolbar, atLimit: true })
+		expect(session.draggedToolbar).toBe(undefined)
+		// Still past the extreme: no re-emit (flip only).
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 200, clientY: 0 })
+		expect(events.filter((event) => event.type === 'slideLimit')).toHaveLength(1)
+		// Moving free again: limit off — the toolbar recovers its status.
+		session.over({ kind: 'tool', toolbar, item }, { clientX: 60, clientY: 0 })
+		const freed = events.filter((event) => event.type === 'slideLimit')
+		expect(freed).toHaveLength(2)
+		expect(freed.at(-1)).toMatchObject({ toolbar, atLimit: false })
+		expect(session.draggedToolbar).toBe(toolbar)
+		// Past the leading extreme (raw -10 < 0): limit on again.
+		session.over({ kind: 'tool', toolbar, item }, { clientX: -5, clientY: 0 })
+		expect(events.filter((event) => event.type === 'slideLimit')).toHaveLength(3)
+		expect(session.draggedToolbar).toBe(undefined)
+		session.end()
+	})
+
+	it('isSlideAtLimit mirrors the clamp boundaries', async () => {
+		const { isSlideAtLimit } = await import('./drag.js')
+		const frame = { axis: 'horizontal' as const, start: 100, available: 200, resting: 40, grab: 0 }
+		expect(isSlideAtLimit(frame, 180)).toBe(false)
+		expect(isSlideAtLimit(frame, 100)).toBe(false)
+		expect(isSlideAtLimit(frame, 300)).toBe(false)
+		expect(isSlideAtLimit(frame, 99)).toBe(true)
+		expect(isSlideAtLimit(frame, 301)).toBe(true)
+	})
 })
 
 /**
@@ -407,6 +468,39 @@ describe('createDrag hover mapping (review regressions)', () => {
 			.sort((a, b) => a - b)
 		expect(lit).toEqual([0, 1])
 		session.end()
+	})
+
+	it('a parking-row hover paints the two FLANKING parking gaps (no dwell arm)', () => {
+		vi.useFakeTimers()
+		try {
+			const tree = new PaletteLayoutTree(twoItemLayout())
+			const live = tree.getLayout()
+			const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+			const item = toolbar[0]
+			if (!item) throw new Error('expected item')
+			const session = tree.createDrag({ kind: 'tool', toolbar, item })
+			const { events } = collectEvents(session)
+			const row = live.parking[0] ?? []
+			const rowItem = row[0]
+			if (!rowItem) throw new Error('expected row item')
+			// Row hover (not a gap): flanking parking gaps paint `on`.
+			session.over({ kind: 'tool', toolbar: row, item: rowItem }, sample)
+			const lit = events
+				.filter(
+					(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+						event.type === 'highlight' && event.dz.kind === 'parking-gap'
+				)
+				.map((event) => (event.dz.kind === 'parking-gap' ? event.dz.gap : -1))
+				.sort((a, b) => a - b)
+			expect(lit).toEqual([0, 1])
+			expect(events.every((event) => event.type !== 'structure')).toBe(true)
+			// No dwell arms on a row hover: advancing the timer commits nothing.
+			vi.advanceTimersByTime(configuration.stackDzHoverMs * 2)
+			expect(events.some((event) => event.type === 'structure')).toBe(false)
+			session.end()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it('a hover that maps to nothing clears the previous paint', () => {
@@ -1243,23 +1337,17 @@ describe('session dwell (Phase 3)', () => {
 		if (!item) throw new Error('expected item')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		const { events } = collectEvents(session)
-		// Parking: after the row is created the armed gap stays valid (two
-		// rows, no emptied veto), so the re-paint lands on the live gap.
+		// Parking: the dwell extracts one tool of two into a fresh row, so
+		// the placed row holds the dragged tool wholly — the armed gap is
+		// now a whole-row neighbour and stays dark (same "past the direct
+		// neighbours" rule as tools/toolbars). The re-paint emits nothing,
+		// and never an `off` for the destroyed node.
 		session.over({ kind: 'parking-gap', parking: live.parking, gap: 1 }, sample)
 		vi.advanceTimersByTime(configuration.stackDzHoverMs + 10)
 		expect(live.parking).toHaveLength(2)
 		const structureAt = events.findIndex((event) => event.type === 'structure')
 		expect(structureAt).toBeGreaterThan(-1)
-		const after = events.slice(structureAt + 1)
-		// The still-hovered gap keeps its `double` state (dwell target);
-		// anything else re-paints `on`. Either way the live gap repaints.
-		const repainted = after.filter(
-			(event) => event.type === 'highlight' && (event.state === 'on' || event.state === 'double')
-		)
-		expect(repainted.length).toBeGreaterThan(0)
-		// Never a diff against nodes a re-render destroyed: no `off` after
-		// the structure event (the baseline was cleared, not diffed).
-		expect(after.some((event) => event.type === 'highlight' && event.state === 'off')).toBe(false)
+		expect(events.slice(structureAt + 1)).toHaveLength(0)
 		session.end()
 	})
 

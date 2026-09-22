@@ -237,6 +237,31 @@ test('horizontal select shows icon + label and opens a full-text list on click',
 	await page.keyboard.press('Escape')
 })
 
+test('select filter narrows rows and Enter picks the first match', async ({ page }) => {
+	// The left drawer's nested popup hosts the `colonyTheme` select with
+	// `showFilter: true` — open the drawer first.
+	await page.getByRole('button', { name: 'More' }).click()
+	const popup = page.locator('.palettable-drawer__popup')
+	await expect(popup).toBeVisible()
+	const box = popup.locator('.palette-default-select.palette-default-layout-horizontal')
+	await expect(box).toBeVisible()
+	const trigger = box.locator('.palette-default-select-trigger')
+	await trigger.click()
+	const list = box.locator('.palette-default-select-list')
+	await expect(list).toBeVisible()
+	const filter = list.locator('[data-testid="select-filter-input"]')
+	await expect(filter).toBeVisible()
+	await filter.fill('nep')
+	const rows = list.locator('.palette-default-select-option')
+	await expect(rows.nth(0)).toBeHidden()
+	await expect(rows.nth(1)).toBeVisible()
+	await expect(rows.nth(1)).toContainText('Neptune')
+	await filter.press('Enter')
+	await expect(list).toBeHidden()
+	await expect(trigger.locator('.palette-default-choice')).toContainText('Neptune')
+	await page.keyboard.press('Escape')
+})
+
 test('vertical select stacks tool + value icons and extends to text on hover', async ({ page }) => {
 	// The left border hosts the `colonyTheme` select (enum, tool icon 🪐).
 	const box = page.locator(

@@ -99,6 +99,13 @@ export type NothingPoint = PointBase<'nothing'> & {
 	 * owns get/set (document root class, …), core never stores the value.
 	 */
 	readonly options?: readonly import('./type.js').EnumOption[]
+	/**
+	 * Allowed editor ids for this point (1:1 binding — e.g. `theme`
+	 * allows `['theme']`, a drawer point allows `['drawer']`). Restricts
+	 * `editorChoicesFor` / `resolveEditorVariant` to this subset of the
+	 * `item` family. Omitted = all `item`-family editors (legacy).
+	 */
+	readonly editors?: readonly string[]
 }
 
 /** Any point the core accepts. */

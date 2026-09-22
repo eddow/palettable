@@ -247,3 +247,64 @@ describe('context-display resolvers', () => {
 		expect(view.can).toBe(false)
 	})
 })
+
+describe('context-routed valued reads/writes (ship selection pattern)', () => {
+	function shipCore() {
+		return new PaletteCore([
+			{ id: 'shipShields', label: 'Ship Shields', type: 'boolean', uses: ['ship'] },
+			{
+				id: 'shipPower',
+				label: 'Ship Reactor',
+				type: 'number',
+				constraints: { min: 0.5, max: 5, step: 0.5 },
+				uses: ['ship'],
+			},
+		])
+	}
+
+	it('readValue prefers the first non-root used bag holding the id, else root', () => {
+		const core = shipCore()
+		core.setMany({ shipShields: false })
+		expect(core.readValue('shipShields')).toBe(false)
+		const bag = new ValuesBag({ shipShields: true })
+		core.setContext('ship', bag)
+		expect(core.readValue('shipShields')).toBe(true)
+		bag.set('shipShields', undefined as never)
+		expect(core.readValue('shipShields')).toBe(false)
+	})
+
+	it('writeValue lands in the context bag when it holds the id, else root', () => {
+		const core = shipCore()
+		core.setMany({ shipShields: false })
+		const bag = new ValuesBag({ shipShields: false, shipPower: 1.5 })
+		core.setContext('ship', bag)
+		expect(core.writeValue('shipShields', true)).toEqual({ target: 'context', bag: 'ship' })
+		expect(bag.get('shipShields')).toBe(true)
+		expect(core.values.get('shipShields')).toBe(false)
+		// Point with no `uses` bag holding it still writes root.
+		const plain = new PaletteCore([{ id: 'flag', label: 'Flag', type: 'boolean' }])
+		plain.setMany({ flag: false })
+		expect(plain.writeValue('flag', true)).toEqual({ target: 'root' })
+		expect(plain.values.get('flag')).toBe(true)
+	})
+
+	it('writeValue throws on skeleton (absent everywhere); readValue returns undefined', () => {
+		const core = shipCore()
+		core.setContext('ship', new ValuesBag())
+		expect(core.readValue('shipShields')).toBeUndefined()
+		expect(() => core.writeValue('shipShields', true)).toThrow('skeleton')
+		expect(() => core.readValue('missing')).toThrow(PaletteError)
+		expect(() => core.writeValue('missing', true)).toThrow(PaletteError)
+	})
+
+	it('run setters and inc/dec route through the context bag', () => {
+		const core = shipCore()
+		const bag = new ValuesBag({ shipShields: false, shipPower: 1.5 })
+		core.setContext('ship', bag)
+		core.run('shipShields=true')
+		expect(bag.get('shipShields')).toBe(true)
+		core.run('shipPower:inc')
+		expect(bag.get('shipPower')).toBe(2)
+		expect(core.canRunAction('shipPower', 'inc')).toBe(true)
+	})
+})

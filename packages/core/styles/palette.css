@@ -113,7 +113,26 @@
 
 /* Perpendicular DZs stretch across their container instead of going round:
  * item separators always fill the toolbar height/width (even unhighlighted,
- * so only the thickness animates), track gaps fill the track width. */
+ * so only the thickness animates), track gaps fill the track width.
+ * (Stamped `palette-horizontal/vertical` selectors kept below as the
+ * no-container-query fallback.) Scoped out of drawer popups: drawer
+ * content is plain stacked toolbars, not DZ-carrying tracks. */
+@container palette style(--layout: horizontal) {
+	.toolbar-border .toolbar-item-space.toolbar-drop-zone,
+	.palette-parking .toolbar-item-space.toolbar-drop-zone {
+		align-self: stretch;
+		height: auto;
+	}
+}
+
+@container palette style(--layout: vertical) {
+	.toolbar-border .toolbar-item-space.toolbar-drop-zone,
+	.palette-parking .toolbar-item-space.toolbar-drop-zone {
+		align-self: stretch;
+		width: auto;
+	}
+}
+
 .toolbar-border.palette-horizontal .toolbar-item-space.toolbar-drop-zone,
 .palette-parking.palette-horizontal .toolbar-item-space.toolbar-drop-zone {
 	align-self: stretch;
@@ -146,6 +165,27 @@
 	display: flex;
 	min-width: 0;
 	min-height: 0;
+}
+
+/* Container-first: the stamped `palette-horizontal/vertical` selectors
+ * below stay as the no-container-query fallback. Scoped out of drawer
+ * popups: drawer content is NOT a track (plain stacked content, styled
+ * in the drawer section), and the popup's child `--layout` would
+ * otherwise flip it. */
+@container palette style(--layout: horizontal) {
+	.toolbar-border > .toolbar-track,
+	.palette-parking > .toolbar-track {
+		flex-direction: row;
+		width: 100%;
+	}
+}
+
+@container palette style(--layout: vertical) {
+	.toolbar-border > .toolbar-track,
+	.palette-parking > .toolbar-track {
+		flex-direction: column;
+		height: 100%;
+	}
 }
 
 .toolbar-border.palette-horizontal > .toolbar-track {
@@ -198,6 +238,17 @@
 		min-height 120ms ease;
 }
 
+/* While dragging, item-separator size snaps instead of animating: the slide
+ * span is re-measured synchronously on every DZ flip, so a 120ms width
+ * animation would measure mid-growth and let the dragged toolbar overlap
+ * the just-lit DZ (notably the neighbour's last gap on approach from
+ * after). Background/glow keep animating. */
+.palette-ide.dragging .toolbar-item-space {
+	transition:
+		background 120ms ease,
+		box-shadow 120ms ease;
+}
+
 .toolbar-stack-space {
 	display: flex;
 	min-width: 0;
@@ -221,7 +272,22 @@
 
 /* Drop-zone highlight rules were stripped with the movement engine.
  * The next movement design will re-add its own `data-active` /
- * `data-proximity` affordances here. */
+ * `data-proximity` affordances here.
+ * (Stamped selectors kept below as fallback.) */
+
+@container palette style(--layout: horizontal) {
+	.toolbar-border .toolbar-track-slot,
+	.palette-parking .toolbar-track-slot {
+		flex-direction: row;
+	}
+}
+
+@container palette style(--layout: vertical) {
+	.toolbar-border .toolbar-track-slot,
+	.palette-parking .toolbar-track-slot {
+		flex-direction: column;
+	}
+}
 
 .toolbar-border.palette-horizontal .toolbar-track-slot {
 	flex-direction: row;
@@ -340,6 +406,23 @@
 }
 
 /* `data-dragging` chrome was stripped with the movement engine. */
+/* (Stamped selectors kept below as fallback.) */
+
+@container palette style(--layout: horizontal) {
+	.toolbar-border .toolbar,
+	.palette-parking .toolbar {
+		flex-direction: row;
+		align-items: center;
+	}
+}
+
+@container palette style(--layout: vertical) {
+	.toolbar-border .toolbar,
+	.palette-parking .toolbar {
+		flex-direction: column;
+		align-items: stretch;
+	}
+}
 
 .toolbar-border.palette-horizontal .toolbar,
 .palette-parking.palette-horizontal .toolbar {
@@ -447,7 +530,22 @@
 /* The perpendicular dimension is standardized: every toolbar (border or
  * parking, either axis) is exactly `--palette-toolbar-perpendicular` at
  * rest. Handles are added *outside* this size on hover, so the resting
- * size never depends on whether a handle is shown. */
+ * size never depends on whether a handle is shown.
+ * (Stamped selectors kept below as fallback.) */
+
+@container palette style(--layout: horizontal) {
+	.toolbar-border .toolbar-track > .toolbar-track-slot > .toolbar,
+	.palette-parking > .toolbar {
+		min-height: var(--palette-toolbar-perpendicular);
+	}
+}
+
+@container palette style(--layout: vertical) {
+	.toolbar-border .toolbar-track > .toolbar-track-slot > .toolbar,
+	.palette-parking > .toolbar {
+		min-width: var(--palette-toolbar-perpendicular);
+	}
+}
 
 .toolbar-border.palette-horizontal > .toolbar-track > .toolbar-track-slot > .toolbar,
 .palette-parking.palette-horizontal > .toolbar {
@@ -459,11 +557,60 @@
 	min-width: var(--palette-toolbar-perpendicular);
 }
 
+/* ── Container context (`--layout` / `--region`) ── */
+/* The `palette` context tree: borders, parking, drawer wrappers, AND drawer
+ * popups are containers; tools query the NEAREST ancestor. The popup stamps
+ * ONLY the child `--layout` and inherits `--region` untouched from the
+ * wrapper — stamping a child region on the popup would shadow the wrapper
+ * and make every side rule match once (stacked margins). Nested drawers
+ * recurse: each wrapper stamps its own parent region. Style-only
+ * containment (`normal`) — no layout side-effects. */
+.toolbar-border,
+.palette-parking,
+.palettable-drawer,
+.palettable-drawer__popup {
+	container: palette / normal;
+}
+
+/* Border context derives from the stamped axis + region (no JS change:
+ * `renderBorder` already emits `palette-{direction}` + `data-region`). */
+.toolbar-border.palette-horizontal {
+	--layout: horizontal;
+}
+
+.toolbar-border.palette-vertical {
+	--layout: vertical;
+}
+
+.toolbar-border[data-region='top'] {
+	--region: top;
+}
+
+.toolbar-border[data-region='right'] {
+	--region: right;
+}
+
+.toolbar-border[data-region='bottom'] {
+	--region: bottom;
+}
+
+.toolbar-border[data-region='left'] {
+	--region: left;
+}
+
+/* Parking is always a horizontal top-region container. */
+.palette-parking {
+	--layout: horizontal;
+	--region: top;
+}
+
 /* ── Drawer (hierarchical) ── */
 /* The popup is a hidden/shown child of the tool wrapper (sibling of the
  * trigger), positioned absolutely toward the IDE center. No body portal,
- * no JS repositioning — the side comes from `from-{region}` on the
- * wrapper, stamped from the parent region at render time. */
+ * no JS repositioning — the side comes from the wrapper's `--region`
+ * (stamped inline at render time; the `from-{region}` class stays as the
+ * no-container-query fallback). The popup overrides both vars to the
+ * child values, so nested tools query the child axis/region. */
 
 .palettable-drawer {
 	position: relative;
@@ -493,15 +640,19 @@
 .palettable-drawer__popup {
 	position: absolute;
 	z-index: 211;
-	padding: 0.25rem;
+	/* Attached group-field: joint-side padding only (per-side rules below),
+	 * so the cross size matches the trigger exactly. */
+	padding: 0;
+	box-sizing: border-box;
 	border: 1px solid rgba(148, 163, 184, 0.38);
 	border-radius: 10px;
 	background: rgba(15, 23, 42, 0.95);
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 	max-width: min(80vw, 28rem);
-	max-height: min(70vh, 24rem);
-	overflow-y: auto;
-	overflow-x: hidden;
+	/* Overflow stays visible so nested popouts (select listbox, nested
+	 * drawers) float above like they do in border tracks. A scroll
+	 * container here would clip them and force a drawer scrollbar. */
+	overflow: visible;
 	/* Hierarchical: inside `.palette-ide`, so the sizing var inherits.
 	 * Kept as a fallback for body-portaled popups (svelte oracle). */
 	--palette-toolbar-perpendicular: 2.5rem;
@@ -512,25 +663,115 @@
 }
 
 /* Center-seeking sides: left opens right, right opens left, top opens
- * down, bottom opens up. Nested drawers recurse via their own wrapper. */
+ * down, bottom opens up. Nested drawers recurse via their own wrapper.
+ * Attached (no gap): the trigger and the popup read as one group-field —
+ * the trigger keeps its toolbar-outer rounding, the popup takes the
+ * workspace-side half (mirrors the slider-drawer input group). */
 .palettable-drawer.from-left > .palettable-drawer__popup {
-	left: calc(100% + 6px);
+	left: 100%;
 	top: 0;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	padding: 0;
+	padding-left: 0.25rem;
 }
 
 .palettable-drawer.from-right > .palettable-drawer__popup {
-	right: calc(100% + 6px);
+	right: 100%;
 	top: 0;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	padding: 0;
+	padding-right: 0.25rem;
 }
 
 .palettable-drawer.from-top > .palettable-drawer__popup {
-	top: calc(100% + 6px);
+	top: 100%;
 	left: 0;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	padding: 0;
+	padding-top: 0.25rem;
 }
 
 .palettable-drawer.from-bottom > .palettable-drawer__popup {
-	bottom: calc(100% + 6px);
+	bottom: 100%;
 	left: 0;
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+	padding: 0;
+	padding-bottom: 0.25rem;
+}
+
+/* Trigger keeps the toolbar-outer half: square the joint side so the pair
+ * reads as one attached group-field. */
+.palettable-drawer.from-left > .palettable-drawer__trigger {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palettable-drawer.from-right > .palettable-drawer__trigger {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.palettable-drawer.from-top > .palettable-drawer__trigger {
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.palettable-drawer.from-bottom > .palettable-drawer__trigger {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+/* Live-var sides: same attached geometry, driven by the wrapper's
+ * `--region` instead of the stamped `from-*` class (which stays as fallback).
+ * The popup inherits `--region` untouched (see context section), so these
+ * resolve exactly once from the wrapper chain. */
+@container palette style(--region: left) {
+	.palettable-drawer__popup {
+		left: 100%;
+		top: 0;
+		border-top-left-radius: 0;
+		border-bottom-left-radius: 0;
+		padding: 0;
+		padding-left: 0.25rem;
+	}
+}
+
+@container palette style(--region: right) {
+	.palettable-drawer__popup {
+		right: 100%;
+		top: 0;
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
+		padding: 0;
+		padding-right: 0.25rem;
+	}
+}
+
+@container palette style(--region: top) {
+	.palettable-drawer__popup {
+		top: 100%;
+		left: 0;
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
+		padding: 0;
+		padding-top: 0.25rem;
+	}
+}
+
+@container palette style(--region: bottom) {
+	.palettable-drawer__popup {
+		bottom: 100%;
+		left: 0;
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
+		padding: 0;
+		padding-bottom: 0.25rem;
+		margin-left: 0;
+	}
 }
 
 /* Suppress toolbar ::before overflow inside popups (avoids phantom scrollbar) */
@@ -546,6 +787,23 @@
 .palettable-drawer__popup.is-horizontal .toolbar {
 	flex-direction: row;
 	align-items: center;
+}
+
+/* Live-var axis: inner toolbars follow the popup's `--layout`
+ * (overridden to the child axis). The `is-*` rules above stay as fallback.
+ * Direct-child scope: deeper tools query their own nearest container. */
+@container palette style(--layout: vertical) {
+	.palettable-drawer__popup > .toolbar-track > .toolbar-track-slot > .toolbar {
+		flex-direction: column;
+		align-items: stretch;
+	}
+}
+
+@container palette style(--layout: horizontal) {
+	.palettable-drawer__popup > .toolbar-track > .toolbar-track-slot > .toolbar {
+		flex-direction: row;
+		align-items: center;
+	}
 }
 
 .palettable-drawer__popup .toolbar-item-space {

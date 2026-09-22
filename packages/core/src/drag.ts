@@ -75,6 +75,12 @@ export type DragEngine = {
 	 */
 	stackFlanks(session: DraggingState, border: Border, trackIndex: number): readonly number[]
 	/**
+	 * Parking flank derivation: the parking gaps flanking `rowIndex`
+	 * (emptied veto applied) — what every parking-row hover paints in
+	 * addition to its own DZs. Mirrors `stackFlanks` for borders.
+	 */
+	parkingFlanks(session: DraggingState, parking: Parking, rowIndex: number): readonly number[]
+	/**
 	 * Catalog placement primitives: the gap check mirrors `isItemSpaceFree`
 	 * for a selection that lives outside the layout, and the insert splits
 	 * the target track gap by `configuration.trackGapSplit` like every
@@ -108,6 +114,14 @@ export type DragEvent =
 	| { readonly type: 'highlight'; readonly dz: DropZone; readonly state: HighlightState }
 	| { readonly type: 'slide'; readonly toolbar: Toolbar; readonly delta: number }
 	| { readonly type: 'clearSlide'; readonly toolbar: Toolbar }
+	/**
+	 * Slide extreme: the pointer pushes past the free span (`atLimit: true`,
+	 * the toolbar "hits" its neighbour) or moves free again (`false`).
+	 * Emitted only on flip. While `atLimit` is true `draggedToolbar` reads
+	 * `undefined`, so adapters applying it verbatim drop the per-toolbar
+	 * `data-dragged` chrome until the toolbar moves free again.
+	 */
+	| { readonly type: 'slideLimit'; readonly toolbar: Toolbar; readonly atLimit: boolean }
 	/** Slide release: the two flanking `space` values were written by core. */
 	| {
 			readonly type: 'resize'
@@ -153,6 +167,17 @@ export function clampSlideDelta(frame: SlideFrame, pointer: number): number {
 	const raw = pointer - frame.grab - frame.start
 	const clamped = Math.min(Math.max(raw, 0), frame.available)
 	return clamped - frame.resting
+}
+
+/**
+ * Whether the pointer pushes past the slide's free span (the toolbar
+ * "hits" its neighbour). `available: 0` still counts: any `raw !== 0`
+ * is past the span. Single copy next to `clampSlideDelta` so the
+ * visual clamp and the chrome decision can never disagree.
+ */
+export function isSlideAtLimit(frame: SlideFrame, pointer: number): boolean {
+	const raw = pointer - frame.grab - frame.start
+	return raw < 0 || raw > frame.available
 }
 
 /**
@@ -369,6 +394,8 @@ class CoreToolbarDrag implements ToolbarDrag {
 	private slideFrame: SlideFrame | undefined = undefined
 	/** Toolbar currently followed (`origin.toolbar` while sliding). */
 	private slideToolbar: Toolbar | undefined = undefined
+	/** Whether the follow is currently clamped at an extreme ("hitting"). */
+	private slideLimited = false
 	/** Cached release split (`(resting + delta) / available`). */
 	private pendingSplit: number | undefined = undefined
 	/** Last pointer sample seen (reused by the dwell re-paint, which has no fresh hover). */
@@ -681,10 +708,23 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * In-track flanks: resolve the border track the hover landed in
 	 * and merge its two flanking stack gaps into `zones` (no commit). Uses the
 	 * engine's `stackFlanks` so the emptied veto (and the `layout.ts`
-	 * ownership of it) stays in one place.
+	 * ownership of it) stays in one place. Parking-row hovers merge the
+	 * two flanking parking gaps instead (via `parkingFlanks`) — same
+	 * active-row fallback the svelte `Parking` paints locally.
 	 */
 	private addTrackFlanks(hover: Hoverable, zones: Map<string, DropZone>): void {
 		const live = this.layout.getLayout()
+		if (hover.kind === 'toolbar' || hover.kind === 'tool' || hover.kind === 'item-gap') {
+			const at = locateContainerOf(hover.toolbar, live)
+			if (at !== undefined && at.kind === 'parking') {
+				for (const gap of this.engine.parkingFlanks(this.session, at.parking, at.index)) {
+					const dz: DropZone = { kind: 'parking-gap', parking: at.parking, gap }
+					const key = dropZoneKey(dz, live)
+					if (!zones.has(key)) zones.set(key, dz)
+				}
+				return
+			}
+		}
 		const at = trackContextOf(hover, live)
 		if (at === undefined) return
 		for (const gap of this.engine.stackFlanks(this.session, at.border, at.trackIndex)) {
@@ -934,7 +974,10 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * Derive the follow state from the live origin + frame + sample and
 	 * emit `slide` / `clearSlide`. Only a whole-toolbar border drag with a
 	 * frame slides; anything else disarms (emitting `clearSlide` when a
-	 * follow was live).
+	 * follow was live). A pointer pushed past the free span emits
+	 * `slideLimit` on flip (`atLimit: true` while "hitting" the neighbour,
+	 * `false` when moving free again) — `draggedToolbar` reads `undefined`
+	 * while limited so adapters drop the per-toolbar chrome.
 	 */
 	private updateSlide(sample: PointerSample): void {
 		const frame = this.slideFrame
@@ -954,22 +997,47 @@ class CoreToolbarDrag implements ToolbarDrag {
 		}
 		this.slideToolbar = toolbar
 		const pointer = frame.axis === 'horizontal' ? sample.clientX : sample.clientY
+		const atLimit = isSlideAtLimit(frame, pointer)
 		const delta = clampSlideDelta(frame, pointer)
 		if (delta === 0) {
 			// Resting position: no transform to write and nothing to commit.
 			// `pendingSplit` stays `undefined` so `end()` emits only the
 			// highlight clears ("a gesture with no slide"). A live follow
 			// stays armed (no event — the adapter holds no transform), so a
-			// later move emits `slide` from the same frame.
+			// later move emits `slide` from the same frame. The limit flip
+			// still emits: resting-at-extreme (e.g. `available: 0`) also
+			// "hits" and drops the chrome.
 			this.pendingSplit = undefined
+			this.setSlideLimit(toolbar, atLimit)
 			return
 		}
 		this.pendingSplit = frame.available > 0 ? (frame.resting + delta) / frame.available : 0
+		this.setSlideLimit(toolbar, atLimit)
 		this.emit({ type: 'slide', toolbar, delta })
+	}
+
+	/**
+	 * Flip the extreme state, emitting `slideLimit` only on change.
+	 * Runs before the `slide` emit so adapters drop the chrome in the
+	 * same pass they apply the clamped transform.
+	 */
+	private setSlideLimit(toolbar: Toolbar, atLimit: boolean): void {
+		if (atLimit === this.slideLimited) return
+		this.slideLimited = atLimit
+		this.emit({ type: 'slideLimit', toolbar, atLimit })
 	}
 
 	/** Drop the follow: emit `clearSlide` when a follow was live. */
 	private clearSlide(): void {
+		// Leaving a limited follow restores the chrome first, so the
+		// adapter re-stamps `data-dragged` before dropping the transform.
+		if (this.slideLimited && this.slideToolbar !== undefined) {
+			const toolbar = this.slideToolbar
+			this.slideLimited = false
+			this.emit({ type: 'slideLimit', toolbar, atLimit: false })
+		} else {
+			this.slideLimited = false
+		}
 		const toolbar = this.slideToolbar
 		this.slideToolbar = undefined
 		this.pendingSplit = undefined
@@ -1015,6 +1083,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 				this.session.origin.kind === 'border' ? this.session.origin.track : undefined
 			const committed = this.engine.commitSlide(this.session, this.pendingSplit)
 			this.slideToolbar = undefined
+			this.slideLimited = false
 			this.pendingSplit = undefined
 			this.slideFrame = undefined
 			if (committed !== undefined) {
@@ -1042,14 +1111,22 @@ class CoreToolbarDrag implements ToolbarDrag {
 
 	/**
 	 * Core-decided dragged toolbar (see the `ToolbarDrag` contract):
-	 * the live `origin.toolbar`, or `undefined` while a catalog creation
-	 * is still pending (detached singleton, no live container) or after
-	 * `end()`. The session origin follows every commit, so this stays
-	 * current across restructures without the adapter re-resolving.
+	 * the live `origin.toolbar` while it slides freely (whole-toolbar
+	 * border drag, not clamped at an extreme), or `undefined` while a
+	 * catalog creation is still pending (detached singleton, no live
+	 * container), while a subset is dragged (the origin toolbar stays
+	 * behind — nothing moves, so no chrome), while the slide is clamped
+	 * at an extreme ("hitting" the neighbour), or after `end()`. The
+	 * session origin follows every commit, so this stays current across
+	 * restructures without the adapter re-resolving: a subset extraction
+	 * promotes to a whole-toolbar slide and the fresh toolbar owns the
+	 * chrome from there.
 	 */
 	get draggedToolbar(): Toolbar | undefined {
 		if (this.ended) return undefined
 		if (this.catalogPending !== undefined) return undefined
+		if (!this.session.isWholeToolbar) return undefined
+		if (this.slideLimited) return undefined
 		return this.session.origin.toolbar
 	}
 

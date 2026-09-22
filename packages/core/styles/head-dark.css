@@ -20,8 +20,8 @@
 	--pd-faint: #64748b;
 	--pd-icon: #93c5fd;
 	--pd-status-fg: #bfdbfe;
-	--pd-accent: rgba(96, 165, 250, 0.9);
-	--pd-accent-ring: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+	--pd-accent: #3b82f6;
+	--pd-accent-ring: 0 0 0 1px rgba(96, 165, 250, 0.55), 0 0 12px rgba(59, 130, 246, 0.45);
 	--pd-hover-border: #93c5fd;
 	--pd-selected-bg: #1d4ed8;
 	--pd-selected-border: #60a5fa;

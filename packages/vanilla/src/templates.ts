@@ -107,6 +107,21 @@ export function selectOptionShellTemplate(options: {
 	)
 }
 
+/**
+ * Text-filter input row pinned at the top of a select listbox
+ * (`config.showFilter === true`). Plain input + empty-state sibling live
+ * here as structure only — the caller owns filtering + keyboard.
+ */
+export function selectFilterShellTemplate(options: { placeholder?: string }): string {
+	return (
+		`<div class="palette-default-select-filter">` +
+		`<input class="palette-default-select-filter-input" data-testid="select-filter-input"` +
+		` type="text" placeholder="${escapeHtml(options.placeholder ?? 'Filter…')}" value=""` +
+		` aria-label="Filter options">` +
+		`<div class="palette-default-command-empty" data-testid="select-filter-empty" hidden="">No matches</div></div>`
+	)
+}
+
 export function segmentedShellTemplate(options: {
 	tone: 'neutral' | 'accent'
 	direction: 'horizontal' | 'vertical'
@@ -175,12 +190,45 @@ export function starsShellTemplate(options: {
 	)
 }
 
-export function statusShellTemplate(tone: 'neutral' | 'accent'): string {
+export function statusShellTemplate(options: {
+	tone: 'neutral' | 'accent'
+	direction: 'horizontal' | 'vertical'
+	region: string
+}): string {
+	const base =
+		`palette-default-status palette-default-tone-${options.tone}` +
+		` palette-default-layout-${options.direction} palette-default-region-${options.region}`
+	if (options.direction === 'vertical') {
+		// Vertical time chip: icon above minutes above seconds in a pinned
+		// square. `.palette-default-status-value` is the non-time fallback
+		// (arbitrary status strings); the renderer toggles `hidden` between
+		// the split pair and the fallback so the square is never empty and
+		// never widens the toolbar.
+		return (
+			`<span class="${base}">` +
+			`<span class="palette-default-icon" hidden=""></span>` +
+			`<span class="palette-default-status-minutes"></span>` +
+			`<span class="palette-default-status-seconds"></span>` +
+			`<span class="palette-default-status-value" hidden=""></span></span>`
+		)
+	}
 	return (
-		`<span class="palette-default-status palette-default-tone-${tone}">` +
+		`<span class="${base}">` +
 		`<span class="palette-default-icon" hidden=""></span>` +
 		`<span class="palette-default-status-value"></span></span>`
 	)
+}
+
+/**
+ * Split a status string into minutes/seconds for the vertical stack.
+ * Strict `mm:ss` only (`1–3 digits : exactly 2 digits`); anything else
+ * returns `undefined` so arbitrary status strings fall back to the single
+ * value node instead of breaking. Opaque split — never formats time.
+ */
+export function splitStatusTime(value: string): [string, string] | undefined {
+	const match = /^(\d{1,3}):(\d{2})$/.exec(value.trim())
+	if (!match?.[1] || !match?.[2]) return undefined
+	return [match[1], match[2]]
 }
 
 // ── Command result rows ─────────────────────────────────────────────────────
@@ -214,7 +262,12 @@ export function commandEmptyTemplate(text: string): string {
 // Hierarchical drawer: trigger + popup are siblings in a `.palettable-drawer`
 // wrapper (child of the tool node). The caller renders the child track into
 // the popup and toggles `hidden` — no body portal, no JS repositioning.
-// The popup side comes from `from-{region}` on the wrapper (CSS only).
+// The popup side queries the WRAPPER's `--region` (parent region, inline
+// style; the `from-{region}` class stays as the no-container-query
+// fallback). The popup stamps ONLY the child `--layout` (inner toolbars
+// query it) and inherits `--region` untouched from the wrapper — stamping
+// a child region on the popup would shadow the wrapper and make every
+// side rule match once (stacked margins, 42px instead of 40px).
 
 export function drawerTriggerShellTemplate(options: {
 	label: string
@@ -246,6 +299,7 @@ export function drawerTriggerShellTemplate(options: {
 export function drawerPopupShellTemplate(childAxis: 'horizontal' | 'vertical'): string {
 	return (
 		`<div class="palettable-drawer__popup is-${childAxis}" data-placement="center"` +
+		` style="--layout: ${childAxis};"` +
 		` role="dialog" tabindex="-1" hidden=""></div>`
 	)
 }

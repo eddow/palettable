@@ -14,6 +14,7 @@
 
 import {
 	type AnyPoint,
+	type AnyValuedPoint,
 	axisForRegion,
 	buttonPresenter,
 	canonicalItemTool,
@@ -33,6 +34,7 @@ import {
 	type Track,
 	themePresenter,
 	togglePresenter,
+	type ValuesBag,
 } from '@palettable/core'
 
 import {
@@ -46,9 +48,11 @@ import {
 	segmentedOptionShellTemplate,
 	segmentedShellTemplate,
 	sel,
+	selectFilterShellTemplate,
 	selectOptionShellTemplate,
 	selectShellTemplate,
 	sliderShellTemplate,
+	splitStatusTime,
 	starsShellTemplate,
 	statusShellTemplate,
 	stepperShellTemplate,
@@ -56,7 +60,7 @@ import {
 import { applyThemeSetting } from './theme.js'
 
 export type HeadContext = {
-	readonly core: PaletteCore
+	readonly core: PaletteCore | PreviewCore
 	readonly item: ToolbarItem
 	readonly surface: SurfaceContext
 	readonly region?: PaletteRegion
@@ -76,10 +80,15 @@ export type HeadContext = {
 	) => HTMLElement
 }
 
-/** Fill a shelled icon node: show + set glyph, or hide when absent. */
+/** Fill a shelled icon node: show + set glyph, or hide when absent.
+ * An empty string is treated as absent (dev-time warn): it would unhide an
+ * empty-but-space-reserving node (`width: 1rem` + parent gap). */
 function fillIcon(node: HTMLElement | undefined, icon: string | undefined): void {
 	if (node === undefined) return
-	if (icon === undefined) {
+	if (icon === undefined || icon === '') {
+		if (icon === '' && typeof console !== 'undefined') {
+			console.warn('[palettable] fillIcon received empty-string icon; treating as absent')
+		}
 		node.hidden = true
 		return
 	}
@@ -87,8 +96,38 @@ function fillIcon(node: HTMLElement | undefined, icon: string | undefined): void
 	node.textContent = icon
 }
 
+/** Remove a shelled icon node when the view carries no icon (no reserved
+ * space); otherwise fill it. Returns the surviving node (or `undefined`). */
+function takeIcon(
+	node: HTMLElement | undefined,
+	icon: string | undefined
+): HTMLElement | undefined {
+	if (node === undefined) return undefined
+	if (icon === undefined || icon === '') {
+		if (icon === '' && typeof console !== 'undefined') {
+			console.warn('[palettable] takeIcon received empty-string icon; removing node')
+		}
+		node.remove()
+		return undefined
+	}
+	node.hidden = false
+	node.textContent = icon
+	return node
+}
+
+/** Stylised skeleton watermark for a select with no matching option (`?`).
+ * Own class (never `.palette-default-choice`) so label selectors and the
+ * overlay/joint `:has` rules never match it. */
+export function selectWatermark(): HTMLElement {
+	const node = document.createElement('span')
+	node.className = 'palette-default-select-watermark'
+	node.textContent = '?'
+	node.setAttribute('aria-hidden', 'true')
+	return node
+}
+
 export function boundOf(
-	core: PaletteCore,
+	core: PaletteCore | PreviewCore,
 	pointId: string | undefined
 ): {
 	point: AnyPoint | undefined
@@ -106,21 +145,16 @@ export function boundOf(
  * the root value. Absent bag / absent key → root. Nothing-points carry no
  * value (always `undefined` — display state comes from the bags).
  * Shared by initial render (`boundOf`) and in-place updates
- * (`ide.ts:updateToolNode`).
+ * (`ide.ts:updateToolNode`). Delegates to `core.readValue` (the single
+ * read path — spec-string suffixes stripped via `canonicalPointId`).
  */
-export function liveValue(core: PaletteCore, point: AnyPoint | undefined): unknown {
+export function liveValue(core: PaletteCore | PreviewCore, point: AnyPoint | undefined): unknown {
 	if (point === undefined || !isValuedPoint(point)) return undefined
-	let value: unknown = core.values.get(point.id)
-	for (const bag of core.resolveBags(point.uses)) {
-		if (bag === undefined) continue
-		if (bag === (core.values as unknown as typeof bag)) continue
-		const selected: unknown = bag.get(point.id as never)
-		if (selected !== undefined) {
-			value = selected
-			break
-		}
+	try {
+		return core.readValue(point.id)
+	} catch {
+		return undefined
 	}
-	return value
 }
 
 function toolOf(item: ToolbarItem): string | undefined {
@@ -150,7 +184,8 @@ export function renderButton(context: HeadContext): HTMLElement {
 	const btn = button as HTMLButtonElement
 	btn.disabled = !view.can
 	btn.title = view.title
-	fillIcon(icon, view.icon)
+	if (view.icon === undefined) icon.remove()
+	else fillIcon(icon, view.icon)
 	label.textContent = view.label
 	btn.addEventListener('click', () => core.run(view.run))
 	return btn
@@ -168,7 +203,13 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	const btn = button as HTMLButtonElement
 	btn.title = view.title
 	fillIcon(icon, view.icon)
-	btn.addEventListener('click', () => core.run(view.toggle))
+	// Recompute the toggle spec at click time: `view.toggle` is captured
+	// from render and goes stale after the first click (false→true would
+	// replay forever, never unticking). Fresh read → run.
+	btn.addEventListener('click', () => {
+		const fresh = boundOf(core, pointIdOf(item))
+		core.run(togglePresenter(item, fresh).toggle)
+	})
 	return btn
 }
 
@@ -203,12 +244,80 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	box.title = view.title
 	const triggerBtn = trigger as HTMLButtonElement
 	// Tool icon first (when declared), then the value icon — icon+value, like
-	// numerics. The icons are tagged so in-place sync can tell them apart.
-	fillIcon(toolIcon, view.toolIcon)
-	fillIcon(valueIcon, view.icon)
-	if (closedLabel === undefined) label.remove()
+	// numerics. Absent icons are REMOVED (not hidden) so no space is
+	// reserved. Skeleton (`isSkeleton`) renders the tool icon + a `?`
+	// watermark instead of the closed label, so the trigger is never empty.
+	takeIcon(toolIcon, view.toolIcon)
+	takeIcon(valueIcon, view.icon)
+	if (view.isSkeleton) {
+		label.replaceWith(selectWatermark())
+	} else if (closedLabel === undefined) label.remove()
 	else label.textContent = closedLabel
 	const list = box.querySelector('.palette-default-select-list') as HTMLElement
+	let filterInput: HTMLInputElement | null = null
+	let filterEmpty: HTMLElement | null = null
+	const closeList = (): void => {
+		list.hidden = true
+		triggerBtn.setAttribute('aria-expanded', 'false')
+		// Clear any viewport flip so the next open re-measures from CSS.
+		list.style.top = ''
+		list.style.bottom = ''
+		// Reset the filter query so the next open starts unfiltered.
+		if (filterInput) {
+			filterInput.value = ''
+			for (const row of list.querySelectorAll('.palette-default-select-option')) {
+				;(row as HTMLElement).hidden = false
+			}
+			if (filterEmpty) filterEmpty.hidden = true
+		}
+	}
+	// Opt-in text filter (`config.showFilter === true`): an input row pinned
+	// at the top of the list. Typing hides non-matching rows (`hidden`, no
+	// rebuild) by case-insensitive substring over label + value; Enter runs
+	// the first visible row; Escape closes + refocuses the trigger. The
+	// query clears on close and survives `updateToolNode` syncs while open
+	// (syncs never touch the filter row).
+	if (view.showFilter) {
+		const [filterWrap, input, empty] = sel(
+			selectFilterShellTemplate({}),
+			'.palette-default-select-filter-input',
+			'.palette-default-command-empty'
+		)
+		filterInput = input as HTMLInputElement
+		filterEmpty = empty
+		list.append(filterWrap)
+		const applyFilter = (): void => {
+			const term = (filterInput?.value ?? '').trim().toLowerCase()
+			let visible = 0
+			for (const row of list.querySelectorAll('.palette-default-select-option')) {
+				const value = (row as HTMLElement).dataset.value ?? ''
+				const label = row.querySelector('.palette-default-choice')?.textContent ?? ''
+				const match = term === '' || `${label} ${value}`.toLowerCase().includes(term)
+				;(row as HTMLElement).hidden = !match
+				if (match) visible += 1
+			}
+			if (filterEmpty) filterEmpty.hidden = visible > 0
+		}
+		filterInput.addEventListener('input', applyFilter)
+		filterInput.addEventListener('click', (event) => event.stopPropagation())
+		filterInput.addEventListener('keydown', (event) => {
+			event.stopPropagation()
+			if (event.key === 'Enter') {
+				event.preventDefault()
+				const first = [...list.querySelectorAll('.palette-default-select-option')].find(
+					(row) => !(row as HTMLElement).hidden && !(row as HTMLButtonElement).disabled
+				)
+				if (first instanceof HTMLButtonElement) {
+					void core.run(view.select((first as HTMLElement).dataset.value ?? ''))
+					closeList()
+					triggerBtn.focus()
+				}
+			} else if (event.key === 'Escape') {
+				closeList()
+				triggerBtn.focus()
+			}
+		})
+	}
 	for (const option of view.listOptions) {
 		const [row, rowIcon, rowText] = sel(
 			selectOptionShellTemplate({
@@ -220,6 +329,7 @@ export function renderSelect(context: HeadContext): HTMLElement {
 			'.palette-default-choice'
 		)
 		fillIcon(rowIcon, option.icon)
+		if (option.icon === undefined) rowIcon.remove()
 		rowText.textContent = option.label
 		row.addEventListener('click', (event) => {
 			event.stopPropagation()
@@ -227,10 +337,6 @@ export function renderSelect(context: HeadContext): HTMLElement {
 			closeList()
 		})
 		list.append(row)
-	}
-	const closeList = (): void => {
-		list.hidden = true
-		triggerBtn.setAttribute('aria-expanded', 'false')
 	}
 	triggerBtn.addEventListener('click', (event) => {
 		event.stopPropagation()
@@ -245,6 +351,21 @@ export function renderSelect(context: HeadContext): HTMLElement {
 		const open = list.hidden
 		list.hidden = !open
 		triggerBtn.setAttribute('aria-expanded', open ? 'true' : 'false')
+		if (open) {
+			// Drawer popups sit at an arbitrary viewport height (unlike
+			// border tracks, where `region: bottom` flips the list up via
+			// CSS). Flip up when the dropped list would run off-screen so
+			// it floats like in the border tracks instead of pushing a
+			// drawer scrollbar / viewport clip.
+			requestAnimationFrame(() => {
+				if (list.hidden) return
+				const rect = list.getBoundingClientRect()
+				if (rect.bottom > window.innerHeight - 8 && rect.height < window.innerHeight - 16) {
+					list.style.top = 'auto'
+					list.style.bottom = 'calc(100% + 4px)'
+				}
+			})
+		}
 	})
 	// Clicking anywhere outside the box closes the list; Escape closes it and
 	// returns focus to the trigger.
@@ -292,7 +413,11 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 			'.palette-default-choice'
 		)
 		button.title = option.text
-		fillIcon(icon, option.icon)
+		// Absent option icons are REMOVED so no space is reserved; an
+		// option with no icon keeps its label as a fallback so the button
+		// is never empty.
+		if (option.icon === undefined) icon.remove()
+		else fillIcon(icon, option.icon)
 		// `showText: false` hides the label (icon-only on both axes); an
 		// option with no icon keeps its label as a fallback so the button
 		// is never empty.
@@ -345,7 +470,12 @@ export function renderSlider(context: HeadContext): HTMLElement {
 	range.value = String(view.value ?? view.min)
 	range.setAttribute('aria-label', view.title)
 	range.addEventListener('input', () => {
-		core.values.set((point?.id ?? '') as never, Number(range.value) as never)
+		if (point?.id === undefined) return
+		try {
+			core.writeValue(point.id, Number(range.value))
+		} catch {
+			// Skeleton (no value anywhere): thumb has nothing to write to.
+		}
 	})
 	return label
 }
@@ -363,19 +493,39 @@ export function renderStepper(context: HeadContext): HTMLElement {
 		'button:last-of-type'
 	)
 	group.title = view.title
+	// Recompute the base value at click time: `view.value` is captured
+	// from render and goes stale after the first click (repeated + would
+	// replay the same write forever). Fresh read → step → write.
+	const stepFromLive = (direction: 1 | -1): void => {
+		if (point?.id === undefined) return
+		try {
+			const live = sliderPresenter(
+				item,
+				{ point, value: liveValue(core, point), bags: core.resolveBags(point?.uses) },
+				surface
+			)
+			if (live.value === undefined) return
+			core.writeValue(
+				point.id,
+				direction === 1
+					? Math.min(live.max, live.value + live.step)
+					: Math.max(live.min, live.value - live.step)
+			)
+		} catch {
+			// Skeleton: nothing to write to.
+		}
+	}
 	;(minus as HTMLButtonElement).disabled =
 		view.value === undefined || view.value - view.step < view.min
 	;(minus as HTMLButtonElement).addEventListener('click', () => {
-		if (view.value === undefined) return
-		core.values.set((point?.id ?? '') as never, Math.max(view.min, view.value - view.step) as never)
+		stepFromLive(-1)
 	})
 	fillIcon(icon, view.icon)
 	readout.append(String(view.value))
 	;(plus as HTMLButtonElement).disabled =
 		view.value === undefined || view.value + view.step > view.max
 	;(plus as HTMLButtonElement).addEventListener('click', () => {
-		if (view.value === undefined) return
-		core.values.set((point?.id ?? '') as never, Math.min(view.max, view.value + view.step) as never)
+		stepFromLive(1)
 	})
 	return group
 }
@@ -400,7 +550,12 @@ export function renderStars(context: HeadContext): HTMLElement {
 		button.title = `${view.title} ${index}`
 		button.textContent = filled ? '▶' : '▷'
 		button.addEventListener('click', () => {
-			core.values.set((point?.id ?? '') as never, index as never)
+			if (point?.id === undefined) return
+			try {
+				core.writeValue(point.id, index)
+			} catch {
+				// Skeleton: nothing to write to.
+			}
 		})
 	})
 	return group
@@ -442,7 +597,8 @@ export function renderTheme(context: HeadContext): HTMLElement {
 	const btn = button as HTMLButtonElement
 	btn.title = view.title
 	btn.dataset.testid = 'theme-tool'
-	fillIcon(icon, view.valueIcon)
+	if (view.valueIcon === undefined) icon.remove()
+	else fillIcon(icon, view.valueIcon)
 	label.remove()
 	if (point === undefined) {
 		btn.disabled = true
@@ -468,21 +624,58 @@ export function renderTheme(context: HeadContext): HTMLElement {
 	return btn
 }
 
-/** Render a `status` tool bound to a nothing-point (read-only display from context bags). */
+/** Render a `status` tool bound to a nothing-point (read-only display from context bags).
+ * Horizontal: icon + single value. Vertical: icon above minutes above
+ * seconds in a pinned square (`splitStatusTime`); non-time strings fall
+ * back to the single value node so the square is never empty. */
 export function renderStatus(context: HeadContext): HTMLElement {
-	const { core, item } = context
+	const { core, item, surface } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = statusPresenter(item, { point, value, bags })
-	const [span, icon, valueNode] = sel(
-		statusShellTemplate(view.tone),
-		'.palette-default-icon',
-		'.palette-default-status-value'
+	const view = statusPresenter(item, { point, value, bags }, surface)
+	const [span, icon] = sel(
+		statusShellTemplate({
+			tone: view.tone,
+			direction: view.direction,
+			region: view.region ?? 'top',
+		}),
+		'.palette-default-icon'
 	)
 	span.title = view.title
-	fillIcon(icon, view.icon)
-	valueNode.textContent = view.value
+	if (view.icon === undefined) icon.remove()
+	else fillIcon(icon, view.icon)
+	syncStatusValue(span, view.value)
 	if (!view.can) span.setAttribute('aria-disabled', 'true')
 	return span
+}
+
+/**
+ * Patch a rendered status node in place: icon + value text only, never
+ * `textContent` over the icon. Vertical toggles the split mm/ss pair vs
+ * the single-value fallback; horizontal writes the single node.
+ */
+export function syncStatusValue(span: HTMLElement, value: string): void {
+	const minutes = span.querySelector('.palette-default-status-minutes')
+	const seconds = span.querySelector('.palette-default-status-seconds')
+	const single = span.querySelector('.palette-default-status-value')
+	if (minutes instanceof HTMLElement && seconds instanceof HTMLElement) {
+		const split = splitStatusTime(value)
+		if (split) {
+			if (minutes.textContent !== split[0]) minutes.textContent = split[0]
+			if (seconds.textContent !== split[1]) seconds.textContent = split[1]
+			minutes.hidden = false
+			seconds.hidden = false
+			if (single instanceof HTMLElement) single.hidden = true
+			return
+		}
+		if (single instanceof HTMLElement) {
+			if (single.textContent !== value) single.textContent = value
+			single.hidden = false
+		}
+		minutes.hidden = true
+		seconds.hidden = true
+		return
+	}
+	if (single instanceof HTMLElement && single.textContent !== value) single.textContent = value
 }
 
 /** Render a `commandBox` (toolbar combobox) item. Runs commands inline.
@@ -626,7 +819,12 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 	const childAxis = surface.axis === 'vertical' ? 'horizontal' : 'vertical'
 	const childRegion: PaletteRegion = childAxis === 'vertical' ? 'left' : 'top'
 	const parentRegion = context.region ?? surface.region ?? 'top'
-	const wrapper = elementFromHtml(`<div class="palettable-drawer from-${parentRegion}"></div>`)
+	// The wrapper carries the parent region twice: the `from-*` class for
+	// the no-container-query fallback, the `--region` var for the live
+	// `@container palette style(--region)` side rules.
+	const wrapper = elementFromHtml(
+		`<div class="palettable-drawer from-${parentRegion}" style="--region: ${parentRegion};"></div>`
+	)
 	const popup = elementFromHtml(drawerPopupShellTemplate(childAxis))
 	if (!popup.classList.contains('palettable-drawer__popup'))
 		throw new Error('drawer popup shell missing node')
@@ -724,4 +922,178 @@ export function renderHeadItem(context: HeadContext): HTMLElement | null {
 /** Surface for a docking region (`top`/`bottom` → horizontal). */
 export function surfaceForRegion(region: PaletteRegion | undefined): SurfaceContext {
 	return { axis: axisForRegion(region), region }
+}
+
+// ── Disconnected preview core ─────────────────────────────────────────────
+// The console add panel renders a functioning-but-disconnected preview of
+// the draft tool: real choices/options from the point definitions, but a
+// local selected value seeded from the live store. Preview interactions
+// never write `core.values` or `core.run` — they mutate the preview core
+// below, which re-renders the preview node in place.
+
+/** Fixed preview surface (mirrors `editorFor` in `add-item.ts`). */
+export const PREVIEW_SURFACE: SurfaceContext = { axis: 'horizontal', region: 'top' }
+
+/** Minimal `PaletteCore` surface the head renderers read (`boundOf` + `run`/`values`/`can`). */
+export type PreviewCore = {
+	readonly values: {
+		get(id: string): unknown
+		set(id: string, value: never): void
+		subscribe(id: string, listener: (value: unknown) => void): () => void
+		asObject(): Record<string, unknown>
+	}
+	readonly points: readonly AnyPoint[]
+	getDefinition(id: string): AnyPoint | undefined
+	resolveBags(uses: readonly string[] | undefined): readonly (ValuesBag | undefined)[]
+	readValue(id: string): unknown
+	writeValue(id: string, value: unknown): void
+	evaluateCan(id: string): boolean
+	subscribeDefinitions(listener: (pointId: string) => void): () => void
+	run(spec: string): void
+	readonly keys: Record<string, string>
+}
+
+/**
+ * Build a preview core over one draft item: reads resolve the point
+ * definition + bags from the live core (real options/icons/`can`), while
+ * the *selected value* comes from a local override map seeded from the
+ * live store. Writes (`run` / `values.set`) apply to the local map and
+ * notify local subscribers — the live store is never touched.
+ */
+export function createPreviewCore(
+	live: PaletteCore,
+	draft: ToolbarItem,
+	seed: Readonly<Record<string, unknown>>
+): { core: PreviewCore; setLocal: (id: string, value: unknown) => void } {
+	const overrides = new Map<string, unknown>(Object.entries(seed))
+	const listeners = new Map<string, Set<(value: unknown) => void>>()
+	const pointId = (() => {
+		try {
+			const id = canonicalItemTool(draft)
+			return id === '' ? undefined : id
+		} catch {
+			return undefined
+		}
+	})()
+	const point = pointId !== undefined ? live.getDefinition(pointId) : undefined
+	const bags = live.resolveBags(point?.uses)
+	const emit = (id: string): void => {
+		const value = overrides.get(id)
+		for (const listener of [...(listeners.get(id) ?? [])]) listener(value)
+	}
+	const setLocal = (id: string, value: unknown): void => {
+		if (Object.is(overrides.get(id), value)) return
+		overrides.set(id, value)
+		emit(id)
+	}
+	const values = {
+		get(id: string): unknown {
+			if (overrides.has(id)) return overrides.get(id)
+			return liveValue(live, live.getDefinition(id))
+		},
+		asObject(): Record<string, unknown> {
+			return Object.fromEntries(overrides)
+		},
+		set(id: string, value: never): void {
+			setLocal(id, value)
+		},
+		subscribe(id: string, listener: (value: unknown) => void): () => void {
+			let set = listeners.get(id)
+			if (!set) {
+				set = new Set()
+				listeners.set(id, set)
+			}
+			set.add(listener)
+			return () => {
+				set.delete(listener)
+				if (set.size === 0) listeners.delete(id)
+			}
+		},
+	}
+	const core: PreviewCore = {
+		values,
+		points: live.points,
+		getDefinition: (id: string) => live.getDefinition(id),
+		resolveBags: (_uses) => bags,
+		readValue: (id: string) => values.get(id),
+		writeValue: (id: string, value: unknown) => {
+			setLocal(id, value)
+		},
+		evaluateCan: (id: string) => {
+			try {
+				return live.evaluateCan(id)
+			} catch {
+				return true
+			}
+		},
+		subscribeDefinitions: (_listener: (pointId: string) => void) => () => {},
+		run: (spec: string) => {
+			applyPreviewSpec(live, values.get, setLocal, spec)
+		},
+		keys: { ...(live.keys ?? {}) },
+	}
+	return { core, setLocal }
+}
+
+/**
+ * Apply a head-emitted spec string to the preview-local map (never the
+ * live store): `id=value` setters parse like the core (`boolean`
+ * `1`/`true`/`0`/`false`, `number` via `Number`), `id:inc`/`id:dec`
+ * step within `min`/`max`, action specs are absorbed as no-ops (a
+ * disconnected preview cannot run side effects).
+ */
+function applyPreviewSpec(
+	live: PaletteCore,
+	getLocal: (id: string) => unknown,
+	setLocal: (id: string, value: unknown) => void,
+	spec: string
+): void {
+	const setter = spec.match(/^([^=:|]+)(=|\|)(.*)$/)
+	if (setter) {
+		const id = setter[1]!
+		const raw = setter[3]!
+		const def = live.getDefinition(id) as AnyValuedPoint | undefined
+		if (def === undefined || !isValuedPoint(def)) return
+		if (def.type === 'boolean') {
+			const token = raw.toLowerCase()
+			if (token === '1' || token === 'true') setLocal(id, true)
+			else if (token === '0' || token === 'false') setLocal(id, false)
+			return
+		}
+		if (def.type === 'number') {
+			if (raw.trim() === '') return
+			const value = Number(raw)
+			if (Number.isFinite(value)) setLocal(id, value)
+			return
+		}
+		setLocal(id, raw)
+		return
+	}
+	const action = spec.match(/^([^=:|]+):(.*)$/)
+	if (action) {
+		const id = action[1]!
+		const name = action[2]!
+		const def = live.getDefinition(id) as AnyValuedPoint | undefined
+		if (def === undefined || !isValuedPoint(def) || def.type !== 'number') return
+		const constraints = (def.constraints ?? {}) as {
+			readonly min?: number
+			readonly max?: number
+			readonly step?: number
+		}
+		const step = constraints.step ?? 1
+		const current = getLocal(id)
+		if (typeof current !== 'number' || !Number.isFinite(current)) return
+		if (name === 'inc') {
+			const next = current + step
+			setLocal(id, constraints.max === undefined ? next : Math.min(next, constraints.max))
+			return
+		}
+		if (name === 'dec') {
+			const next = current - step
+			setLocal(id, constraints.min === undefined ? next : Math.max(next, constraints.min))
+			return
+		}
+		return
+	}
+	// Bare action id: absorbed — a disconnected preview runs no side effects.
 }

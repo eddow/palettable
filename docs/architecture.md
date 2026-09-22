@@ -680,7 +680,9 @@ adapter work, step 9 is this doc):
   subscribers survive; root name throws), `getBag`/`resolveBags` (missing →
   `undefined`; `ROOT_CONTEXT` / `'root'` alias always resolves to the `values`
   store), `subscribeContext` (`(bagName, changedKeys)`; identity change emits
-  `[]`), `subscribeCan` (flips only). The root bag is core-owned (`values`
+  `[]`), `subscribeCan` (flips only), `subscribeDefinitions` (per-point id;
+  fires on `defineEnumOptions` + `defineVirtual`/`removeVirtual` so adapters
+  reconcile enum rows in place). The root bag is core-owned (`values`
   store); context bags are host-owned. `dispose()` clears context forwards +
   listeners.
 - `context-display.ts` — `dualSourceValue` (selection-wins precedence),

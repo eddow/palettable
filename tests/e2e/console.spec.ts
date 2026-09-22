@@ -80,7 +80,7 @@ test('edit-only console has no mode button (commandBox is displayed)', async ({ 
 	await expect(page.getByTestId('console-add-panel')).toBeVisible()
 })
 
-test('add-to-toolbar flow selects entry + variant', async ({ page }) => {
+test('add-to-toolbar flow selects entry, then configures + previews', async ({ page }) => {
 	await openConsole(page)
 	const addInput = page.getByTestId('console-input')
 	await addInput.fill('Life Support')
@@ -91,10 +91,10 @@ test('add-to-toolbar flow selects entry + variant', async ({ page }) => {
 		.click()
 	const panel = page.getByTestId('console-details-panel')
 	await expect(panel).toContainText('Life Support')
-	await panel
-		.locator('.palette-default-add-variant-trigger', { hasText: 'Life Support (editor)' })
-		.click()
-	await expect(panel.locator('select').first()).toBeVisible()
+	// Selecting the entry opens the editor + disconnected preview
+	// directly (no variant picker — adding happens only via d&d).
+	await expect(panel.getByTestId('console-add-preview')).toBeVisible()
+	await expect(panel.locator('.palette-default-config-table').first()).toBeVisible()
 })
 
 test('add-box results list addable tools (not draggable)', async ({ page }) => {

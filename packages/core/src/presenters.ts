@@ -36,7 +36,7 @@ import { familyOfPoint } from './editors.js'
 import type { PaletteRegion, SurfaceContext, ToolbarItem } from './layout.js'
 import { isDrawerItem } from './layout.js'
 import type { AnyPoint } from './points.js'
-import { isActionPoint, isValuedPoint } from './points.js'
+import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { EnumOption } from './type.js'
 import { matchEnumOption } from './virtual.js'
 
@@ -50,6 +50,8 @@ export type HeadItemConfig = {
 	readonly showValue?: boolean
 	/** Select + segmented label opt-out (`select` / `segmented`; default shown). */
 	readonly showText?: boolean
+	/** Select listbox text-filter opt-in (`select` only; default hidden). */
+	readonly showFilter?: boolean
 }
 
 /** Resolved head metadata for an item. */
@@ -125,9 +127,15 @@ export function resolveEditorVariant(
 ): string | undefined {
 	const family = point === undefined ? 'item' : familyOfPoint(point)
 	const variants = registry?.[family] ?? {}
+	// Nothing-point 1:1 subset (`point.editors`) mirrors `editorChoicesFor`.
+	const allowed =
+		point !== undefined && isNothingPoint(point) && point.editors !== undefined
+			? new Set(point.editors)
+			: undefined
 	const eligible = Object.values(variants).filter(
 		(cap) =>
 			!cap.hidden &&
+			(allowed === undefined || allowed.has(cap.id)) &&
 			(cap.supportedAxes === undefined ||
 				cap.supportedAxes === 'both' ||
 				cap.supportedAxes === surface.axis ||
@@ -235,20 +243,40 @@ export type StatusPresenter = {
 	readonly value: string
 	/** False when the context bag is absent (`undefined` slot) — adapter renders disabled + placeholder. */
 	readonly can: boolean
+	readonly direction: 'horizontal' | 'vertical'
+	/** Docking region, so axis-aware editors can pick the overlay side. */
+	readonly region: PaletteRegion | undefined
 }
 
 /**
  * View-model for a status tool bound to a nothing-point (read-only display).
- * Reads display state from the resolved `uses` bags in order (first string
- * value wins); `undefined` slot = context absent → `can: false`, value
- * falls back to the tool label (adapter renders disabled + placeholder).
+ * Reads display state from the resolved `uses` bags in order: the item
+ * `config.statusKey` names the key to display (default: first non-empty
+ * string value in the bag — the `missionTime` pattern). `undefined` slot =
+ * context absent → `can: false`, value falls back to the tool label
+ * (adapter renders disabled + placeholder). Opaque-string pass-through:
+ * never formats time — `mm:ss` is demo-owned.
  */
-export function statusPresenter(item: ToolbarItem, bound: BoundDisplay): StatusPresenter {
+export function statusPresenter(
+	item: ToolbarItem,
+	bound: BoundDisplay,
+	surface: SurfaceContext
+): StatusPresenter {
 	const meta = headMeta(item)
 	const bags = bound.bags ?? []
+	const config = (item as { config?: unknown }).config as { statusKey?: unknown } | undefined
+	const statusKey = typeof config?.statusKey === 'string' ? config.statusKey : undefined
 	let value: string | undefined
 	for (const bag of bags) {
 		if (bag === undefined) continue
+		if (statusKey !== undefined) {
+			const candidate = bag.get(statusKey)
+			if (typeof candidate === 'string' && candidate.length > 0) {
+				value = candidate
+				break
+			}
+			continue
+		}
 		for (const key of Object.keys(bag.asObject())) {
 			const candidate = bag.get(key)
 			if (typeof candidate === 'string' && candidate.length > 0) {
@@ -266,6 +294,8 @@ export function statusPresenter(item: ToolbarItem, bound: BoundDisplay): StatusP
 		tone: meta.tone,
 		value: value ?? meta.label,
 		can,
+		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+		region: surface.region,
 	}
 }
 
@@ -352,17 +382,25 @@ export type SelectPresenter = {
 	readonly label: string
 	/** Tool icon (`config.icon`); renders before the value icon, like numerics. */
 	readonly toolIcon: string | undefined
-	/** Current value icon (raw declared option icon, ignores `choiceDisplay`). */
-	readonly icon: string
+	/** Current value icon (raw declared option icon, ignores `choiceDisplay`);
+	 * `undefined` when neither the option nor the tool declares one — the
+	 * adapter removes the slot so no space is reserved. */
+	readonly icon: string | undefined
 	readonly direction: 'horizontal' | 'vertical'
 	/** Docking region, so axis-aware editors can pick the overlay side. */
 	readonly region: PaletteRegion | undefined
 	/** Closed-box + segmented label visibility (`config.showText === false` hides it → icon-only). */
 	readonly showText: boolean
+	/** Listbox text-filter input (`config.showFilter === true` shows it; `select` only). */
+	readonly showFilter: boolean
 	/** Display mode (`config.choiceDisplay`, default `'both'`); gates the closed-box label. */
 	readonly display: ChoiceDisplay
 	/** Current value; `undefined` = skeleton (no option selected). */
 	readonly value: string | undefined
+	/** True when no option matches (`current === undefined`): skeleton or
+	 * unknown value. The adapter renders a watermark (`?`) instead of the
+	 * closed label so the trigger is never an empty box. */
+	readonly isSkeleton: boolean
 	/** Current option in raw form; `undefined` = skeleton or unknown value. */
 	readonly current: SelectCurrent | undefined
 	/** Display-filtered options for `segmented` (honours `choiceDisplay`). */
@@ -414,6 +452,17 @@ function showTextOf(item: ToolbarItem): boolean {
 }
 
 /**
+ * Whether a select listbox shows its text-filter input. Opt-in via
+ * `config.showFilter === true` (`select` only; default hidden, so existing
+ * layouts are unchanged). Mirrors `showTextOf`/`showValueOf`. The adapter
+ * filters rows from `listOptions` — core carries no filtering logic.
+ */
+function showFilterOf(item: ToolbarItem): boolean {
+	const config = (item as { config?: unknown }).config as { showFilter?: unknown } | undefined
+	return config?.showFilter === true
+}
+
+/**
  * Closed select-box label: `undefined` = icon-only trigger. The label shows
  * when text is enabled (`showText` and `display !== 'icon'`); an option with
  * no icon keeps its label as a fallback so the trigger is never empty
@@ -462,12 +511,14 @@ export function selectPresenter(
 		tone: meta.tone,
 		label: meta.label,
 		toolIcon,
-		icon: typeof currentIcon === 'string' ? currentIcon : (meta.icon ?? value ?? ''),
+		icon: typeof currentIcon === 'string' ? currentIcon : meta.icon,
 		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
 		region: surface.region,
 		showText: showTextOf(item),
+		showFilter: showFilterOf(item),
 		display,
 		value,
+		isSkeleton: currentEntry === undefined,
 		current: currentEntry,
 		options: optionsList.map((option) => ({
 			value: option.value,
@@ -626,9 +677,10 @@ export function configuratorTonePatch(value: string): Record<string, string> {
 /**
  * Prune config keys when switching editors (mirrors the svelte `setEditor`
  * cleanup for `values`/`keywords`/`choiceDisplay`).
- * - slider / drawerSlider keep `showValue`, prune the enum-subset keys + `showText`.
- * - select / segmented keep `showText` + the enum-subset keys, prune `showValue`.
- * - other enum editors keep the enum-subset keys, prune `showValue` + `showText`.
+ * - slider / drawerSlider keep `showValue`, prune the enum-subset keys + `showText` + `showFilter`.
+ * - select keeps `showText` + `showFilter` + the enum-subset keys, prunes `showValue`.
+ * - segmented keeps `showText` + the enum-subset keys, prunes `showValue` + `showFilter`.
+ * - other enum editors keep the enum-subset keys, prune `showValue` + `showText` + `showFilter`.
  * - everything else prunes both.
  * Returns the keys to delete (adapter deletes them from `item.config`).
  */
@@ -640,10 +692,11 @@ export function configuratorEditorCleanup(nextEditor: string): readonly string[]
 		nextEditor === 'select' ||
 		nextEditor === 'segmented' ||
 		nextEditor === 'splitRadio'
-	if (isSlider) return ['values', 'keywords', 'choiceDisplay', 'showText']
-	if (nextEditor === 'select' || nextEditor === 'segmented') return ['showValue']
-	if (isEnum) return ['showValue', 'showText']
-	return ['values', 'keywords', 'choiceDisplay', 'showValue', 'showText']
+	if (isSlider) return ['values', 'keywords', 'choiceDisplay', 'showText', 'showFilter']
+	if (nextEditor === 'select') return ['showValue']
+	if (nextEditor === 'segmented') return ['showValue', 'showFilter']
+	if (isEnum) return ['showValue', 'showText', 'showFilter']
+	return ['values', 'keywords', 'choiceDisplay', 'showValue', 'showText', 'showFilter']
 }
 
 // ── Enum-from / stash display helpers ───────────────────────────────────────

@@ -14,6 +14,7 @@ import {
 	type AnyPoint,
 	type DerivedVariant,
 	isActionPoint,
+	isNothingPoint,
 	isValuedPoint,
 	resolveEditorVariant,
 	type SurfaceContext,
@@ -34,7 +35,15 @@ function editorFor(
 	defaults: import('@palettable/core').EditorDefaults | undefined
 ): string | undefined {
 	const surface: SurfaceContext = { axis: 'horizontal', region: 'top' }
-	return resolveEditorVariant(point, surface, registry, defaults, undefined)
+	const resolved = resolveEditorVariant(point, surface, registry, defaults, undefined)
+	if (resolved !== undefined) return resolved
+	// No registry (vanilla demo + unit fixtures pass none): fall back to
+	// the family default so the draft/preview still renders a real editor.
+	if (point !== undefined && isActionPoint(point)) return 'button'
+	if (point === undefined || !isValuedPoint(point)) return 'status'
+	if (point.type === 'boolean') return 'toggle'
+	if (point.type === 'enum') return 'select'
+	return 'slider'
 }
 
 function labelOf(point: AnyPoint | undefined, fallback: string): string {
@@ -57,20 +66,14 @@ function humanize(id: string): string {
 }
 
 /**
- * Resolve the spec string for a `set` variant: `toolId` for booleans
- * (toggle flips it), `toolId=value` for numbers/enums when the inline
- * value parses, else the bare `toolId` (configured later in the inspector).
+ * Resolve the spec string for a `set` variant: always the bare `toolId`
+ * (mirrors core `paletteDerivedVariants` + svelte
+ * `paletteToolbarItemFromDerivedVariant`). The tool binds the point and
+ * displays the live value — no `=value` preset is carried. The inline
+ * `booleanValue`/`setValue` snapshot fields are ignored (kept in the
+ * `AddSelection` shape for the `ConsoleStore` contract only).
  */
-function setSpec(toolId: string, selection: AddSelection): string {
-	if (selection.variant.valueType === 'number') {
-		const parsed = Number(selection.setValue)
-		if (selection.setValue.trim() !== '' && Number.isFinite(parsed)) return `${toolId}=${parsed}`
-		return toolId
-	}
-	if (selection.variant.valueType === 'enum') {
-		if (selection.setValue !== '') return `${toolId}=${selection.setValue}`
-		return toolId
-	}
+function setSpec(toolId: string, _selection: AddSelection): string {
 	return toolId
 }
 
@@ -83,20 +86,47 @@ export function itemFromAddSelection(
 	const { source, variant } = selection
 	if (variant.kind === 'item') {
 		if (!variant.editor) return undefined
-		return {
+		// Nothing-points bind 1:1 by plain id (mirrors the hydration
+		// migration `{ tool: editor, editor }` in `layout.ts`): a tool-less
+		// item breaks `canonicalItemTool` (throws) and every head renderer
+		// that resolves the point. Drawers additionally need their nested
+		// track (empty until the user fills it after drop).
+		const item = {
+			tool: variant.editor,
 			editor: variant.editor,
 			config: {
 				icon: variant.icon ?? '⌘',
 				label: variant.label,
 				hint: variant.meta,
 			},
-		} as ToolbarItem
+		} as ToolbarItem & { toolbar?: never[] }
+		if (variant.editor === 'drawer') {
+			;(item as { toolbar?: never[] }).toolbar = []
+		}
+		return item
 	}
 	if (!variant.toolId) return undefined
 	const toolId = variant.toolId
 	const point = points.find((candidate) => candidate.id === toolId)
 	if (variant.kind === 'tool') {
 		if (!point || isActionPoint(point)) return undefined
+		// Nothing-point tool: bind the point id 1:1 with its mapped editor
+		// (variant carries `point.editors[0]`; `editorFor` resolves the same
+		// via the allowlist). Drawers need their nested track (empty until
+		// the user fills it after drop).
+		if (isNothingPoint(point)) {
+			const editor = variant.editor ?? editorFor(point, registry, defaults)
+			if (editor === undefined) return undefined
+			const item = {
+				tool: toolId,
+				editor,
+				config: { icon: iconOf(point, source.icon), label: labelOf(point, source.label) },
+			} as ToolbarItem & { toolbar?: never[] }
+			if (editor === 'drawer') {
+				;(item as { toolbar?: never[] }).toolbar = []
+			}
+			return item
+		}
 		const spec = toolId
 		return {
 			tool: spec,

@@ -318,6 +318,11 @@ via `element.style.transform = translate3d(...)` (compositor only), and a
 single `resizeToolbar` commit lands on release. `clampSlideDelta` is the one
 copy of the slide math, shared by the per-frame write and the release commit,
 so the visual position and the committed `space` can never disagree.
+`isSlideAtLimit` is the same clamp expressed as a boolean (pointer past the
+free span): while limited the session emits `slideLimit` (`atLimit: true`,
+`draggedToolbar` reads `undefined`) so the dragged toolbar loses its
+`data-dragged` chrome — it "hits" the neighbour — and recovers it
+(`atLimit: false`) when moving free again.
 
 Slide-follow is armed **declaratively** in svelte: an `$effect` in
 `ToolbarTrack` keyed on `mode === 'slide' && origin.track === track` reads the

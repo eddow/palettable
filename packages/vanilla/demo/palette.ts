@@ -115,6 +115,32 @@ export function bindResetViaCore(reset: () => void): void {
 	resetViaCore = reset
 }
 
+/**
+ * Fixed ship roster for the context demo: one-or-none selected via the
+ * chrome `<select>` in `main.ts`. Selection swaps a flat `ship` ValuesBag
+ * (`shipId` + per-ship props); None removes the bag. Ship point ids never
+ * enter the root bag / `CONSUMER_DEFAULTS` — no-selection renders the
+ * core-contract fallback (disabled + placeholder / skeleton).
+ */
+export const SHIP_ROSTER = [
+	{ id: 'aurora', name: 'Aurora', icon: '🚀' },
+	{ id: 'borealis', name: 'Borealis', icon: '🛸' },
+	{ id: 'cinder', name: 'Cinder', icon: '🛰️' },
+] as const
+
+export type ShipId = (typeof SHIP_ROSTER)[number]['id']
+
+/** Per-ship property values, keyed by ship id (flat keys land in the `ship` bag). */
+export const SHIP_VALUES: Record<ShipId, { shipShields: boolean; shipPower: number }> = {
+	aurora: { shipShields: true, shipPower: 3 },
+	borealis: { shipShields: false, shipPower: 1.5 },
+	cinder: { shipShields: true, shipPower: 4.5 },
+}
+
+export function shipById(id: string | undefined): (typeof SHIP_ROSTER)[number] | undefined {
+	return SHIP_ROSTER.find((ship) => ship.id === id)
+}
+
 export function demoPoints(): AnyPoint[] {
 	return [
 		{
@@ -180,6 +206,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🎨',
 			categories: ['appearance'],
 			keywords: ['color', 'theme', 'dark', 'light', 'system'],
+			editors: ['theme'],
 			options: [
 				{ value: 'light', icon: '☀️', label: 'Light' },
 				{ value: 'dark', icon: '🌙', label: 'Dark' },
@@ -193,6 +220,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⌘',
 			categories: ['system'],
 			keywords: ['command', 'search', 'run', 'palette'],
+			editors: ['commandBox'],
 		},
 		{
 			id: 'moreDrawer',
@@ -201,6 +229,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🗂',
 			categories: ['system'],
 			keywords: ['drawer', 'more', 'nested'],
+			editors: ['drawer'],
 		},
 		{
 			id: 'missionTime',
@@ -209,6 +238,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⏱️',
 			categories: ['colony'],
 			keywords: ['mission', 'time', 'status', 'clock'],
+			editors: ['status'],
 			uses: ['mission'],
 		},
 		{
@@ -317,6 +347,53 @@ export function demoPoints(): AnyPoint[] {
 				consoleToggle?.()
 			},
 		},
+		{
+			id: 'shipStatus',
+			label: 'Selected ship',
+			type: 'nothing',
+			icon: '🚀',
+			categories: ['fleet'],
+			keywords: ['ship', 'fleet', 'selection', 'status'],
+			editors: ['status'],
+			uses: ['ship'],
+		},
+		{
+			id: 'shipShields',
+			label: 'Ship Shields',
+			type: 'boolean',
+			icon: '🛡️',
+			categories: ['fleet', 'defense'],
+			keywords: ['ship', 'shields', 'defense', 'fleet'],
+			uses: ['ship'],
+		},
+		{
+			id: 'shipPower',
+			label: 'Ship Reactor',
+			type: 'number',
+			icon: '🔋',
+			categories: ['fleet', 'power'],
+			keywords: ['ship', 'reactor', 'power', 'fleet'],
+			constraints: { min: 0.5, max: 5, step: 0.5 },
+			uses: ['ship'],
+		},
+		{
+			id: 'fireTorpedo',
+			label: 'Fire Torpedo',
+			type: 'action',
+			icon: '💥',
+			categories: ['fleet', 'action'],
+			keywords: ['ship', 'fire', 'torpedo', 'weapon', 'fleet'],
+			uses: ['ship'],
+			can: (bag) => bag?.get('shipId') !== undefined,
+			run(ship) {
+				const id = ship?.get('shipId')
+				const entry = shipById(typeof id === 'string' ? id : undefined)
+				demoLens.lastAction =
+					entry !== undefined
+						? `${entry.name} fired a torpedo!`
+						: 'No ship selected — torpedo held.'
+			},
+		},
 	]
 }
 
@@ -395,7 +472,12 @@ const rwComboboxLayout: Borders = {
 					{
 						tool: 'colonyTheme',
 						editor: 'select',
-						config: { icon: '🪐', label: 'Atmosphere', hint: 'Head select (enum)' },
+						config: {
+							icon: '🪐',
+							label: 'Atmosphere',
+							hint: 'Head select (enum)',
+							showFilter: true,
+						},
 					},
 					{
 						tool: 'powerPriority',
@@ -412,7 +494,12 @@ const rwComboboxLayout: Borders = {
 									{
 										tool: 'colonyTheme',
 										editor: 'select',
-										config: { icon: '🪐', label: 'Atmosphere', hint: 'Nested drawer select' },
+										config: {
+											icon: '🪐',
+											label: 'Atmosphere',
+											hint: 'Nested drawer select',
+											showFilter: true,
+										},
 									},
 									{
 										tool: 'gameSpeed',
@@ -466,6 +553,15 @@ const rwComboboxLayout: Borders = {
 						editor: 'stars',
 						config: { icon: '⭐', label: 'Morale', hint: 'Demo stars rating' },
 					},
+					{
+						tool: 'missionTime',
+						editor: 'status',
+						config: {
+							icon: '⏱️',
+							label: 'Mission time',
+							hint: 'Vertical time status (nothing-point)',
+						},
+					},
 				],
 			},
 		],
@@ -504,6 +600,44 @@ const rwComboboxLayout: Borders = {
 						tool: 'taxRate',
 						editor: 'drawerSlider',
 						config: { icon: '📉', label: 'Tax drawer', hint: 'Drawer slider (horizontal)' },
+					},
+					{
+						tool: 'shipStatus',
+						editor: 'status',
+						config: {
+							icon: '🚀',
+							label: 'Selected ship',
+							hint: 'Ship selection status (contextual)',
+							statusKey: 'shipName',
+						},
+					},
+					{
+						tool: 'shipShields',
+						editor: 'toggle',
+						config: {
+							icon: '🛡️',
+							label: 'Ship shields',
+							hint: 'Contextual toggle (selected ship)',
+						},
+					},
+					{
+						tool: 'shipPower',
+						editor: 'slider',
+						config: {
+							icon: '🔋',
+							label: 'Ship reactor',
+							hint: 'Contextual slider (selected ship)',
+						},
+					},
+					{
+						tool: 'fireTorpedo',
+						editor: 'button',
+						config: {
+							icon: '💥',
+							label: 'Fire',
+							hint: 'Gated action (needs a selected ship)',
+							tone: 'accent',
+						},
 					},
 				],
 			},

@@ -11,6 +11,7 @@ import {
 	defaultLayoutFromPoints,
 	draggingEmptiesParkingRow,
 	draggingEmptiesTrackIndex,
+	draggingWholeParkingRow,
 	dragOver,
 	dragStart,
 	type ItemLocation,
@@ -24,6 +25,7 @@ import {
 	nearestFreeItemSpaceBefore,
 	type PaletteLayout,
 	PaletteLayoutTree,
+	parkingFlanks,
 	parkingGapHighlight,
 	refreshDragMode,
 	resolveDragMode,
@@ -756,7 +758,7 @@ describe('drag veto + mode helpers (explicit dragging state)', () => {
 		expect(draggingEmptiesTrackIndex(undefined, live.borders.top)).toBe(undefined)
 	})
 
-	it('draggingEmptiesParkingRow finds the sole-row whole-dragged stack', () => {
+	it('draggingEmptiesParkingRow stays single-row; whole-row veto is separate', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
 		const sole = live.parking[0] ?? []
@@ -765,8 +767,32 @@ describe('drag veto + mode helpers (explicit dragging state)', () => {
 			origin: { kind: 'parking', toolbar: sole, parking: live.parking, index: 0 },
 		})
 		expect(draggingEmptiesParkingRow(dragging, live.parking)).toBe(0)
+		expect(draggingWholeParkingRow(dragging, live.parking)).toBe(0)
 		const border = borderDrag(0, 1)
 		expect(draggingEmptiesParkingRow(border, live.parking)).toBe(undefined)
+		expect(draggingWholeParkingRow(border, live.parking)).toBe(undefined)
+		// Partial drag: an origin toolbar outside parking matches neither
+		// veto (identity, not shape).
+		const foreign = live.borders.top[0]?.[0]?.toolbar ?? []
+		const foreignItem = foreign[0]
+		if (!foreignItem) throw new Error('expected item')
+		const twoTool: DraggingState = startDraggingState({
+			tools: [foreignItem],
+			origin: { kind: 'parking', toolbar: foreign, parking: live.parking, index: 0 },
+		})
+		// Origin toolbar is not in parking → both undefined.
+		expect(draggingEmptiesParkingRow(twoTool, live.parking)).toBe(undefined)
+		expect(draggingWholeParkingRow(twoTool, live.parking)).toBe(undefined)
+		// Whole-row drag in a two-row stack: emptied stays undefined
+		// (single-row scope), whole-row veto still finds the origin row.
+		const rowA = [{ tool: 'a' }]
+		const twoRows = [rowA, [{ tool: 'b' }]]
+		const wholeA: DraggingState = startDraggingState({
+			tools: [...rowA],
+			origin: { kind: 'parking', toolbar: rowA, parking: twoRows, index: 0 },
+		})
+		expect(draggingEmptiesParkingRow(wholeA, twoRows)).toBe(undefined)
+		expect(draggingWholeParkingRow(wholeA, twoRows)).toBe(0)
 	})
 })
 
@@ -823,6 +849,38 @@ describe('gap highlight (pure, no DOM)', () => {
 		// Mask shows the inner end gap even under the emptied veto (the veto
 		// applies to direct/row hover; the mask is the console/panel fallback).
 		expect([...masked.highlighted]).toEqual([2])
+	})
+
+	it('parking flanks: row hover flanks, whole-row neighbours stay dark', () => {
+		const tree = new PaletteLayoutTree(twoItemLayout())
+		const live = tree.getLayout()
+		const dragging = borderDrag(0, 1)
+		// Two rows would flank gaps [0, 1] / [1, 2]; the single-row
+		// fixture flanks [0, 1].
+		expect(parkingFlanks(dragging, live.parking, 0)).toEqual([0, 1])
+		// Whole-row drag: the two gaps touching the origin row stay dark
+		// (dropping there re-creates the same spot). With rows [A, B] and
+		// A dragged, only gap 2 (after B) is a candidate.
+		const sole = live.parking[0] ?? []
+		const emptied: DraggingState = startDraggingState({
+			tools: [...sole],
+			origin: { kind: 'parking', toolbar: sole, parking: live.parking, index: 0 },
+		})
+		expect(parkingFlanks(emptied, live.parking, 0)).toEqual([])
+		// Two-row stack needs its own session (origin `parking` array must
+		// be the array under test — identity, not shape). Two distinct
+		// toolbars (a whole-row drag needs tools === toolbar content).
+		// Hovering the dragged row itself paints nothing (both flanks touch
+		// it); hovering the other row paints its far flank only.
+		const rowA = [{ tool: 'a' }]
+		const rowB = [{ tool: 'b' }]
+		const twoRows = [rowA, rowB]
+		const wholeA: DraggingState = startDraggingState({
+			tools: [...rowA],
+			origin: { kind: 'parking', toolbar: rowA, parking: twoRows, index: 0 },
+		})
+		expect(parkingFlanks(wholeA, twoRows, 0)).toEqual([])
+		expect(parkingFlanks(wholeA, twoRows, 1)).toEqual([2])
 	})
 
 	it('border stacks: no highlight when not editing or not dragging', () => {
@@ -1424,6 +1482,67 @@ describe('core drag engine (dragStart / dragOver)', () => {
 		expect(decision.moved).toBe(true)
 		expect(decision.trackHighlights).toEqual([{ track, gaps: [1] }])
 		expect(dragging.isWholeToolbar).toBe(true)
+	})
+
+	it('dragOver a track-gap paints + commits on a subset drag (no whole-track veto)', () => {
+		// Regression: the direct track-gap highlight must mirror the commit
+		// veto exactly (`isSlidingFlank` only — never a whole-track veto).
+		// The old shape routed through `trackSpaceHighlight` with
+		// `slotIndex: 0` + `activeSlot: undefined`, which paints every gap
+		// dark while `commitDraggedToTrackSpace` still lands there — moving
+		// tools under a dark gap (vertical ABCD pop-A: the leading gap
+		// painted dark, the singleton still extracted, and the gap-before-B
+		// highlight was lost with it).
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const toolbar = live.borders.top[0]?.[0]?.toolbar ?? []
+		const track = live.borders.top[0] ?? []
+		const item = toolbar[0]
+		if (!item) throw new Error('expected item')
+		const dragging = dragStart(live, { kind: 'tool', toolbar, item })
+		expect(dragging.isWholeToolbar).toBe(false)
+		const decision = dragOver(
+			dragging,
+			live,
+			{ kind: 'track-gap', track, border: live.borders.top, gap: 0 },
+			{},
+			true
+		)
+		expect(decision.moved).toBe(true)
+		expect(decision.trackHighlights).toEqual([{ track, gaps: [0] }])
+		expect(track.map((slot) => slot.toolbar.length)).toEqual([1, 3])
+	})
+
+	it('dragOver a sliding-flank track-gap stays dark and never commits', () => {
+		// The one veto that remains: the two gaps flanking the moved
+		// toolbar while sliding (hovering them is just continuing to move).
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const first = live.borders.top[0]?.[0]?.toolbar ?? []
+		const track = live.borders.top[0] ?? []
+		const subset: DraggingState = startDraggingState({
+			tools: first.slice(0, 1),
+			origin: { kind: 'border', toolbar: first, track, border: live.borders.top },
+		})
+		expect(commitDraggedToTrackSpace(subset, track, live.borders.top, 1)).toMatchObject({
+			moved: true,
+		})
+		const sliding = track[1]?.toolbar ?? []
+		const dragging = startDraggingState({
+			tools: [...sliding],
+			origin: { kind: 'border', toolbar: sliding, track, border: live.borders.top },
+		})
+		expect(dragging.isWholeToolbar).toBe(true)
+		const decision = dragOver(
+			dragging,
+			live,
+			{ kind: 'track-gap', track, border: live.borders.top, gap: 1 },
+			{},
+			true
+		)
+		expect(decision.moved).toBe(false)
+		expect(decision.trackHighlights).toEqual([])
+		expect(track).toHaveLength(2)
 	})
 
 	it('dragOver with editing off returns empty (hover stays dark)', () => {

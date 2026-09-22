@@ -349,7 +349,7 @@ export function paletteCommandEntries(
 	return entries
 }
 
-/** Build the add-item entries used when creating new toolbar items. Valued points seed `tool`-kind sources; nothing-points surface via `context.itemEditors` (`item`-kind). */
+/** Build the add-item entries used when creating new toolbar items. Valued + nothing points seed `tool`-kind sources by point name; `context.itemEditors` (`item`-kind) survives only as a fallback for editors no nothing-point claims. */
 export function paletteAddItemEntries(
 	points: readonly AnyPoint[],
 	context: CommandBoxContext = {},
@@ -360,10 +360,26 @@ export function paletteAddItemEntries(
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
 		if (isActionPoint(point)) continue
-		if (isNothingPoint(point)) continue
+		if (isNothingPoint(point)) {
+			// Nothing-points list by point name (Theme, Command, More, …),
+			// not as interchangeable generic editors — each binds 1:1 to
+			// its allowed editor(s) via `point.editors`.
+			const label = point.label ?? humanizeCommandText(point.id)
+			entries.push({
+				id: `tool:${point.id}`,
+				kind: 'tool',
+				toolId: point.id,
+				label,
+				meta: 'Add tool',
+				icon: point.icon,
+				keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
+				categories: entryCategories(point, ['tools']),
+			})
+			continue
+		}
 		if (!isValuedPoint(point)) continue
-		// Enum points collapse to one catalog row (no per-option add source).
-		if (point.type === 'enum') continue
+		// Every valued family (boolean/number/enum/…) seeds one add source;
+		// the concrete editor is picked per-variant via `paletteDerivedVariants`.
 		const label = point.label ?? humanizeCommandText(point.id)
 		entries.push({
 			id: `tool:${point.id}`,
@@ -377,6 +393,13 @@ export function paletteAddItemEntries(
 		})
 	}
 	for (const editor of context.itemEditors ?? []) {
+		// Fallback only: skip editors already claimed 1:1 by a nothing-point
+		// (`point.editors` includes the id), so the list shows points by
+		// name instead of interchangeable generic editors.
+		const claimed = points.some(
+			(point) => isNothingPoint(point) && !excluded.has(point.id) && point.editors?.includes(editor)
+		)
+		if (claimed) continue
 		entries.push({
 			id: `item:${editor}`,
 			kind: 'item',
@@ -427,7 +450,7 @@ export function paletteDerivedVariants(
 			},
 		]
 	}
-	if (point === undefined || !isValuedPoint(point)) {
+	if (point === undefined || (!isValuedPoint(point) && !isNothingPoint(point))) {
 		// No point metadata (adapter passed sources without points): fall back
 		// to a generic `set` variant carrying the bare tool spec.
 		return [
@@ -440,6 +463,25 @@ export function paletteDerivedVariants(
 				icon: source.icon,
 				keywords: collectKeywords(source.toolId, label, 'set', 'value'),
 				categories: [...(source.categories ?? []), 'derived'],
+				spec: source.toolId,
+			},
+		]
+	}
+	if (isNothingPoint(point)) {
+		// Nothing-point tool: one variant bound to the point id, editor is
+		// the point's 1:1 editor (`point.editors[0]` when declared).
+		const editor = point.editors?.[0]
+		return [
+			{
+				id: `${source.id}:tool`,
+				kind: 'tool',
+				toolId: source.toolId,
+				editor,
+				label,
+				meta: 'Add tool',
+				icon: source.icon,
+				keywords: collectKeywords(source.toolId, label, point.keywords),
+				categories: [...(source.categories ?? []), 'tool'],
 				spec: source.toolId,
 			},
 		]

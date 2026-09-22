@@ -133,16 +133,45 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		const bag = new ValuesBag({ fileName: 'a.ts' })
 		const bound = statusPresenter(
 			{ tool: 'missionTime', editor: 'status' },
-			{ point: undefined, value: undefined, bags: [bag] }
+			{ point: undefined, value: undefined, bags: [bag] },
+			surface
 		)
 		expect(bound.value).toBe('a.ts')
 		expect(bound.can).toBe(true)
+		expect(bound.direction).toBe('horizontal')
+		expect(bound.region).toBe('top')
 		const absent = statusPresenter(
 			{ tool: 'missionTime', editor: 'status' },
-			{ point: undefined, value: undefined, bags: [undefined] }
+			{ point: undefined, value: undefined, bags: [undefined] },
+			surface
 		)
 		expect(absent.value).toBe('missionTime')
 		expect(absent.can).toBe(false)
+		const named = statusPresenter(
+			{ tool: 'shipStatus', editor: 'status', config: { statusKey: 'shipName' } },
+			{
+				point: undefined,
+				value: undefined,
+				bags: [new ValuesBag({ shipId: 'aurora', shipName: '🚀 Aurora' })],
+			},
+			surface
+		)
+		expect(named.value).toBe('🚀 Aurora')
+		expect(named.can).toBe(true)
+		const namedAbsent = statusPresenter(
+			{ tool: 'shipStatus', editor: 'status', config: { statusKey: 'shipName' } },
+			{ point: undefined, value: undefined, bags: [new ValuesBag({ shipId: 'aurora' })] },
+			surface
+		)
+		expect(namedAbsent.value).toBe('shipStatus')
+		expect(namedAbsent.can).toBe(true)
+		const vertical = statusPresenter(
+			{ tool: 'missionTime', editor: 'status' },
+			{ point: undefined, value: undefined, bags: [bag] },
+			{ axis: 'vertical', region: 'left' }
+		)
+		expect(vertical.direction).toBe('vertical')
+		expect(vertical.region).toBe('left')
 	})
 
 	it('builds theme view-models cycling light → dark → system', () => {
@@ -434,6 +463,27 @@ describe('selectPresenter / sliderPresenter', () => {
 		).toBe(true)
 	})
 
+	it('hides the select filter by default, shows it on `config.showFilter === true`', () => {
+		const point = { id: 'theme', label: 'T', type: 'enum' as const }
+		expect(selectPresenter({ tool: 'theme' }, { point, value: 'x' }, surface).showFilter).toBe(
+			false
+		)
+		expect(
+			selectPresenter(
+				{ tool: 'theme', config: { showFilter: true } },
+				{ point, value: 'x' },
+				surface
+			).showFilter
+		).toBe(true)
+		expect(
+			selectPresenter(
+				{ tool: 'theme', config: { showFilter: false } },
+				{ point, value: 'x' },
+				surface
+			).showFilter
+		).toBe(false)
+	})
+
 	it('exposes raw current + full-text list rows for the select listbox', () => {
 		const point = {
 			id: 'theme',
@@ -525,18 +575,20 @@ describe('configuratorModel + patches', () => {
 		expect(configuratorTonePatch('accent')).toEqual({ tone: 'accent' })
 		expect(configuratorTonePatch('x')).toEqual({ tone: 'neutral' })
 		expect(configuratorEditorCleanup('select')).toEqual(['showValue'])
-		expect(configuratorEditorCleanup('segmented')).toEqual(['showValue'])
+		expect(configuratorEditorCleanup('segmented')).toEqual(['showValue', 'showFilter'])
 		expect(configuratorEditorCleanup('slider')).toEqual([
 			'values',
 			'keywords',
 			'choiceDisplay',
 			'showText',
+			'showFilter',
 		])
 		expect(configuratorEditorCleanup('drawerSlider')).toEqual([
 			'values',
 			'keywords',
 			'choiceDisplay',
 			'showText',
+			'showFilter',
 		])
 		expect(configuratorEditorCleanup('button')).toEqual([
 			'values',
@@ -544,6 +596,7 @@ describe('configuratorModel + patches', () => {
 			'choiceDisplay',
 			'showValue',
 			'showText',
+			'showFilter',
 		])
 	})
 })

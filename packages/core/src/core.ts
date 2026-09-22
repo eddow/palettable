@@ -40,6 +40,7 @@ export type PaletteCoreOptions = {
 	readonly editors?: EditorRegistry
 	readonly editorDefaults?: EditorDefaults
 	readonly initialLayout?: AnySerializedLayout | PaletteLayout
+	// Note: not completely implemented, still under construction
 	/** End-user-defined virtual points (`enum-from` / `stash`). */
 	readonly virtuals?: readonly VirtualPoint[]
 	/**
@@ -63,6 +64,14 @@ export type ContextListener = (bagName: ContextName, changed: readonly string[])
  * Fired only on flips (no render storms).
  */
 export type CanListener = (pointId: string, can: boolean) => void
+
+/**
+ * Listener for point-definition changes: the point id whose options were
+ * replaced (`defineEnumOptions`) or whose virtual was (re)defined/removed.
+ * Adapters reconcile select/segmented rows in place (never a structural
+ * sync) — same pattern as `CanListener`, per-point id payload.
+ */
+export type DefinitionListener = (pointId: string) => void
 
 /**
  * Main entry point: point registry + value store + layout tree.
@@ -163,6 +172,64 @@ export class PaletteCore {
 		return this.evaluateCan(pointId)
 	}
 
+	/**
+	 * Read the live value for a valued point: dual-source precedence —
+	 * the first non-root used bag holding the id wins, else the root
+	 * value. Absent bag / absent key → root. Never throws on missing
+	 * context; throws `PaletteError` on unknown ids and non-valued points.
+	 * Adapters share this read path (vanilla `liveValue` delegates here).
+	 */
+	readValue(id: string): unknown {
+		const pointId = canonicalPointId(id)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (!isValuedPoint(def)) return undefined
+		let value: unknown = this.values.get(def.id)
+		for (const bag of this.resolveBags(def.uses)) {
+			if (bag === undefined) continue
+			if (bag === (this.values as unknown as ValuesBag)) continue
+			const selected: unknown = bag.get(def.id)
+			if (selected !== undefined) {
+				value = selected
+				break
+			}
+		}
+		return value
+	}
+
+	/**
+	 * Write a valued point through its context: the first non-root used
+	 * bag holding the id wins (context write), else the root store (root
+	 * write). Returns where the write landed (`'context'` + bag name, or
+	 * `'root'`). Strict like `run` setters: absent everywhere (skeleton)
+	 * throws `PaletteError` — the consumer hydrates first (root via
+	 * `setMany`, context via `bag.setTree`). Unknown ids and non-valued
+	 * points throw. `Object.is`-equal writes are no-ops (same echo-loop
+	 * guard as the stores).
+	 */
+	writeValue(
+		id: string,
+		value: unknown
+	): { readonly target: 'context'; readonly bag: string } | { readonly target: 'root' } {
+		const pointId = canonicalPointId(id)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is not valued`)
+		const uses = def.uses ?? []
+		for (const name of uses) {
+			if (isRootContext(name)) continue
+			const bag = this.bags.get(name)
+			if (bag === undefined) continue
+			if (!bag.has(def.id)) continue
+			bag.set(def.id, value)
+			return { target: 'context', bag: name }
+		}
+		if (!this.values.has(def.id))
+			throw new PaletteError(`writeValue: no value for "${def.id}" (skeleton)`)
+		this.values.set(def.id, value as never)
+		return { target: 'root' }
+	}
+
 	// ── Context bags (Phase 8) ──────────────────────────────────────────
 	// Root bag `ROOT_CONTEXT` is core-owned (the `values` store itself);
 	// context bags are host-owned via `setContext` / `removeContext`
@@ -173,6 +240,7 @@ export class PaletteCore {
 	private bagForwards = new Map<ContextName, Unsubscribe>()
 	private contextListeners = new Set<ContextListener>()
 	private canListeners = new Set<CanListener>()
+	private definitionListeners = new Set<DefinitionListener>()
 	private canCache = new Map<string, boolean>()
 
 	/**
@@ -265,6 +333,29 @@ export class PaletteCore {
 		}
 	}
 
+	/**
+	 * Subscribe to point-definition changes (enum option replacement via
+	 * `defineEnumOptions`, virtual (re)definition/removal). Fired once per
+	 * mutation with the affected point/virtual id — adapters reconcile the
+	 * affected tools in place (never a structural sync).
+	 */
+	subscribeDefinitions(listener: DefinitionListener): Unsubscribe {
+		this.definitionListeners.add(listener)
+		return () => {
+			this.definitionListeners.delete(listener)
+		}
+	}
+
+	private emitDefinitions(pointId: string): void {
+		for (const listener of [...this.definitionListeners]) {
+			try {
+				listener(pointId)
+			} catch {
+				// Listener errors must not break the notify chain.
+			}
+		}
+	}
+
 	private onBagChanged(name: ContextName, changed: readonly string[]): void {
 		this.emitContext(name, changed)
 		this.refreshCanForBag(name)
@@ -321,6 +412,7 @@ export class PaletteCore {
 	/**
 	 * Define (or redefine) a virtual point after construction.
 	 * Redefining a `stash` clears its aside slot.
+	 * Emits a definition notification for the virtual id.
 	 */
 	defineVirtual(virtual: VirtualPoint): void {
 		const ids = this.allIds()
@@ -331,29 +423,67 @@ export class PaletteCore {
 		this.virtuals.set(virtual.id, virtual)
 		this.virtualPointsCache = undefined
 		this.stashAsides.delete(virtual.id)
+		this.emitDefinitions(virtual.id)
 	}
 
-	/** Remove a virtual point (drops its stash aside slot). */
+	/** Remove a virtual point (drops its stash aside slot). Emits a definition notification. */
 	removeVirtual(id: string): void {
 		this.virtuals.delete(id)
 		this.virtualPointsCache = undefined
 		this.stashAsides.delete(id)
+		this.emitDefinitions(canonicalPointId(id))
+	}
+
+	/**
+	 * Replace the option list of an `enum` point after construction.
+	 * Validated like construction: unknown ids throw, non-enum points
+	 * throw, empty lists throw, duplicate option values throw. The stored
+	 * definition object is replaced (never mutated — adapters may hold the
+	 * old reference), `pointsCache` is invalidated, and a definition
+	 * notification fires for the point id. Current values are NOT touched:
+	 * a value with no matching option renders the `?` skeleton until the
+	 * host writes a listed value.
+	 */
+	defineEnumOptions(id: string, options: readonly import('./type.js').EnumOption[]): void {
+		const pointId = canonicalPointId(id)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`defineEnumOptions: unknown point "${id}"`)
+		if (!isValuedPoint(def) || def.type !== 'enum')
+			throw new PaletteError(`defineEnumOptions: point "${id}" is not an enum`)
+		if (options.length === 0)
+			throw new PaletteError(`defineEnumOptions: point "${id}" needs at least one option`)
+		const seen = new Set<string>()
+		for (const option of options) {
+			if (seen.has(option.value))
+				throw new PaletteError(
+					`defineEnumOptions: point "${id}" has a duplicate option value "${option.value}"`
+				)
+			seen.add(option.value)
+		}
+		this.definitions.set(pointId, {
+			...def,
+			constraints: { ...(def.constraints as object | undefined), options: [...options] },
+		} as AnyPoint)
+		this.pointsCache = undefined
+		this.emitDefinitions(pointId)
 	}
 
 	/**
 	 * Can a named action (`id:action`) run? Bounds-checked for `number`
 	 * actions (`inc` stops at `max`, `dec` stops at `min`), mirroring the
 	 * Svelte reference's `valueActions.number.inc.get can()`.
-	 * Throws `PaletteError` on unknown points/actions and on absent
-	 * (skeleton) values — strict path, use `require(id)` semantics.
+	 * Reads the live value through context (`readValue`), so contextual
+	 * tools gate on the selection. Throws `PaletteError` on unknown
+	 * points/actions and on absent (skeleton) values — strict path.
 	 */
 	canRunAction(id: string, action: string): boolean {
 		const def = this.definitions.get(canonicalPointId(id))
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is an action`)
-		if (!this.values.has(def.id))
+		const current = this.readValue(def.id)
+		if (current === undefined)
 			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
-		const can = namedActionCan(def, this.values.get(def.id), action)
+		const can = namedActionCan(def, current, action)
 		if (can === undefined) throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
 		return can
 	}
@@ -410,14 +540,12 @@ export class PaletteCore {
 		if (def === undefined) throw new PaletteError(`run: unknown point "${parsed.pointId}"`)
 		if (parsed.kind === 'point') {
 			if (!isActionPoint(def)) throw new PaletteError(`run: point "${spec}" is not an action`)
-			def.run()
+			def.run(...this.resolveBags(def.uses))
 			return
 		}
 		if (!isValuedPoint(def)) throw new PaletteError(`run: point "${parsed.pointId}" is an action`)
 		if (parsed.kind === 'setter') {
-			if (!this.values.has(parsed.pointId))
-				throw new PaletteError(`run: no value for "${parsed.pointId}" (skeleton)`)
-			this.values.set(parsed.pointId, readSetterValue(def, parsed.value) as never)
+			this.writeValue(parsed.pointId, readSetterValue(def, parsed.value))
 			return
 		}
 		this.applyNamedAction(def, parsed.action)
@@ -466,6 +594,7 @@ export class PaletteCore {
 		this.bags.clear()
 		this.contextListeners.clear()
 		this.canListeners.clear()
+		this.definitionListeners.clear()
 		this.canCache.clear()
 	}
 
@@ -484,19 +613,19 @@ export class PaletteCore {
 			| { readonly min?: number; readonly max?: number; readonly step?: number }
 			| undefined
 		const step = constraints?.step ?? 1
-		if (!this.values.has(def.id)) throw new PaletteError(`run: no value for "${def.id}" (skeleton)`)
-		const current = this.values.require(def.id) as number
+		const current = this.readValue(def.id)
+		if (current === undefined) throw new PaletteError(`run: no value for "${def.id}" (skeleton)`)
 		if (def.type === 'number') {
 			if (action === 'inc') {
-				const next = current + step
+				const next = (current as number) + step
 				const clamped = constraints?.max === undefined ? next : Math.min(next, constraints.max)
-				this.values.set(def.id, clamped as never)
+				this.writeValue(def.id, clamped)
 				return
 			}
 			if (action === 'dec') {
-				const next = current - step
+				const next = (current as number) - step
 				const clamped = constraints?.min === undefined ? next : Math.max(next, constraints.min)
-				this.values.set(def.id, clamped as never)
+				this.writeValue(def.id, clamped)
 				return
 			}
 		}

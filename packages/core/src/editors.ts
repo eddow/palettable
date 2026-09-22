@@ -53,9 +53,16 @@ export function editorChoicesFor(
 ): readonly EditorChoice[] {
 	const family: PointFamily = point === undefined ? 'item' : familyOfPoint(point)
 	const variants = registry?.[family] ?? {}
+	// Nothing-points may restrict to a 1:1 editor subset via `point.editors`
+	// (e.g. `theme` → `['theme']`); omitted = whole `item` family (legacy).
+	const allowed =
+		point !== undefined && isNothingPoint(point) && point.editors !== undefined
+			? new Set(point.editors)
+			: undefined
 	const list = Object.values(variants).filter(
 		(cap) =>
 			!cap.hidden &&
+			(allowed === undefined || allowed.has(cap.id)) &&
 			(cap.supportedAxes === undefined ||
 				cap.supportedAxes === 'both' ||
 				cap.supportedAxes === surface.axis ||

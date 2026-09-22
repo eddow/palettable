@@ -105,14 +105,34 @@ describe('paletteCommandEntries', () => {
 })
 
 describe('paletteAddItemEntries / paletteDerivedVariants', () => {
-	it('lists editable tools + editor-only items, skipping actions and enums', () => {
+	it('lists editable tools + nothing-points by name, skipping actions only', () => {
 		const entries = paletteAddItemEntries(points(), { itemEditors: ['commandBox'] })
 		expect(entries.some((entry) => entry.id === 'tool:fontSize')).toBe(true)
+		expect(entries.some((entry) => entry.id === 'tool:theme')).toBe(true)
 		expect(entries.some((entry) => entry.id === 'tool:reset')).toBe(false)
-		expect(entries.some((entry) => entry.id === 'tool:theme')).toBe(false)
 		expect(entries.find((entry) => entry.id === 'item:commandBox')?.meta).toBe(
 			'Add editor-only item'
 		)
+	})
+
+	it('lists nothing-points as tool sources and skips claimed generic editors', () => {
+		const withNothing: AnyPoint[] = [
+			...points(),
+			{ id: 'themeTool', label: 'Theme', type: 'nothing', editors: ['theme'] },
+		]
+		const entries = paletteAddItemEntries(withNothing, { itemEditors: ['theme', 'status'] })
+		expect(entries.some((entry) => entry.id === 'tool:themeTool')).toBe(true)
+		// `theme` is claimed 1:1 by the nothing-point → no generic entry.
+		expect(entries.some((entry) => entry.id === 'item:theme')).toBe(false)
+		// `status` is unclaimed → generic fallback survives.
+		expect(entries.some((entry) => entry.id === 'item:status')).toBe(true)
+		const variants = paletteDerivedVariants(
+			entries.find((entry) => entry.id === 'tool:themeTool')!,
+			withNothing
+		)
+		expect(variants.map((variant) => variant.kind)).toEqual(['tool'])
+		expect(variants[0]?.toolId).toBe('themeTool')
+		expect(variants[0]?.editor).toBe('theme')
 	})
 
 	it('expands sources into set variants carrying specs', () => {

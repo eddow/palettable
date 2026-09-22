@@ -42,7 +42,7 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@24.13.4)(jsdom@30.0.1)(vite@8.3.0(@types/node@24.13.4))
 
-  packages/svelte:
+  packages/svelette:
     devDependencies:
       '@palettable/core':
         specifier: workspace:*

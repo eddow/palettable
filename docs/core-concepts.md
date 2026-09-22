@@ -31,13 +31,18 @@ operates on** via `uses?: readonly ContextName[]` (optional bags — `undefined`
 (`undefined` = bag not registered — render falls back to disabled +
 placeholder, never throws). `ROOT_CONTEXT` may appear explicitly to receive
 the root bag as an argument (e.g. `uses: [ROOT_CONTEXT, 'activeFile']` →
-`run(rootBag, activeFileBag)`); valued-point value access always stays on the
-root bag via `core.values.get/set` regardless of `uses` — `uses` only controls
-which bags are passed to `run` / `can` / display resolvers, in `uses` order.
+`run(rootBag, activeFileBag)`); valued-point reads/writes route through
+context via `core.readValue` / `core.writeValue` (dual-source precedence:
+first non-root used bag holding the id wins, else root; strict skeleton
+throw on write when absent everywhere — the consumer hydrates first).
+`uses` only controls which bags are passed to `run` / `can` / display
+resolvers, in `uses` order.
 
-- `run(...bags)` receives the used bags writable; the host bridge (adapter
-  code, never core) propagates writes to the IDE. The existing
-  `PaletteCore.run(spec)` survives as root-bag sugar.
+- `run(...bags)` receives the used bags writable; `PaletteCore.run(spec)`
+  passes the resolved bags for action points (context-aware path — e.g. the
+  fleet `fireTorpedo` reads `ship?.get('shipId')`), while valued-point
+  setters/actions route through `writeValue`/`readValue` (context-routed
+  writes land in the selection bag, never root).
 - `can(...bags)` is functional on **all** point kinds (omitted = enabled);
   adapters read it via `core.evaluateCan(id)` and subscribe to flips via
   `core.subscribeCan` (flips only — no render storms). Context-bag changes

@@ -20,7 +20,7 @@ export default defineConfig({
 		{
 			name: 'svelte',
 			use: { baseURL: 'http://localhost:4173' },
-			testIgnore: /vanilla\.spec\.ts/,
+			testIgnore: [/vanilla\.spec\.ts/, /ship-context\.spec\.ts/],
 		},
 		{
 			name: 'vanilla',
