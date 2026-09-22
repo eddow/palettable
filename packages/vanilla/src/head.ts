@@ -1,15 +1,15 @@
 /**
- * `@palettable/vanilla` — default head editors (plain-DOM renderers).
+ * `@palettable/vanilla` — default head controls (plain-DOM renderers).
  *
- * Each editor renders one toolbar item into an `HTMLElement` from a core
+ * Each control renders one toolbar item into an `HTMLElement` from a core
  * presenter view-model (button/toggle/select/segmented/slider/stepper/stars/
  * status/theme/commandBox/drawer). Presentation only: all reads go through core
  * presenters, all writes through `core.run(spec)` / `core.values.set`.
  * Status/commandBox/drawer/theme tools bind nothing-points (1:1 — one tool,
  * one nothing-point whose `uses` names its context); display state comes
  * from the resolved bags, never from `core.values`.
- * Mirrors the svelte default head (`head/editors/*.svelte`) + the demo
- * overrides (`DemoSlider` value badge, `StarsEditor` rating row).
+ * Mirrors the svelte default head + the demo
+ * overrides (value badge, rating row).
  */
 
 import {
@@ -17,7 +17,9 @@ import {
 	type AnyValuedPoint,
 	axisForRegion,
 	buttonPresenter,
-	canonicalItemTool,
+	canonicalItemPoint,
+	configuration,
+	drawerOpenOf,
 	filterCommandEntries,
 	isActionPoint,
 	isDrawerItem,
@@ -78,6 +80,11 @@ export type HeadContext = {
 		axis: 'horizontal' | 'vertical',
 		region: PaletteRegion
 	) => HTMLElement
+	/** Edit-mode drag state for drawer hover-open (threaded from the adapter). */
+	readonly isEditing?: () => boolean
+	readonly isDragging?: () => boolean
+	/** Hierarchy close: close open drawers not containing `target`. */
+	readonly closeUnrelatedDrawers?: (target: EventTarget | null) => void
 }
 
 /** Fill a shelled icon node: show + set glyph, or hide when absent.
@@ -157,22 +164,22 @@ export function liveValue(core: PaletteCore | PreviewCore, point: AnyPoint | und
 	}
 }
 
-function toolOf(item: ToolbarItem): string | undefined {
-	const tool = (item as { tool?: unknown }).tool
-	return typeof tool === 'string' ? tool : undefined
+function specOf(item: ToolbarItem): string | undefined {
+	const point = (item as { point?: unknown }).point
+	return typeof point === 'string' ? point : undefined
 }
 
 function pointIdOf(item: ToolbarItem): string | undefined {
-	const spec = toolOf(item)
+	const spec = specOf(item)
 	if (spec === undefined) return undefined
-	const id = canonicalItemTool(item)
+	const id = canonicalItemPoint(item)
 	return id === '' ? undefined : id
 }
 
 /** Render a `button` (action) item. */
 export function renderButton(context: HeadContext): HTMLElement {
 	const { core, item } = context
-	const spec = toolOf(item) ?? ''
+	const spec = specOf(item) ?? ''
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
 	const view = buttonPresenter(item, { point, value: undefined, bags }, spec, can)
@@ -191,7 +198,7 @@ export function renderButton(context: HeadContext): HTMLElement {
 	return btn
 }
 
-/** Render a `toggle` (boolean) item. Skeleton (`pressed === undefined`) renders unpressed + `aria-pressed="mixed"`. */
+/** Render a `toggle` (boolean) item. Skeleton (`pressed === undefined`) renders unpressed + `aria-pressed="mixed"`; a context tool with no value is disabled (`view.can === false`). */
 export function renderToggle(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
@@ -201,6 +208,7 @@ export function renderToggle(context: HeadContext): HTMLElement {
 		'.palette-default-icon'
 	)
 	const btn = button as HTMLButtonElement
+	btn.disabled = !view.can
 	btn.title = view.title
 	fillIcon(icon, view.icon)
 	// Recompute the toggle spec at click time: `view.toggle` is captured
@@ -208,7 +216,9 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	// replay forever, never unticking). Fresh read → run.
 	btn.addEventListener('click', () => {
 		const fresh = boundOf(core, pointIdOf(item))
-		core.run(togglePresenter(item, fresh).toggle)
+		const live = togglePresenter(item, fresh)
+		if (!live.can) return
+		core.run(live.toggle)
 	})
 	return btn
 }
@@ -243,6 +253,9 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	)
 	box.title = view.title
 	const triggerBtn = trigger as HTMLButtonElement
+	// Context tool with no value (skeleton) or explicit `can: false` → the
+	// trigger is disabled: there is nothing to write to.
+	triggerBtn.disabled = !view.can
 	// Tool icon first (when declared), then the value icon — icon+value, like
 	// numerics. Absent icons are REMOVED (not hidden) so no space is
 	// reserved. Skeleton (`isSkeleton`) renders the tool icon + a `?`
@@ -407,7 +420,7 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 			segmentedOptionShellTemplate({
 				value: option.value,
 				selected: view.value === option.value,
-				can: option.can,
+				can: option.can && view.can,
 			}),
 			'.palette-default-choice-icon',
 			'.palette-default-choice'
@@ -468,6 +481,7 @@ export function renderSlider(context: HeadContext): HTMLElement {
 	range.max = String(view.max)
 	range.step = String(view.step)
 	range.value = String(view.value ?? view.min)
+	range.disabled = !view.can
 	range.setAttribute('aria-label', view.title)
 	range.addEventListener('input', () => {
 		if (point?.id === undefined) return
@@ -516,14 +530,14 @@ export function renderStepper(context: HeadContext): HTMLElement {
 		}
 	}
 	;(minus as HTMLButtonElement).disabled =
-		view.value === undefined || view.value - view.step < view.min
+		!view.can || view.value === undefined || view.value - view.step < view.min
 	;(minus as HTMLButtonElement).addEventListener('click', () => {
 		stepFromLive(-1)
 	})
 	fillIcon(icon, view.icon)
 	readout.append(String(view.value))
 	;(plus as HTMLButtonElement).disabled =
-		view.value === undefined || view.value + view.step > view.max
+		!view.can || view.value === undefined || view.value + view.step > view.max
 	;(plus as HTMLButtonElement).addEventListener('click', () => {
 		stepFromLive(1)
 	})
@@ -549,6 +563,7 @@ export function renderStars(context: HeadContext): HTMLElement {
 		button.setAttribute('aria-checked', index === view.value ? 'true' : 'false')
 		button.title = `${view.title} ${index}`
 		button.textContent = filled ? '▶' : '▷'
+		button.disabled = !view.can
 		button.addEventListener('click', () => {
 			if (point?.id === undefined) return
 			try {
@@ -788,9 +803,16 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
  * siblings in a `.palettable-drawer.from-{region}` wrapper (child of the
  * tool node). The popup toggles `hidden` — no body portal, no JS
  * repositioning; the side is CSS-only from the parent region
- * (center-seeking: left→right, right→left, top→down, bottom→up). */
+ * (center-seeking: left→right, right→left, top→down, bottom→up).
+ * Trigger behavior follows `config.open` (svelte `DrawerEditor` parity):
+ * `click` toggles on click (default), `press` toggles on pointerdown,
+ * `hover` opens on mouseenter and schedules close on mouseleave via
+ * `configuration.drawerHoverCloseMs` (leaving the trigger for the popup
+ * cancels the close; leaving the popup re-arms it).
+ */
 export function renderDrawer(context: HeadContext): HTMLElement {
 	const { item, surface } = context
+	const openMode = drawerOpenOf(item)
 	const config = ((item as { config?: Record<string, unknown> }).config ?? {}) as Record<
 		string,
 		unknown
@@ -811,6 +833,7 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 			icon: typeof config.icon === 'string' ? config.icon : undefined,
 			axis: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
 			region: surface.region,
+			open: openMode,
 		})
 	)
 	if (!(trigger instanceof HTMLButtonElement)) throw new Error('drawer trigger shell missing node')
@@ -855,9 +878,80 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		}
 	}
 	trigger.addEventListener('click', () => {
+		if (openMode !== 'click') return
 		if (open) close()
 		else openPopup()
 	})
+	if (openMode === 'press') {
+		trigger.addEventListener('pointerdown', () => {
+			if (open) close()
+			else openPopup()
+		})
+	}
+	// `open: 'hover'` keeps the popup open while the pointer travels from
+	// the trigger to the popup: leaving the trigger schedules a close that
+	// entering the popup cancels (and vice versa). `click`/`press` modes
+	// ignore hover entirely.
+	let cancelHoverClose: () => void = () => {}
+	if (openMode === 'hover') {
+		let hoverCloseTimer: ReturnType<typeof setTimeout> | undefined
+		cancelHoverClose = () => {
+			if (hoverCloseTimer !== undefined) {
+				clearTimeout(hoverCloseTimer)
+				hoverCloseTimer = undefined
+			}
+		}
+		const scheduleHoverClose = () => {
+			cancelHoverClose()
+			hoverCloseTimer = setTimeout(() => {
+				hoverCloseTimer = undefined
+				close()
+			}, configuration.drawerHoverCloseMs)
+		}
+		trigger.addEventListener('mouseenter', () => {
+			cancelHoverClose()
+			openPopup()
+		})
+		trigger.addEventListener('mouseleave', scheduleHoverClose)
+		popup.addEventListener('mouseenter', cancelHoverClose)
+		popup.addEventListener('mouseleave', scheduleHoverClose)
+	}
+	// Edit-mode drag hover-open: while editing + dragging, hovering the
+	// trigger OR the popup opens the drawer (any `config.open` mode — the
+	// drag needs the toolbar visible to highlight its gaps). Hierarchy
+	// close is adapter-owned (no mouseleave close here): the adapter closes
+	// only drawers outside the hovered ancestor chain.
+	//
+	// NOTE: the trigger's own `pointerenter`/`pointermove` do NOT fire
+	// during a tool drag — the drawer tool's own guard
+	// (`position: absolute; inset: -3px; z-index: 1`) covers the trigger
+	// and retargets every pointer event to itself. The adapter's bar-level
+	// `pointermove` (coordinate hit-test via `elementFromPoint`, resolving
+	// the item through the guard's parent wrapper) owns hover-open
+	// instead: it dispatches a bubbling `palettable-drawer-drag-hover`
+	// CustomEvent carrying the hovered drawer item, and this wrapper opens
+	// only when the item is its own.
+	// The popup listener covers the already-open case (hovering the open
+	// popup's gaps keeps it open without re-dispatch).
+	//
+	// Attached for EVERY open mode (including `hover`): a drag hover-open
+	// must work regardless of the trigger's rest behavior — the drag needs
+	// the toolbar visible to highlight its gaps.
+	wrapper.addEventListener('palettable-drawer-drag-hover', (event) => {
+		event.stopPropagation()
+		if ((event as CustomEvent<ToolbarItem>).detail !== item) return
+		if (context.isEditing?.() !== true) return
+		if (context.isDragging?.() !== true) return
+		if (openMode === 'hover') cancelHoverClose()
+		openPopup()
+	})
+	if (openMode !== 'hover') {
+		popup.addEventListener('pointerenter', () => {
+			if (context.isEditing?.() !== true) return
+			if (context.isDragging?.() !== true) return
+			openPopup()
+		})
+	}
 	// Outside-click closes (capture): clicks inside the wrapper (trigger,
 	// popup, nested drawers) are ignored. Self-removes when the wrapper
 	// leaves the DOM (re-render while open) so no listener leaks.
@@ -887,10 +981,10 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 	return wrapper
 }
 
-/** Dispatch an item to its head editor by explicit `editor` id. */
+/** Dispatch an item to its head control by explicit `control` id. */
 export function renderHeadItem(context: HeadContext): HTMLElement | null {
-	const editor = (context.item as { editor?: string }).editor
-	switch (editor) {
+	const control = (context.item as { control?: string }).control
+	switch (control) {
 		case 'button':
 			return renderButton(context)
 		case 'toggle':
@@ -931,7 +1025,7 @@ export function surfaceForRegion(region: PaletteRegion | undefined): SurfaceCont
 // never write `core.values` or `core.run` — they mutate the preview core
 // below, which re-renders the preview node in place.
 
-/** Fixed preview surface (mirrors `editorFor` in `add-item.ts`). */
+/** Fixed preview surface (mirrors `controlFor` in `add-item.ts`). */
 export const PREVIEW_SURFACE: SurfaceContext = { axis: 'horizontal', region: 'top' }
 
 /** Minimal `PaletteCore` surface the head renderers read (`boundOf` + `run`/`values`/`can`). */
@@ -969,7 +1063,7 @@ export function createPreviewCore(
 	const listeners = new Map<string, Set<(value: unknown) => void>>()
 	const pointId = (() => {
 		try {
-			const id = canonicalItemTool(draft)
+			const id = canonicalItemPoint(draft)
 			return id === '' ? undefined : id
 		} catch {
 			return undefined

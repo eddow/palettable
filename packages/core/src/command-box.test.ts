@@ -106,21 +106,21 @@ describe('paletteCommandEntries', () => {
 
 describe('paletteAddItemEntries / paletteDerivedVariants', () => {
 	it('lists editable tools + nothing-points by name, skipping actions only', () => {
-		const entries = paletteAddItemEntries(points(), { itemEditors: ['commandBox'] })
+		const entries = paletteAddItemEntries(points(), { itemControls: ['commandBox'] })
 		expect(entries.some((entry) => entry.id === 'tool:fontSize')).toBe(true)
 		expect(entries.some((entry) => entry.id === 'tool:theme')).toBe(true)
 		expect(entries.some((entry) => entry.id === 'tool:reset')).toBe(false)
 		expect(entries.find((entry) => entry.id === 'item:commandBox')?.meta).toBe(
-			'Add editor-only item'
+			'Add control-only item'
 		)
 	})
 
-	it('lists nothing-points as tool sources and skips claimed generic editors', () => {
+	it('lists nothing-points as tool sources and skips claimed generic controls', () => {
 		const withNothing: AnyPoint[] = [
 			...points(),
-			{ id: 'themeTool', label: 'Theme', type: 'nothing', editors: ['theme'] },
+			{ id: 'themeTool', label: 'Theme', type: 'nothing', controls: ['theme'] },
 		]
-		const entries = paletteAddItemEntries(withNothing, { itemEditors: ['theme', 'status'] })
+		const entries = paletteAddItemEntries(withNothing, { itemControls: ['theme', 'status'] })
 		expect(entries.some((entry) => entry.id === 'tool:themeTool')).toBe(true)
 		// `theme` is claimed 1:1 by the nothing-point → no generic entry.
 		expect(entries.some((entry) => entry.id === 'item:theme')).toBe(false)
@@ -131,8 +131,8 @@ describe('paletteAddItemEntries / paletteDerivedVariants', () => {
 			withNothing
 		)
 		expect(variants.map((variant) => variant.kind)).toEqual(['tool'])
-		expect(variants[0]?.toolId).toBe('themeTool')
-		expect(variants[0]?.editor).toBe('theme')
+		expect(variants[0]?.pointId).toBe('themeTool')
+		expect(variants[0]?.control).toBe('theme')
 	})
 
 	it('expands sources into set variants carrying specs', () => {
@@ -151,9 +151,9 @@ describe('paletteAddItemEntries / paletteDerivedVariants', () => {
 			{
 				id: 'item:commandBox',
 				kind: 'item',
-				editor: 'commandBox',
+				control: 'commandBox',
 				label: 'Command Box',
-				meta: 'Add editor-only item',
+				meta: 'Add control-only item',
 			},
 			points()
 		)

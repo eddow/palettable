@@ -15,13 +15,13 @@ Run: `pnpm --filter @palettable/core test`. Config:
 | `src/palette.test.ts` | `initialValues` / `setMany` validation + batching, `ServerPointDescriptor` round-trip + action rebuild by name (+ nothing-point round-trip), `readSetterValue` (strict coercion: blank/∞ boolean-token → throw), `resolveEditablePoint` / `readActionCan` (functional), `uses` contract, `PaletteWriteError` |
 | `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
 | `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, the core drag engine (`dragStart` origin resolution + whole-toolbar flag, `dragOver` paint/commit per element kind incl. dark-gap no-move + editing-off dark), inline-virtual snapshot round-trip |
-| `src/editors.test.ts` | `familyOfPoint`, `editorChoicesFor` (axis filter, defaults, nothing-point items) |
+| `src/controls.test.ts` | `familyOfPoint`, `controlChoicesFor` (axis filter, defaults, nothing-point items) |
 | `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked, step-aware) + `run` clamping at min/max, `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
 | `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog incl. bounds-aware inc/dec `can`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
 | `src/console.test.ts` | `ConsoleStore` open/close/toggle + add-state + listeners, `consolePointDescriptor` |
-| `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveEditorVariant` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from/stash display helpers |
+| `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveControl` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from/stash display helpers |
 | `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration` |
-| `src/render.test.ts` | Node-only import (no timers), golden render model (byte-identical + JSON round-trip), values/descriptors/editors/keystrokes, virtuals (enum-from key/setter/stash pressed), drawers (recursion + depth bound), version/unknown-point rejection, hydration round-trip, action isolation, config-pinning, import-graph + determinism, value codecs |
+| `src/render.test.ts` | Node-only import (no timers), golden render model (byte-identical + JSON round-trip), values/descriptors/controls/keystrokes, virtuals (enum-from key/setter/stash pressed), drawers (recursion + depth bound), version/unknown-point rejection, hydration round-trip, action isolation, config-pinning, import-graph + determinism, value codecs |
 | `src/context.test.ts` | `ValuesBag` (frozen get, `setTree` batching, per-key notify, lock → `PaletteWriteError`, `asObject`), `NothingPoint` guards + `initialValues`/`setMany` rejection, core registry (`setContext` replace / `removeContext` / root `getBag('')` / `resolveBags` / `subscribeContext` / `evaluateCan` / `subscribeCan` flips-only / `dispose`), `dualSourceValue` + param-array accessors, `buttonPresenter` functional `can` |
 
 Gotchas:
@@ -57,7 +57,7 @@ Run: `pnpm test`. Config: `vitest.config.ts` (`environment: `jsdom`,
 | `tests/smoke.test.ts` | 1 | harness sanity |
 | `tests/component.test.ts` | 1 | testing-library Svelte mount |
 | `tests/palette/keys.test.ts` | 6 | keystroke normalization, event derivation, binding resolution |
-| `tests/palette/palette.test.ts` | 17 | tool resolution, setter/action runners, editor resolution, configurator scope, surface axis, `dragend` clearing, multi-setter divergence, hydrated reactivity (`HydratedBordersProbe`) |
+| `tests/palette/palette.test.ts` | 17 | tool resolution, setter/action runners, control resolution, configurator scope, surface axis, `dragend` clearing, multi-setter divergence, hydrated reactivity (`HydratedBordersProbe`) |
 | `tests/palette/serialization.test.ts` | 19 | `serialize` / `validate` / `hydrate` round-trips, parking persistence + ownership, instance fingerprints |
 | `tests/palette/command-box.test.ts` | 26 | entry builders, model search/filter/score, keyboard, non-runnable `PaletteError` (`CommandBoxEntriesProbe` for reactive entries) |
 | `tests/palette/components.test.ts` | 16 | `paletteRoot`, item drag/inspect, `Ide`, `Parking` independent stack (`PaletteRootProbe`, `PaletteItemDragProbe`, `IdeProbe`, `ParkingProbe`, `ParkingEditorStub`) |
@@ -137,7 +137,7 @@ spec first, core unit anchors second.
   track gaps stay dark while a neighbour TB edge paints. Vanilla passes,
   svelte fails (expected divergence — oracle predates the rule). Core
   anchors: `layout.test.ts` "whole-toolbar drag paints neighbour TB edges"
-  + "startDraggingState derives the whole-toolbar flag".
+  + "derives the whole-toolbar flag at drag-start".
 - `e2e/dark-gap-no-move.spec.ts` (1, conformance): re-organisation happens
   ONLY on a highlighted DZ — hovering dark gap 1 beside dragged tool 0
   leaves the tool order untouched and builds no singleton. Guards the

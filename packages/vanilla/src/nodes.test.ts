@@ -4,8 +4,8 @@ import { NodeRegistry } from './nodes.js'
 describe('NodeRegistry', () => {
 	it('registers and looks up toolbars, items, tracks, and rows by identity', () => {
 		const registry = new NodeRegistry()
-		const toolbar = [{ tool: 'a' }]
-		const item = { tool: 'a' }
+		const toolbar = [{ point: 'a' }]
+		const item = { point: 'a' }
 		const track = [{ space: 1, toolbar }]
 		const bar = document.createElement('div')
 		const wrapper = document.createElement('div')
@@ -28,7 +28,7 @@ describe('NodeRegistry', () => {
 
 	it('deletes single keys and clears everything', () => {
 		const registry = new NodeRegistry()
-		const item = { tool: 'a' }
+		const item = { point: 'a' }
 		const node = document.createElement('div')
 		registry.setItem(item, node)
 		expect(registry.get(item)).toBe(node)
@@ -41,8 +41,8 @@ describe('NodeRegistry', () => {
 
 	it('misses on structural duplicates (identity, not fingerprint)', () => {
 		const registry = new NodeRegistry()
-		const item = { tool: 'a' }
-		const twin = { tool: 'a' }
+		const item = { point: 'a' }
+		const twin = { point: 'a' }
 		const node = document.createElement('div')
 		registry.setItem(item, node)
 		expect(registry.get(twin)).toBe(undefined)

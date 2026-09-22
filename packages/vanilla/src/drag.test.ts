@@ -142,12 +142,12 @@ describe('itemFromAddSelection', () => {
 	it('builds a tool item from a set variant (bare tool id — no =value preset)', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'tool:speed', kind: 'tool', toolId: 'speed', label: 'Speed', meta: '' },
+				source: { id: 'tool:speed', kind: 'tool', pointId: 'speed', label: 'Speed', meta: '' },
 				variant: {
 					id: 'tool:speed:set',
 					kind: 'set',
-					toolId: 'speed',
-					label: 'Speed (editor)',
+					pointId: 'speed',
+					label: 'Speed (control)',
 					meta: '',
 					valueType: 'number',
 					spec: 'speed',
@@ -159,16 +159,16 @@ describe('itemFromAddSelection', () => {
 		)
 		// The draft binds the point and displays the live value — the
 		// inline `setValue` is ignored (no `=value` preset is carried).
-		expect(item).toMatchObject({ tool: 'speed' })
+		expect(item).toMatchObject({ point: 'speed' })
 	})
-	it('builds an editor-only item from an item variant', () => {
+	it('builds a control-only item from an item variant', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'item:status', kind: 'item', editor: 'status', label: 'Status', meta: '' },
+				source: { id: 'item:status', kind: 'item', control: 'status', label: 'Status', meta: '' },
 				variant: {
 					id: 'item:status:item',
 					kind: 'item',
-					editor: 'status',
+					control: 'status',
 					label: 'Status',
 					meta: '',
 				},
@@ -177,17 +177,17 @@ describe('itemFromAddSelection', () => {
 			},
 			points as never
 		)
-		expect(item).toMatchObject({ editor: 'status' })
+		expect(item).toMatchObject({ control: 'status' })
 	})
 	it('returns undefined for mismatched families', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'tool:lamp', kind: 'tool', toolId: 'lamp', label: 'Lamp', meta: '' },
+				source: { id: 'tool:lamp', kind: 'tool', pointId: 'lamp', label: 'Lamp', meta: '' },
 				variant: {
 					id: 'tool:lamp:set',
 					kind: 'set',
-					toolId: 'lamp',
-					label: 'Lamp (editor)',
+					pointId: 'lamp',
+					label: 'Lamp (control)',
 					meta: '',
 					valueType: 'number',
 					spec: 'lamp',

@@ -34,7 +34,7 @@ async function toolOrder(page: import('@playwright/test').Page): Promise<(string
 				),
 			].map((bar) =>
 				[...bar.querySelectorAll(':scope > .toolbar-item')].map(
-					(item) => item.getAttribute('data-tool') ?? item.getAttribute('data-editor')
+					(item) => item.getAttribute('data-point') ?? item.getAttribute('data-control')
 				)
 			)
 		)

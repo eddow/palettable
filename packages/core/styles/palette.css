@@ -41,7 +41,7 @@
 }
 
 /* The item currently being inspected (selected for edition) is highlighted so
- * the configurator in the console reads against the live editor. */
+ * the configurator in the console reads against the live tool. */
 .palette-ide.editing .toolbar-item[data-inspected='true'] {
 	box-shadow:
 		0 0 0 1px rgba(96, 165, 250, 0.72),
@@ -703,24 +703,41 @@
 	padding-bottom: 0.25rem;
 }
 
-/* Trigger keeps the toolbar-outer half: square the joint side so the pair
- * reads as one attached group-field. */
-.palettable-drawer.from-left > .palettable-drawer__trigger {
+/* Trigger keeps the toolbar-outer half — but only while open (attached
+ * group-field), except hover-open drawers which stay attached at rest too
+ * (`.is-open-hover`): their popup appears on hover with no click state
+ * change, so the trigger must already read as attached. Click/press
+ * drawers at rest (`aria-expanded="false"`, popup hidden) are standalone
+ * squares with all 4 corners rounded. Gated with `:has` on the trigger
+ * state so no JS class is needed. */
+.palettable-drawer.from-left:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	> .palettable-drawer__trigger,
+.palettable-drawer.from-left:has(> .palettable-drawer__trigger.is-open-hover)
+	> .palettable-drawer__trigger {
 	border-top-right-radius: 0;
 	border-bottom-right-radius: 0;
 }
 
-.palettable-drawer.from-right > .palettable-drawer__trigger {
+.palettable-drawer.from-right:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	> .palettable-drawer__trigger,
+.palettable-drawer.from-right:has(> .palettable-drawer__trigger.is-open-hover)
+	> .palettable-drawer__trigger {
 	border-top-left-radius: 0;
 	border-bottom-left-radius: 0;
 }
 
-.palettable-drawer.from-top > .palettable-drawer__trigger {
+.palettable-drawer.from-top:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	> .palettable-drawer__trigger,
+.palettable-drawer.from-top:has(> .palettable-drawer__trigger.is-open-hover)
+	> .palettable-drawer__trigger {
 	border-bottom-left-radius: 0;
 	border-bottom-right-radius: 0;
 }
 
-.palettable-drawer.from-bottom > .palettable-drawer__trigger {
+.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	> .palettable-drawer__trigger,
+.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger.is-open-hover)
+	> .palettable-drawer__trigger {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 }
@@ -806,6 +823,35 @@
 	}
 }
 
+/* Drawer item-spaces are live DZs in edit mode (same session path as
+ * border/parking bars): they stretch across the popup's child axis and
+ * highlight identically. Hidden outside edit mode so the popup reads as
+ * plain stacked toolbars at rest. */
 .palettable-drawer__popup .toolbar-item-space {
+	align-self: stretch;
+}
+
+.palette-ide:not(.editing) .palettable-drawer__popup .toolbar-item-space {
 	display: none;
+}
+
+/* Empty drawer toolbar: the single `:only-child` DZ stays visible (not
+ * just when highlighted) as a square drop target at toolbar scale —
+ * larger than the standard `--palette-dz-size` strip. */
+.palettable-drawer__popup .toolbar:has(> .toolbar-item-space:only-child) {
+	min-width: var(--palette-toolbar-perpendicular);
+	min-height: var(--palette-toolbar-perpendicular);
+}
+
+.palettable-drawer__popup .toolbar-item-space.toolbar-drop-zone:only-child:not(.highlighted) {
+	min-width: calc(var(--palette-toolbar-perpendicular) - 0.5rem);
+	min-height: calc(var(--palette-toolbar-perpendicular) - 0.5rem);
+	flex: 1 1 auto;
+	border-radius: 6px;
+	border: 1px dashed rgba(148, 163, 184, 0.5);
+}
+
+.palettable-drawer__popup
+	.toolbar-item-space.toolbar-drop-zone:only-child:not(.highlighted)::after {
+	content: '';
 }

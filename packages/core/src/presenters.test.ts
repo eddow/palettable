@@ -1,21 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { ValuesBag } from './context.js'
-import type { EditorRegistry } from './editors.js'
+import type { ControlRegistry } from './controls.js'
 import type { SurfaceContext } from './layout.js'
 import {
 	axisForRegion,
 	buttonPresenter,
-	configuratorEditorCleanup,
+	configuratorControlCleanup,
 	configuratorModel,
 	configuratorTextPatch,
 	configuratorTonePatch,
 	drawerChildAxis,
 	drawerChildRegion,
+	drawerOpenOf,
 	enumFromDisplayKey,
 	headMeta,
 	headTooltip,
 	isPresenterDrawerItem,
-	resolveEditorVariant,
+	resolveControl,
 	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
@@ -27,7 +28,7 @@ import {
 
 const surface: SurfaceContext = { axis: 'horizontal', region: 'top' }
 
-const registry: EditorRegistry = {
+const registry: ControlRegistry = {
 	boolean: {
 		toggle: { id: 'toggle', label: 'Toggle', families: ['boolean'], compact: true },
 	},
@@ -60,48 +61,48 @@ describe('axisForRegion / drawer rules', () => {
 	})
 })
 
-describe('resolveEditorVariant', () => {
+describe('resolveControl', () => {
 	it('follows explicit → default → first-eligible', () => {
 		const point = { id: 'n', label: 'N', type: 'number' } as const
-		expect(resolveEditorVariant(point, surface, registry, { number: 'stepper' }, undefined)).toBe(
+		expect(resolveControl(point, surface, registry, { number: 'stepper' }, undefined)).toBe(
 			'stepper'
 		)
-		expect(resolveEditorVariant(point, surface, registry, undefined, undefined)).toBe('slider')
-		expect(resolveEditorVariant(point, surface, registry, undefined, 'stepper')).toBe('stepper')
+		expect(resolveControl(point, surface, registry, undefined, undefined)).toBe('slider')
+		expect(resolveControl(point, surface, registry, undefined, 'stepper')).toBe('stepper')
 	})
 
-	it('falls back when the explicit editor is ineligible for the surface', () => {
+	it('falls back when the explicit control is ineligible for the surface', () => {
 		const point = { id: 'n', label: 'N', type: 'number' } as const
 		const vertical: SurfaceContext = { axis: 'vertical', region: 'left' }
 		// `slider` is horizontal-only → compact `stepper` wins.
-		expect(resolveEditorVariant(point, vertical, registry, undefined, 'slider')).toBe('stepper')
+		expect(resolveControl(point, vertical, registry, undefined, 'slider')).toBe('stepper')
 	})
 
-	it('returns undefined with no eligible variant', () => {
-		expect(resolveEditorVariant(undefined, surface, {}, undefined, undefined)).toBeUndefined()
+	it('returns undefined with no eligible control', () => {
+		expect(resolveControl(undefined, surface, {}, undefined, undefined)).toBeUndefined()
 	})
 })
 
 describe('headMeta / headTooltip', () => {
 	it('reads config with defaults', () => {
-		expect(headMeta({ tool: 'a' })).toMatchObject({ label: 'a', tone: 'neutral' })
+		expect(headMeta({ point: 'a' })).toMatchObject({ label: 'a', tone: 'neutral' })
 		expect(
-			headMeta({ tool: 'a', config: { label: 'A', tone: 'accent', icon: 'x', hint: 'h' } })
+			headMeta({ point: 'a', config: { label: 'A', tone: 'accent', icon: 'x', hint: 'h' } })
 		).toMatchObject({ label: 'A', tone: 'accent', icon: 'x', hint: 'h' })
-		expect(headTooltip({ tool: 'a' }, 'hint')).toBe('a · hint')
+		expect(headTooltip({ point: 'a' }, 'hint')).toBe('a · hint')
 	})
 })
 
 describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 	it('builds action view-models with run specs', () => {
 		const view = buttonPresenter(
-			{ tool: 'save' },
+			{ point: 'save' },
 			{ point: { id: 'save', label: 'Save', type: 'action', run: () => {} }, value: undefined },
 			'save'
 		)
 		expect(view).toMatchObject({ label: 'save', can: true, run: 'save' })
 		const disabled = buttonPresenter(
-			{ tool: 'save' },
+			{ point: 'save' },
 			{
 				point: { id: 'save', label: 'Save', type: 'action', run: () => {}, can: () => false },
 				value: undefined,
@@ -113,26 +114,62 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 
 	it('builds toggle view-models with toggle specs', () => {
 		const on = togglePresenter(
-			{ tool: 'flag' },
+			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: true }
 		)
 		expect(on).toMatchObject({ pressed: true, toggle: 'flag=false' })
 		const off = togglePresenter(
-			{ tool: 'flag' },
+			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: false }
 		)
 		expect(off.toggle).toBe('flag=true')
 		const skeleton = togglePresenter(
-			{ tool: 'flag' },
+			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: undefined }
 		)
 		expect(skeleton.pressed).toBeUndefined()
 	})
+	it('disables a context toggle on skeleton, enables it on hydration', () => {
+		const point = { id: 'shipShields', label: 'Shields', type: 'boolean' as const, uses: ['ship'] }
+		const bag = new ValuesBag<Record<string, unknown>>()
+		const skeleton = togglePresenter(
+			{ point: 'shipShields' },
+			{ point, value: undefined, bags: [bag] }
+		)
+		expect(skeleton.can).toBe(false)
+		const hydrated = togglePresenter({ point: 'shipShields' }, { point, value: true, bags: [bag] })
+		expect(hydrated.can).toBe(true)
+	})
 
+	it('keeps root-only valued tools enabled on skeleton', () => {
+		const point = { id: 'flag', label: 'Flag', type: 'boolean' as const }
+		expect(togglePresenter({ point: 'flag' }, { point, value: undefined }).can).toBe(true)
+	})
+
+	it('lets an explicit functional can override the skeleton default', () => {
+		const point = {
+			id: 'shipShields',
+			label: 'Shields',
+			type: 'boolean' as const,
+			uses: ['ship'],
+			can: () => true,
+		}
+		expect(togglePresenter({ point: 'shipShields' }, { point, value: undefined }).can).toBe(true)
+		const denied = {
+			id: 'shipShields',
+			label: 'Shields',
+			type: 'boolean' as const,
+			uses: ['ship'],
+			can: () => false,
+		}
+		expect(togglePresenter({ point: 'shipShields' }, { point: denied, value: true }).can).toBe(
+			false
+		)
+	})
 	it('builds status view-models from context bags', () => {
 		const bag = new ValuesBag({ fileName: 'a.ts' })
 		const bound = statusPresenter(
-			{ tool: 'missionTime', editor: 'status' },
+			{ point: 'missionTime', control: 'status' },
 			{ point: undefined, value: undefined, bags: [bag] },
 			surface
 		)
@@ -141,14 +178,14 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		expect(bound.direction).toBe('horizontal')
 		expect(bound.region).toBe('top')
 		const absent = statusPresenter(
-			{ tool: 'missionTime', editor: 'status' },
+			{ point: 'missionTime', control: 'status' },
 			{ point: undefined, value: undefined, bags: [undefined] },
 			surface
 		)
 		expect(absent.value).toBe('missionTime')
 		expect(absent.can).toBe(false)
 		const named = statusPresenter(
-			{ tool: 'shipStatus', editor: 'status', config: { statusKey: 'shipName' } },
+			{ point: 'shipStatus', control: 'status', config: { statusKey: 'shipName' } },
 			{
 				point: undefined,
 				value: undefined,
@@ -159,14 +196,14 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		expect(named.value).toBe('🚀 Aurora')
 		expect(named.can).toBe(true)
 		const namedAbsent = statusPresenter(
-			{ tool: 'shipStatus', editor: 'status', config: { statusKey: 'shipName' } },
+			{ point: 'shipStatus', control: 'status', config: { statusKey: 'shipName' } },
 			{ point: undefined, value: undefined, bags: [new ValuesBag({ shipId: 'aurora' })] },
 			surface
 		)
 		expect(namedAbsent.value).toBe('shipStatus')
 		expect(namedAbsent.can).toBe(true)
 		const vertical = statusPresenter(
-			{ tool: 'missionTime', editor: 'status' },
+			{ point: 'missionTime', control: 'status' },
 			{ point: undefined, value: undefined, bags: [bag] },
 			{ axis: 'vertical', region: 'left' }
 		)
@@ -186,15 +223,18 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 			],
 		} as const
 		expect(
-			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'light' })
+			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'light' })
 		).toMatchObject({ value: 'light', valueIcon: '☀️', cycle: 'theme=dark' })
 		expect(
-			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'dark' })
+			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'dark' })
 		).toMatchObject({ value: 'dark', valueIcon: '🌙', cycle: 'theme=system' })
 		expect(
-			themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: 'system' })
+			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'system' })
 		).toMatchObject({ value: 'system', valueIcon: '💻', cycle: 'theme=light' })
-		const skeleton = themePresenter({ tool: 'theme', editor: 'theme' }, { point, value: undefined })
+		const skeleton = themePresenter(
+			{ point: 'theme', control: 'theme' },
+			{ point, value: undefined }
+		)
 		expect(skeleton.value).toBeUndefined()
 		expect(skeleton.cycle).toBe('theme=light')
 	})
@@ -203,7 +243,7 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 describe('selectPresenter / sliderPresenter', () => {
 	it('resolves current icon/value + options with select specs', () => {
 		const view = selectPresenter(
-			{ tool: 'theme' },
+			{ point: 'theme' },
 			{
 				point: {
 					id: 'theme',
@@ -225,7 +265,7 @@ describe('selectPresenter / sliderPresenter', () => {
 		expect(view.options[1]?.can).toBe(false)
 		expect(view.select('light')).toBe('theme=light')
 		const skeleton = selectPresenter(
-			{ tool: 'theme' },
+			{ point: 'theme' },
 			{
 				point: {
 					id: 'theme',
@@ -239,7 +279,7 @@ describe('selectPresenter / sliderPresenter', () => {
 		)
 		expect(skeleton.value).toBeUndefined()
 		const nonString = selectPresenter(
-			{ tool: 'theme' },
+			{ point: 'theme' },
 			{
 				point: {
 					id: 'theme',
@@ -256,7 +296,7 @@ describe('selectPresenter / sliderPresenter', () => {
 
 	it('resolves bounds with defaults', () => {
 		const view = sliderPresenter(
-			{ tool: 'n' },
+			{ point: 'n' },
 			{
 				point: {
 					id: 'n',
@@ -269,26 +309,54 @@ describe('selectPresenter / sliderPresenter', () => {
 			surface
 		)
 		expect(view).toMatchObject({ min: 1, max: 10, step: 2, value: 5 })
-		const bare = sliderPresenter({ tool: 'n' }, { point: undefined, value: undefined }, surface)
+		const bare = sliderPresenter({ point: 'n' }, { point: undefined, value: undefined }, surface)
 		expect(bare).toMatchObject({ min: 0, max: 100, step: 1, value: undefined })
 		const nonNumber = sliderPresenter(
-			{ tool: 'n' },
+			{ point: 'n' },
 			{ point: { id: 'n', label: 'N', type: 'number' }, value: 'x' },
 			surface
 		)
 		expect(nonNumber.value).toBeUndefined()
 	})
 
+	it('disables a context slider on skeleton, enables it on hydration', () => {
+		const point = { id: 'shipPower', label: 'Reactor', type: 'number' as const, uses: ['ship'] }
+		const bag = new ValuesBag<Record<string, unknown>>()
+		expect(
+			sliderPresenter({ point: 'shipPower' }, { point, value: undefined, bags: [bag] }, surface).can
+		).toBe(false)
+		expect(
+			sliderPresenter({ point: 'shipPower' }, { point, value: 3, bags: [bag] }, surface).can
+		).toBe(true)
+	})
+
+	it('disables a context select on skeleton, enables it on hydration', () => {
+		const point = {
+			id: 'shipMode',
+			label: 'Mode',
+			type: 'enum' as const,
+			uses: ['ship'],
+			constraints: { options: [{ value: 'a' }, { value: 'b' }] },
+		}
+		const bag = new ValuesBag<Record<string, unknown>>()
+		expect(
+			selectPresenter({ point: 'shipMode' }, { point, value: undefined, bags: [bag] }, surface).can
+		).toBe(false)
+		expect(
+			selectPresenter({ point: 'shipMode' }, { point, value: 'a', bags: [bag] }, surface).can
+		).toBe(true)
+	})
+
 	it('exposes a formatted value readout', () => {
 		const view = sliderPresenter(
-			{ tool: 'n' },
+			{ point: 'n' },
 			{ point: { id: 'n', label: 'N', type: 'number' }, value: 1.5 },
 			surface
 		)
 		expect(view.text).toBe('1.5')
 		expect(view.showValue).toBe(true)
 		const skeleton = sliderPresenter(
-			{ tool: 'n' },
+			{ point: 'n' },
 			{ point: { id: 'n', label: 'N', type: 'number' }, value: undefined },
 			surface
 		)
@@ -298,19 +366,19 @@ describe('selectPresenter / sliderPresenter', () => {
 	it('hides the slider readout on `config.showValue === false`', () => {
 		const point = { id: 'n', label: 'N', type: 'number' as const }
 		expect(
-			sliderPresenter({ tool: 'n', config: { showValue: false } }, { point, value: 1 }, surface)
+			sliderPresenter({ point: 'n', config: { showValue: false } }, { point, value: 1 }, surface)
 				.showValue
 		).toBe(false)
 		expect(
 			sliderPresenter(
-				{ tool: 'n', editor: 'drawerSlider', config: { showValue: false } },
+				{ point: 'n', control: 'drawerSlider', config: { showValue: false } },
 				{ point, value: 1 },
 				surface
 			).showValue
 		).toBe(false)
 		// Any other value (including absent) keeps the readout.
 		expect(
-			sliderPresenter({ tool: 'n', config: { showValue: true } }, { point, value: 1 }, surface)
+			sliderPresenter({ point: 'n', config: { showValue: true } }, { point, value: 1 }, surface)
 				.showValue
 		).toBe(true)
 	})
@@ -318,11 +386,11 @@ describe('selectPresenter / sliderPresenter', () => {
 	it('defaults the range layout to inline on both axes', () => {
 		const point = { id: 'n', label: 'N', type: 'number' as const }
 		expect(
-			sliderPresenter({ tool: 'n' }, { point, value: 1 }, { axis: 'horizontal', region: 'top' })
+			sliderPresenter({ point: 'n' }, { point, value: 1 }, { axis: 'horizontal', region: 'top' })
 				.variant
 		).toBe('inline')
 		expect(
-			sliderPresenter({ tool: 'n' }, { point, value: 1 }, { axis: 'vertical', region: 'left' })
+			sliderPresenter({ point: 'n' }, { point, value: 1 }, { axis: 'vertical', region: 'left' })
 				.variant
 		).toBe('inline')
 	})
@@ -331,7 +399,7 @@ describe('selectPresenter / sliderPresenter', () => {
 		const point = { id: 'n', label: 'N', type: 'number' as const }
 		const axes = (item: Record<string, unknown>, axis: 'horizontal' | 'vertical') => {
 			const view = sliderPresenter(
-				{ tool: 'n', ...item },
+				{ point: 'n', ...item },
 				{ point, value: 1 },
 				{
 					axis,
@@ -344,38 +412,38 @@ describe('selectPresenter / sliderPresenter', () => {
 		expect(axes({}, 'horizontal')).toEqual(['inline', 'horizontal'])
 		expect(axes({}, 'vertical')).toEqual(['inline', 'vertical'])
 		// Drawer uses the perpendicular axis, so it never looks inline.
-		expect(axes({ editor: 'drawerSlider' }, 'horizontal')).toEqual(['drawer', 'vertical'])
-		expect(axes({ editor: 'drawerSlider' }, 'vertical')).toEqual(['drawer', 'horizontal'])
+		expect(axes({ control: 'drawerSlider' }, 'horizontal')).toEqual(['drawer', 'vertical'])
+		expect(axes({ control: 'drawerSlider' }, 'vertical')).toEqual(['drawer', 'horizontal'])
 	})
 
-	it('honours the drawerSlider editor and an explicit sliderVariant config', () => {
+	it('honours the drawerSlider control and an explicit sliderVariant config', () => {
 		const point = { id: 'n', label: 'N', type: 'number' as const }
 		expect(
 			sliderPresenter(
-				{ tool: 'n', editor: 'drawerSlider' },
+				{ point: 'n', control: 'drawerSlider' },
 				{ point, value: 1 },
 				{ axis: 'horizontal', region: 'top' }
 			).variant
 		).toBe('drawer')
 		expect(
 			sliderPresenter(
-				{ tool: 'n', config: { sliderVariant: 'drawer' } },
+				{ point: 'n', config: { sliderVariant: 'drawer' } },
 				{ point, value: 1 },
 				{ axis: 'horizontal', region: 'top' }
 			).variant
 		).toBe('drawer')
-		// The editor id is the configurator's own choice, so it wins over a
+		// The control id is the configurator's own choice, so it wins over a
 		// stale `sliderVariant` left in config.
 		expect(
 			sliderPresenter(
-				{ tool: 'n', editor: 'slider', config: { sliderVariant: 'drawer' } },
+				{ point: 'n', control: 'slider', config: { sliderVariant: 'drawer' } },
 				{ point, value: 1 },
 				{ axis: 'horizontal', region: 'top' }
 			).variant
 		).toBe('inline')
 		expect(
 			sliderPresenter(
-				{ tool: 'n', editor: 'drawerSlider', config: { sliderVariant: 'inline' } },
+				{ point: 'n', control: 'drawerSlider', config: { sliderVariant: 'inline' } },
 				{ point, value: 1 },
 				{ axis: 'horizontal', region: 'top' }
 			).variant
@@ -384,7 +452,7 @@ describe('selectPresenter / sliderPresenter', () => {
 
 	it('splits select option icon/label for axis-aware rendering', () => {
 		const view = selectPresenter(
-			{ tool: 'theme' },
+			{ point: 'theme' },
 			{
 				point: {
 					id: 'theme',
@@ -406,9 +474,9 @@ describe('selectPresenter / sliderPresenter', () => {
 		})
 		// No icon declared → icon is undefined, label falls back to the value.
 		expect(view.options[1]).toMatchObject({ value: 'void', icon: undefined, label: 'void' })
-		// `choiceDisplay: 'icon'` hides the label; `'text'` hides the icon.
+		// `showText: false` hides the label (icon-only).
 		const iconOnly = selectPresenter(
-			{ tool: 'theme', config: { choiceDisplay: 'icon' } },
+			{ point: 'theme', config: { showText: false } },
 			{
 				point: {
 					id: 'theme',
@@ -421,8 +489,9 @@ describe('selectPresenter / sliderPresenter', () => {
 			surface
 		)
 		expect(iconOnly.options[0]).toMatchObject({ icon: '🔴', label: undefined })
-		const textOnly = selectPresenter(
-			{ tool: 'theme', config: { choiceDisplay: 'text' } },
+		// Shown text keeps icon + label.
+		const textShown = selectPresenter(
+			{ point: 'theme' },
 			{
 				point: {
 					id: 'theme',
@@ -434,12 +503,12 @@ describe('selectPresenter / sliderPresenter', () => {
 			},
 			surface
 		)
-		expect(textOnly.options[0]).toMatchObject({ icon: undefined, label: 'Mars' })
+		expect(textShown.options[0]).toMatchObject({ icon: '🔴', label: 'Mars' })
 	})
 
 	it('reports the region so overlays can pick their side', () => {
 		const view = selectPresenter(
-			{ tool: 'theme' },
+			{ point: 'theme' },
 			{ point: { id: 'theme', label: 'T', type: 'enum' }, value: 'x' },
 			{ axis: 'vertical', region: 'left' }
 		)
@@ -449,35 +518,38 @@ describe('selectPresenter / sliderPresenter', () => {
 
 	it('shows segmented labels by default, hides them on `config.showText === false`', () => {
 		const point = { id: 'theme', label: 'T', type: 'enum' as const }
-		expect(selectPresenter({ tool: 'theme' }, { point, value: 'x' }, surface).showText).toBe(true)
+		expect(selectPresenter({ point: 'theme' }, { point, value: 'x' }, surface).showText).toBe(true)
 		expect(
 			selectPresenter(
-				{ tool: 'theme', config: { showText: false } },
+				{ point: 'theme', config: { showText: false } },
 				{ point, value: 'x' },
 				surface
 			).showText
 		).toBe(false)
 		expect(
-			selectPresenter({ tool: 'theme', config: { showText: true } }, { point, value: 'x' }, surface)
-				.showText
+			selectPresenter(
+				{ point: 'theme', config: { showText: true } },
+				{ point, value: 'x' },
+				surface
+			).showText
 		).toBe(true)
 	})
 
 	it('hides the select filter by default, shows it on `config.showFilter === true`', () => {
 		const point = { id: 'theme', label: 'T', type: 'enum' as const }
-		expect(selectPresenter({ tool: 'theme' }, { point, value: 'x' }, surface).showFilter).toBe(
+		expect(selectPresenter({ point: 'theme' }, { point, value: 'x' }, surface).showFilter).toBe(
 			false
 		)
 		expect(
 			selectPresenter(
-				{ tool: 'theme', config: { showFilter: true } },
+				{ point: 'theme', config: { showFilter: true } },
 				{ point, value: 'x' },
 				surface
 			).showFilter
 		).toBe(true)
 		expect(
 			selectPresenter(
-				{ tool: 'theme', config: { showFilter: false } },
+				{ point: 'theme', config: { showFilter: false } },
 				{ point, value: 'x' },
 				surface
 			).showFilter
@@ -496,21 +568,21 @@ describe('selectPresenter / sliderPresenter', () => {
 				],
 			},
 		}
-		const view = selectPresenter({ tool: 'theme' }, { point, value: 'mars' }, surface)
+		const view = selectPresenter({ point: 'theme' }, { point, value: 'mars' }, surface)
 		expect(view.current).toMatchObject({ value: 'mars', icon: '🔴', label: 'Mars' })
 		expect(view.toolIcon).toBeUndefined()
 		expect(view.icon).toBe('🔴')
 		expect(
-			selectPresenter({ tool: 'theme', config: { icon: '🪐' } }, { point, value: 'mars' }, surface)
+			selectPresenter({ point: 'theme', config: { icon: '🪐' } }, { point, value: 'mars' }, surface)
 				.toolIcon
 		).toBe('🪐')
 		expect(view.listOptions).toEqual([
 			{ value: 'mars', icon: '🔴', label: 'Mars', can: true },
 			{ value: 'void', icon: undefined, label: 'Void', can: true },
 		])
-		// The list ignores `showText` / `choiceDisplay`: rows stay full text.
+		// The list ignores `showText`: rows stay full text.
 		const hidden = selectPresenter(
-			{ tool: 'theme', config: { showText: false, choiceDisplay: 'icon' } },
+			{ point: 'theme', config: { showText: false } },
 			{ point, value: 'mars' },
 			surface
 		)
@@ -518,37 +590,31 @@ describe('selectPresenter / sliderPresenter', () => {
 		expect(hidden.current).toMatchObject({ value: 'mars', icon: '🔴', label: 'Mars' })
 		// Unknown value / skeleton → no current.
 		expect(
-			selectPresenter({ tool: 'theme' }, { point, value: 'nope' }, surface).current
+			selectPresenter({ point: 'theme' }, { point, value: 'nope' }, surface).current
 		).toBeUndefined()
 		expect(
-			selectPresenter({ tool: 'theme' }, { point, value: undefined }, surface).current
+			selectPresenter({ point: 'theme' }, { point, value: undefined }, surface).current
 		).toBeUndefined()
 	})
 
-	it('derives the closed select-box label from showText + display mode', () => {
+	it('derives the closed select-box label from showText', () => {
 		const point = {
 			id: 'theme',
 			label: 'T',
 			type: 'enum' as const,
 			constraints: { options: [{ value: 'mars', label: 'Mars', icon: '🔴' }] },
 		}
-		const shown = selectPresenter({ tool: 'theme' }, { point, value: 'mars' }, surface)
+		const shown = selectPresenter({ point: 'theme' }, { point, value: 'mars' }, surface)
 		expect(selectClosedLabel(shown)).toBe('Mars')
 		const hidden = selectPresenter(
-			{ tool: 'theme', config: { showText: false } },
+			{ point: 'theme', config: { showText: false } },
 			{ point, value: 'mars' },
 			surface
 		)
 		expect(selectClosedLabel(hidden)).toBeUndefined()
-		const iconMode = selectPresenter(
-			{ tool: 'theme', config: { choiceDisplay: 'icon' } },
-			{ point, value: 'mars' },
-			surface
-		)
-		expect(selectClosedLabel(iconMode)).toBeUndefined()
 		// Icon-less option keeps its label so the trigger is never empty.
 		const bare = selectPresenter(
-			{ tool: 'theme', config: { showText: false } },
+			{ point: 'theme', config: { showText: false } },
 			{
 				point: {
 					id: 'theme',
@@ -567,37 +633,45 @@ describe('selectPresenter / sliderPresenter', () => {
 
 describe('configuratorModel + patches', () => {
 	it('builds pure configurator view-models', () => {
-		expect(configuratorModel({ tool: 'a', editor: 'toggle' })).toMatchObject({
-			editor: 'toggle',
+		expect(configuratorModel({ point: 'a', control: 'toggle' })).toMatchObject({
+			control: 'toggle',
 			removable: true,
 		})
 		expect(configuratorTextPatch('label', 'A')).toEqual({ label: 'A' })
 		expect(configuratorTonePatch('accent')).toEqual({ tone: 'accent' })
 		expect(configuratorTonePatch('x')).toEqual({ tone: 'neutral' })
-		expect(configuratorEditorCleanup('select')).toEqual(['showValue'])
-		expect(configuratorEditorCleanup('segmented')).toEqual(['showValue', 'showFilter'])
-		expect(configuratorEditorCleanup('slider')).toEqual([
-			'values',
-			'keywords',
-			'choiceDisplay',
-			'showText',
-			'showFilter',
-		])
-		expect(configuratorEditorCleanup('drawerSlider')).toEqual([
-			'values',
-			'keywords',
-			'choiceDisplay',
-			'showText',
-			'showFilter',
-		])
-		expect(configuratorEditorCleanup('button')).toEqual([
-			'values',
-			'keywords',
-			'choiceDisplay',
+		expect(configuratorControlCleanup('select')).toEqual(['showValue'])
+		expect(configuratorControlCleanup('segmented')).toEqual(['showValue', 'showFilter'])
+		expect(configuratorControlCleanup('slider')).toEqual(['showText', 'showFilter'])
+		expect(configuratorControlCleanup('drawerSlider')).toEqual(['showText', 'showFilter'])
+		expect(configuratorControlCleanup('button')).toEqual(['showValue', 'showText', 'showFilter'])
+		expect(configuratorControlCleanup('drawer')).toEqual([
 			'showValue',
 			'showText',
 			'showFilter',
+			'sliderVariant',
+			'statusKey',
 		])
+		expect(configuratorControlCleanup('status')).toEqual([
+			'showValue',
+			'showText',
+			'showFilter',
+			'sliderVariant',
+			'open',
+		])
+	})
+
+	it('reads drawer open with default', () => {
+		expect(drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [] })).toBe('click')
+		expect(
+			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'hover' } })
+		).toBe('hover')
+		expect(
+			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'press' } })
+		).toBe('press')
+		expect(
+			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'nope' } })
+		).toBe('click')
 	})
 })
 
@@ -618,7 +692,7 @@ describe('enum-from / stash display helpers', () => {
 	})
 
 	it('detects drawer items', () => {
-		expect(isPresenterDrawerItem({ tool: 'drawer', editor: 'drawer', toolbar: [] })).toBe(true)
-		expect(isPresenterDrawerItem({ tool: 'a' })).toBe(false)
+		expect(isPresenterDrawerItem({ point: 'drawer', control: 'drawer', toolbar: [] })).toBe(true)
+		expect(isPresenterDrawerItem({ point: 'a' })).toBe(false)
 	})
 })

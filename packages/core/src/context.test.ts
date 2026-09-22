@@ -167,6 +167,42 @@ describe('PaletteCore context registry', () => {
 		expect(() => core.evaluateCan('missing')).toThrow(PaletteError)
 	})
 
+	it('evaluateCan disables a context valued point on skeleton (no explicit can)', () => {
+		const core = new PaletteCore([
+			{ id: 'shipShields', label: 'Shields', type: 'boolean', uses: ['ship'] },
+			{ id: 'rootFlag', label: 'Root flag', type: 'boolean' },
+		])
+		const bag = new ValuesBag<Record<string, unknown>>()
+		core.setContext('ship', bag)
+		// Context tool, no value anywhere → disabled.
+		expect(core.evaluateCan('shipShields')).toBe(false)
+		// Root-only tool stays enabled (consumer hydrates the root store).
+		expect(core.evaluateCan('rootFlag')).toBe(true)
+		bag.set('shipShields', true)
+		expect(core.evaluateCan('shipShields')).toBe(true)
+		bag.set('shipShields', undefined)
+		expect(core.evaluateCan('shipShields')).toBe(false)
+	})
+
+	it('subscribeCan fires on skeleton flips for context valued points', () => {
+		const core = new PaletteCore([
+			{ id: 'shipShields', label: 'Shields', type: 'boolean', uses: ['ship'] },
+		])
+		const flips: Array<readonly [string, boolean]> = []
+		core.subscribeCan((id, can) => {
+			flips.push([id, can] as const)
+		})
+		const bag = new ValuesBag<Record<string, unknown>>()
+		core.setContext('ship', bag)
+		bag.set('shipShields', true)
+		expect(flips).toEqual([['shipShields', true]])
+		bag.set('shipShields', undefined)
+		expect(flips).toEqual([
+			['shipShields', true],
+			['shipShields', false],
+		])
+	})
+
 	it('subscribeCan fires only on flips (no render storms)', () => {
 		const core = new PaletteCore([
 			{
@@ -230,7 +266,7 @@ describe('context-display resolvers', () => {
 
 	it('buttonPresenter evaluates functional can against bound bags', () => {
 		const view = buttonPresenter(
-			{ tool: 'save' },
+			{ point: 'save' },
 			{
 				point: {
 					id: 'save',

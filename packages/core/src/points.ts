@@ -8,7 +8,7 @@
  * Consumer-owned defaults live outside core (e.g. demo `setMany`).
  */
 import type { IconToken } from './identifiers.js'
-import type { EnumOption, PointType, TypeConstraints } from './type.js'
+import type { PointType, TypeConstraints } from './type.js'
 
 /**
  * Root context name — the core-owned bag (`PaletteCore.values`).
@@ -68,12 +68,8 @@ export type ValuedPoint<K extends PointType = Exclude<PointType, 'action' | 'not
 	}
 
 /** Narrow helpers for the built-ins (docs + narrowing; custom types use `ValuedPoint<K>`). */
-export type BooleanPoint = ValuedPoint<'boolean'>
 export type NumberPoint = ValuedPoint<'number'>
 export type StringPoint = ValuedPoint<'string'>
-export type EnumPoint<T extends string = string> = Omit<ValuedPoint<'enum'>, 'constraints'> & {
-	readonly constraints: { readonly options: readonly EnumOption<T>[] }
-}
 
 /** Any valued point (excludes `'action'` / `'nothing'`). */
 export type AnyValuedPoint = ValuedPoint<Exclude<PointType, 'action' | 'nothing'>>
@@ -100,19 +96,16 @@ export type NothingPoint = PointBase<'nothing'> & {
 	 */
 	readonly options?: readonly import('./type.js').EnumOption[]
 	/**
-	 * Allowed editor ids for this point (1:1 binding — e.g. `theme`
+	 * Allowed control ids for this point (1:1 binding — e.g. `theme`
 	 * allows `['theme']`, a drawer point allows `['drawer']`). Restricts
-	 * `editorChoicesFor` / `resolveEditorVariant` to this subset of the
-	 * `item` family. Omitted = all `item`-family editors (legacy).
+	 * `controlChoicesFor` / `resolveControl` to this subset of the
+	 * `item` family. Omitted = all `item`-family controls (legacy).
 	 */
-	readonly editors?: readonly string[]
+	readonly controls?: readonly string[]
 }
 
 /** Any point the core accepts. */
 export type AnyPoint = ActionPoint | AnyValuedPoint | NothingPoint
-
-/** Points map — heterogeneous by design (`Record<string, AnyPoint>`). */
-export type PointsMap = Record<string, AnyPoint>
 
 /** Type guards (null-safe; valued = any non-action, non-nothing type). */
 export function isActionPoint(point: AnyPoint | null | undefined): point is ActionPoint {

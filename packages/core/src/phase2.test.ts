@@ -4,7 +4,7 @@ import {
 	actualTrackSpaceAt,
 	type Border,
 	type Borders,
-	canonicalItemTool,
+	canonicalItemPoint,
 	clampUnit,
 	findOwnershipViolations,
 	insertToolbar,
@@ -34,7 +34,7 @@ describe('clampUnit', () => {
 
 describe('actualTrackSpaceAt', () => {
 	it('reads stored spaces and derives the trailing remainder', () => {
-		const track = trackOf([{ tool: 'a' }], [{ tool: 'b' }])
+		const track = trackOf([{ point: 'a' }], [{ point: 'b' }])
 		track[0]!.space = 0.2
 		track[1]!.space = 0.3
 		expect(actualTrackSpaceAt(track, 0)).toBeCloseTo(0.2)
@@ -44,7 +44,7 @@ describe('actualTrackSpaceAt', () => {
 	})
 
 	it('clamps stored spaces before deriving the remainder', () => {
-		const track = trackOf([{ tool: 'a' }])
+		const track = trackOf([{ point: 'a' }])
 		track[0]!.space = 2
 		expect(actualTrackSpaceAt(track, 0)).toBe(1)
 		expect(actualTrackSpaceAt(track, 1)).toBe(0)
@@ -53,8 +53,8 @@ describe('actualTrackSpaceAt', () => {
 
 describe('removeToolbar / removeEmptyTrack / removeParkedToolbar', () => {
 	it('removes a toolbar and merges surrounding spacing', () => {
-		const a: Toolbar = [{ tool: 'a' }, { tool: 'b' }]
-		const b: Toolbar = [{ tool: 'c' }]
+		const a: Toolbar = [{ point: 'a' }, { point: 'b' }]
+		const b: Toolbar = [{ point: 'c' }]
 		const track: Track = [
 			{ space: 0.2, toolbar: a },
 			{ space: 0.3, toolbar: b },
@@ -67,13 +67,13 @@ describe('removeToolbar / removeEmptyTrack / removeParkedToolbar', () => {
 	})
 
 	it('returns -1 when the toolbar is not in the track', () => {
-		const track = trackOf([{ tool: 'a' }])
-		expect(removeToolbar(track, [{ tool: 'x' }])).toBe(-1)
+		const track = trackOf([{ point: 'a' }])
+		expect(removeToolbar(track, [{ point: 'x' }])).toBe(-1)
 		expect(track).toHaveLength(1)
 	})
 
 	it('drops an emptied track from its border', () => {
-		const solo: Toolbar = [{ tool: 'solo' }]
+		const solo: Toolbar = [{ point: 'solo' }]
 		const track: Track = [{ space: 0, toolbar: solo }]
 		const border: Border = [track]
 		removeToolbar(track, solo)
@@ -82,8 +82,8 @@ describe('removeToolbar / removeEmptyTrack / removeParkedToolbar', () => {
 	})
 
 	it('keeps a non-empty track in its border', () => {
-		const keep: Toolbar = [{ tool: 'keep' }]
-		const doomed: Toolbar = [{ tool: 'doomed' }]
+		const keep: Toolbar = [{ point: 'keep' }]
+		const doomed: Toolbar = [{ point: 'doomed' }]
 		const track: Track = [
 			{ space: 0.4, toolbar: keep },
 			{ space: 0, toolbar: doomed },
@@ -95,8 +95,8 @@ describe('removeToolbar / removeEmptyTrack / removeParkedToolbar', () => {
 	})
 
 	it('removes a parked toolbar by identity', () => {
-		const a: Toolbar = [{ tool: 'a' }]
-		const parking: Parking = [a, [{ tool: 'b' }]]
+		const a: Toolbar = [{ point: 'a' }]
+		const parking: Parking = [a, [{ point: 'b' }]]
 		expect(removeParkedToolbar(parking, a)).toBe(0)
 		expect(parking).toHaveLength(1)
 		expect(removeParkedToolbar(parking, a)).toBe(-1)
@@ -105,10 +105,10 @@ describe('removeToolbar / removeEmptyTrack / removeParkedToolbar', () => {
 
 describe('insertToolbar / resizeToolbar', () => {
 	it('splits the target gap by the split ratio', () => {
-		const a: Toolbar = [{ tool: 'a' }]
+		const a: Toolbar = [{ point: 'a' }]
 		const track = trackOf(a)
 		track[0]!.space = 0.4
-		const b: Toolbar = [{ tool: 'b' }]
+		const b: Toolbar = [{ point: 'b' }]
 		insertToolbar(track, 0, b, 0.5)
 		expect(track).toHaveLength(2)
 		expect(track[0]!.toolbar).toBe(b)
@@ -119,7 +119,7 @@ describe('insertToolbar / resizeToolbar', () => {
 	})
 
 	it('rebalances spaces around an existing toolbar', () => {
-		const track = trackOf([{ tool: 'a' }], [{ tool: 'b' }])
+		const track = trackOf([{ point: 'a' }], [{ point: 'b' }])
 		track[0]!.space = 0.2
 		track[1]!.space = 0.3
 		resizeToolbar(track, 0, 0.5)
@@ -129,45 +129,45 @@ describe('insertToolbar / resizeToolbar', () => {
 	})
 
 	it('ignores out-of-range resize indices', () => {
-		const track = trackOf([{ tool: 'a' }])
+		const track = trackOf([{ point: 'a' }])
 		const before = track[0]!.space
 		resizeToolbar(track, 9, 0.5)
 		expect(track[0]!.space).toBe(before)
 	})
 })
 
-describe('canonicalItemTool / itemFingerprint', () => {
+describe('canonicalItemPoint / itemFingerprint', () => {
 	it('strips setter and action suffixes', () => {
-		expect(canonicalItemTool({ tool: 'alertLevel' })).toBe('alertLevel')
-		expect(canonicalItemTool({ tool: 'alertLevel=red' })).toBe('alertLevel')
-		expect(canonicalItemTool({ tool: 'alertLevel|red' })).toBe('alertLevel')
-		expect(canonicalItemTool({ tool: 'alertLevel:inc' })).toBe('alertLevel')
-		expect(() => canonicalItemTool({ editor: 'status' } as never)).toThrow('no bound point')
+		expect(canonicalItemPoint({ point: 'alertLevel' })).toBe('alertLevel')
+		expect(canonicalItemPoint({ point: 'alertLevel=red' })).toBe('alertLevel')
+		expect(canonicalItemPoint({ point: 'alertLevel|red' })).toBe('alertLevel')
+		expect(canonicalItemPoint({ point: 'alertLevel:inc' })).toBe('alertLevel')
+		expect(() => canonicalItemPoint({ control: 'status' } as never)).toThrow('no bound point')
 	})
 
 	it('resolves inline virtual definitions to their own id', () => {
 		expect(
-			canonicalItemTool({
-				tool: { id: 'pause', label: 'Pause', source: 'gameSpeed', kind: 'stash', stashedValue: 0 },
+			canonicalItemPoint({
+				point: { id: 'pause', label: 'Pause', source: 'gameSpeed', kind: 'stash', stashedValue: 0 },
 			})
 		).toBe('pause')
 	})
 
-	it('fingerprints canonical tool + editor + config', () => {
-		expect(itemFingerprint({ tool: 'alertLevel' })).toBe(
-			itemFingerprint({ tool: 'alertLevel=red' })
+	it('fingerprints canonical point + control + config', () => {
+		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
+			itemFingerprint({ point: 'alertLevel=red' })
 		)
-		expect(itemFingerprint({ tool: 'alertLevel' })).toBe(
-			itemFingerprint({ tool: 'alertLevel|red' })
+		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
+			itemFingerprint({ point: 'alertLevel|red' })
 		)
-		expect(itemFingerprint({ tool: 'alertLevel' })).toBe(
-			itemFingerprint({ tool: 'alertLevel:inc' })
+		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
+			itemFingerprint({ point: 'alertLevel:inc' })
 		)
-		expect(itemFingerprint({ tool: 'a', editor: 'toggle' })).not.toBe(
-			itemFingerprint({ tool: 'a', editor: 'select' })
+		expect(itemFingerprint({ point: 'a', control: 'toggle' })).not.toBe(
+			itemFingerprint({ point: 'a', control: 'select' })
 		)
-		expect(itemFingerprint({ tool: 'a', config: { b: 1, a: 2 } })).toBe(
-			itemFingerprint({ tool: 'a', config: { a: 2, b: 1 } })
+		expect(itemFingerprint({ point: 'a', config: { b: 1, a: 2 } })).toBe(
+			itemFingerprint({ point: 'a', config: { a: 2, b: 1 } })
 		)
 	})
 })
@@ -179,14 +179,14 @@ describe('findOwnershipViolations', () => {
 
 	it('passes a clean layout', () => {
 		const violations = findOwnershipViolations({
-			borders: bordersWith([trackOf([{ tool: 'a' }])]),
-			parking: [[{ tool: 'p' }]],
+			borders: bordersWith([trackOf([{ point: 'a' }])]),
+			parking: [[{ point: 'p' }]],
 		})
 		expect(violations).toEqual([])
 	})
 
 	it('flags shared references and structural duplicates', () => {
-		const shared = { tool: 'a' }
+		const shared = { point: 'a' }
 		const violations = findOwnershipViolations({
 			borders: bordersWith([[{ space: 0, toolbar: [shared] }]]),
 			parking: [[shared]],

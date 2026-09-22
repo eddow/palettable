@@ -23,12 +23,15 @@
  * - **virtual point** = an end-user-defined derived point over a source point:
  *   `enum-from` (present any value as an enum / enum subset) or `stash`
  *   (push-aside / pop-back toggle action).
- * - **tool** = a toolbar-bound control (`ToolbarItem`: a point spec + an
- *   editor-variant id + an opaque config payload). Buttons, toggles, selects,
+ * - **tool** = a toolbar-bound control (`ToolbarItem`: a point spec + a
+ *   control id + an opaque config payload). Buttons, toggles, selects,
  *   sliders, steppers are tools.
- * - **editor** = the *variant id* of a tool (`'button'`, `'toggle'`, …) plus
- *   its configuration panel. The core only manipulates variant ids and
- *   capability descriptors; adapters map ids to components.
+ * - **control** = the chosen front-end of a tool (`'button'`, `'toggle'`, …).
+ *   The core only manipulates control ids and capability descriptors;
+ *   adapters map ids to components.
+ * - **configurator** = the configuration panel of a tool (label/icon/hint,
+ *   control chooser, tone, delete). Rendered in the console *Details* panel,
+ *   not on the toolbar.
  * - **nothing-point tools** = tools bound to nothing-points (`status`, `command-box`,
  *   `drawer`, `theme` — one tool, one nothing-point whose `uses` names its
  *   context). A drawer carries a nested `toolbar` (perpendicular to its
@@ -40,9 +43,9 @@ export * from './configuration.js'
 export * from './console.js'
 export * from './context.js'
 export * from './context-display.js'
+export * from './controls.js'
 export * from './core.js'
 export * from './drag.js'
-export * from './editors.js'
 export * from './errors.js'
 export * from './globals.js'
 export * from './identifiers.js'

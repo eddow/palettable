@@ -21,6 +21,10 @@ function shieldsToggle(page: import('@playwright/test').Page) {
 	return bottomBar(page).locator('button[title^="Ship shields"]')
 }
 
+function reactorSlider(page: import('@playwright/test').Page) {
+	return bottomBar(page).locator('input[type="range"][aria-label^="Ship reactor"]')
+}
+
 function fireButton(page: import('@playwright/test').Page) {
 	return bottomBar(page).locator('button[title^="Fire"]')
 }
@@ -36,8 +40,11 @@ test('fleet cards render three ships; none selected initially', async ({ page })
 	for (const id of ['aurora', 'borealis', 'cinder']) {
 		await expect(page.getByTestId(`ship-card-${id}`)).toHaveAttribute('aria-pressed', 'false')
 	}
-	// No selection: Fire is gated off.
+	// No selection: Fire is gated off, and the contextual valued tools are
+	// disabled (skeleton — nothing to write to).
 	await expect(fireButton(page)).toBeDisabled()
+	await expect(shieldsToggle(page)).toBeDisabled()
+	await expect(reactorSlider(page)).toBeDisabled()
 })
 
 test('selecting a ship hydrates the contextual tools; toggle back deselects', async ({ page }) => {
@@ -46,11 +53,15 @@ test('selecting a ship hydrates the contextual tools; toggle back deselects', as
 	// Status shows the selected ship name; shields reflect Aurora (up); Fire enables.
 	await expect(shipStatus(page)).toHaveText('🚀 Aurora')
 	await expect(shieldsToggle(page)).toHaveAttribute('aria-pressed', 'true')
+	await expect(shieldsToggle(page)).toBeEnabled()
+	await expect(reactorSlider(page)).toBeEnabled()
 	await expect(fireButton(page)).toBeEnabled()
-	// Clicking the selected card again deselects: Fire gates off.
+	// Clicking the selected card again deselects: every contextual tool gates off.
 	await page.getByTestId('ship-card-aurora').click()
 	await expect(page.getByTestId('ship-card-aurora')).toHaveAttribute('aria-pressed', 'false')
 	await expect(fireButton(page)).toBeDisabled()
+	await expect(shieldsToggle(page)).toBeDisabled()
+	await expect(reactorSlider(page)).toBeDisabled()
 })
 
 test('switching ships swaps values; toolbar edits flow back to the cards', async ({ page }) => {

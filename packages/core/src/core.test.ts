@@ -609,7 +609,7 @@ describe('subscriptions / dispose', () => {
 		core.subscribeLayout(listener)
 		core.layout.insertItem(
 			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 },
-			{ tool: 'extra' }
+			{ point: 'extra' }
 		)
 		expect(listener).toHaveBeenCalledTimes(1)
 		expect(listener.mock.calls[0]?.[0].version).toBe(2)
@@ -625,7 +625,7 @@ describe('subscriptions / dispose', () => {
 		core.values.set('theme', 'dark')
 		core.layout.insertItem(
 			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 },
-			{ tool: 'extra' }
+			{ point: 'extra' }
 		)
 		expect(valueListener).not.toHaveBeenCalled()
 		expect(layoutListener).not.toHaveBeenCalled()

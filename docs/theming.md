@@ -6,7 +6,7 @@ never duplicated per instance:
 | File | Owner | Contents |
 | ---- | ----- | -------- |
 | `core/styles/palette.css` | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell layout (`.palettable-drawer__*`) |
-| `core/styles/head-default.css` | head (default theme) | structural chrome (§§1–12: buttons, panels, command box, editors, vertical, joined-box, configurator) — no raw colors, tokens referenced only |
+| `core/styles/head-default.css` | head (default theme) | structural chrome (§§1–12: buttons, panels, command box, controls, vertical, joined-box, configurator) — no raw colors, tokens referenced only |
 | `core/styles/head-dark.css` / `core/styles/head-light.css` | head themes | `--pd-*` tokens (§0) + light drawer-popup paint; import the base plus **one** theme (dark is the default when neither class applies) |
 
 ## Rules
@@ -41,9 +41,9 @@ Rules:
 
 ## Axis-aware items
 
-Editors receive the surface axis via `context.surface` (vanilla) /
+Controls receive the surface axis via `context.surface` (vanilla) /
 `surfaceContextFromScope` (svelte) and stamp `palette-default-layout-${direction}`
-on their root. Several editors use it to avoid widening a vertical toolbar:
+on their root. Several controls use it to avoid widening a vertical toolbar:
 
 - **`segmented`** — at rest a vertical segmented shows icons only. The option
   text is an absolutely positioned overlay revealed on `:hover`/`:focus-visible`
@@ -63,13 +63,13 @@ on their root. Several editors use it to avoid widening a vertical toolbar:
     vertical one (`writing-mode: vertical-lr` + `direction: rtl`). In a
     vertical toolbar it may grow along the axis, but its perpendicular width
     stays at `--palette-toolbar-perpendicular`.
-  - **`drawer`** (the `drawerSlider` editor id) keeps the range out of the
+  - **`drawer`** (the `drawerSlider` control id) keeps the range out of the
     flow, running it along the *perpendicular* axis — the opposite of inline.
     The icon and value form the always-visible trigger segment; the range is a
     second segment revealed on hover/focus, sharing one border so the pair
     reads as a button group with only the outer corners rounded.
-  - `config.sliderVariant` selects a variant when the editor id is not one of
-    the two slider ids; the editor id always wins.
+  - `config.sliderVariant` selects a layout when the control id is not one of
+    the two slider ids; the control id always wins.
 
   Both variants render `.palette-default-slider-value` — the icon nests inside
   the chip (icon + text), sharing every declaration with
@@ -131,8 +131,9 @@ the head theme (light rule at the end of `head-light.css`).
 ## Section map (`head-default.css`)
 
 1 buttons · 2 icon/choice/status · 3 shared floating panel ·
-4 command box · 5 console overlay · 6 editor groups + readout · 7 select ·
-8 slider · 9 stepper/stars (+ drawer trigger) · 10 vertical axis ·
+4 command box · 5 console overlay · 6 control groups + readout · 7 select ·
+8 slider · 9 stepper/stars (+ drawer trigger: chevron beside the icon
+horizontally, stacked underneath it in vertical toolbars) · 10 vertical axis ·
 11 joined-box collapsing · 12 configurator/add-panel. Tokens live in
 `head-dark.css` / `head-light.css` (§0: `--pd-*` paint + `--pd-r-*` radii +
 `--pd-ease`/`--pd-slide` timings).
@@ -148,7 +149,7 @@ shared edges via `-1px`; vertical groups use `column-reverse`, so
 ## Accent tone (`config.tone: 'accent'`)
 
 Accent paints an accent border + outer glow (`--pd-accent` /
-`--pd-accent-ring`) on every editor. Button, toggle, theme and drawer-trigger
+`--pd-accent-ring`) on every control. Button, toggle, theme and drawer-trigger
 tools carry `palette-default-tone-accent` on the same node as
 `palette-default-tool` (same-element selector); segmented options and stepper
 ± buttons match via the descendant selector; select trigger, slider readout +

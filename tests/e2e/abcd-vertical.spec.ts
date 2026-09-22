@@ -13,7 +13,7 @@ async function highlighted(page: import('@playwright/test').Page) {
 			const bar = (n as HTMLElement).closest('.toolbar')
 			const tools = bar
 				? [...bar.querySelectorAll('.toolbar-item')]
-						.map((w) => w.getAttribute('data-tool'))
+						.map((w) => w.getAttribute('data-point'))
 						.join(',')
 				: '-'
 			const kind = (n as HTMLElement).hasAttribute('data-item-space-index')
@@ -31,7 +31,7 @@ async function bars(page: import('@playwright/test').Page) {
 		const border = document.querySelector('.toolbar-border[data-region="left"]')
 		if (!border) return []
 		return [...border.querySelectorAll('.toolbar')].map((bar) =>
-			[...bar.querySelectorAll('.toolbar-item')].map((w) => w.getAttribute('data-tool'))
+			[...bar.querySelectorAll('.toolbar-item')].map((w) => w.getAttribute('data-point'))
 		)
 	})
 }
@@ -50,8 +50,8 @@ test('ABCD vertical bottom-aligned pop-A then slide before BCD', async ({ page }
 						space: 1,
 						toolbar: [
 							{
-								tool: 'console',
-								editor: 'button',
+								point: 'console',
+								control: 'button',
 								config: { icon: '💻', label: 'Terminal', hint: 'Head button (run)' },
 							},
 						],
@@ -63,10 +63,10 @@ test('ABCD vertical bottom-aligned pop-A then slide before BCD', async ({ page }
 					{
 						space: 1,
 						toolbar: [
-							{ tool: 'autoOxygen', editor: 'toggle' },
-							{ tool: 'shieldGenerator', editor: 'toggle' },
-							{ tool: 'fastMode', editor: 'toggle' },
-							{ tool: 'missionTime', editor: 'status' },
+							{ point: 'autoOxygen', control: 'toggle' },
+							{ point: 'shieldGenerator', control: 'toggle' },
+							{ point: 'fastMode', control: 'toggle' },
+							{ point: 'missionTime', control: 'status' },
 						],
 					},
 				],

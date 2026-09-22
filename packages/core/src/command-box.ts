@@ -24,7 +24,7 @@
  *   `plans/simplify.md`** (never set by demo/tools): enum catalog always
  *   collapses to one tool-label row.
  * - `paletteToolbarItemFromSpec` / `paletteToolbarItemFromDerivedVariant`
- *   (which resolve editor registries + components) stay adapter-owned —
+ *   (which resolve control registries + components) stay adapter-owned —
  *   core has no components. The builders emit specs + variant descriptors;
  *   adapters map them to items.
  */
@@ -61,7 +61,7 @@ export type CommandBoxEntry = {
 	readonly uses?: readonly string[]
 }
 
-/** Add-item source: a point or an editor-only item that can seed a toolbar item. */
+/** Add-item source: a point or a control-only item that can seed a toolbar item. */
 export type AddItemSource = {
 	readonly id: string
 	readonly label: string
@@ -70,8 +70,8 @@ export type AddItemSource = {
 	readonly keywords?: readonly string[]
 	readonly categories?: readonly string[]
 	readonly kind: 'tool' | 'item'
-	readonly toolId?: string
-	readonly editor?: string
+	readonly pointId?: string
+	readonly control?: string
 }
 
 /** Concrete variant derived from an add-item source. */
@@ -83,10 +83,10 @@ export type DerivedVariant = {
 	readonly keywords?: readonly string[]
 	readonly categories?: readonly string[]
 	readonly kind: 'tool' | 'item' | 'set' | 'action'
-	readonly toolId?: string
-	readonly editor?: string
+	readonly pointId?: string
+	readonly control?: string
 	readonly action?: string
-	/** Spec string this variant inserts (`toolId`, `toolId=value`, `toolId:action`). */
+	/** Spec string this variant inserts (`pointId`, `pointId=value`, `pointId:action`). */
 	readonly spec?: string
 	readonly valueType?: 'boolean' | 'number' | 'enum'
 	readonly values?: readonly EnumOption[]
@@ -96,12 +96,12 @@ export type DerivedVariant = {
 export type CommandBoxContext = {
 	/** Key bindings for `meta` shortcut labels (`findKeystrokesFor`). */
 	readonly keys?: KeyBindings
-	/** Current values for `can` computation (e.g. `tool.value !== value`). */
+	/** Current values for `can` computation (e.g. `point.value !== value`). */
 	readonly values?: Readonly<Record<string, unknown>>
 	/** Static `can` flags for action points (omitted = enabled). */
 	readonly actionCan?: Readonly<Record<string, boolean | undefined>>
-	/** Editor-only item ids for add-item sources (adapter's `editors.item` keys). */
-	readonly itemEditors?: readonly string[]
+	/** Control-only item ids for add-item sources (adapter's `controls.item` keys). */
+	readonly itemControls?: readonly string[]
 }
 
 function normalizeToken(value: string): string {
@@ -222,10 +222,10 @@ function numberActionEnabled(
 export function paletteCommandEntries(
 	points: readonly AnyPoint[],
 	context: CommandBoxContext = {},
-	options: { excludeTools?: readonly string[]; mode?: 'run' | 'catalog' } = {}
+	options: { excludePoints?: readonly string[]; mode?: 'run' | 'catalog' } = {}
 ): readonly CommandBoxEntry[] {
 	const catalog = options.mode === 'catalog'
-	const excluded = new Set(options.excludeTools ?? [])
+	const excluded = new Set(options.excludePoints ?? [])
 	const entries: CommandBoxEntry[] = []
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
@@ -245,10 +245,10 @@ export function paletteCommandEntries(
 			continue
 		}
 		if (!isValuedPoint(point)) {
-			// Nothing-points (status, command-box, drawer, theme) bind tools
+			// Nothing-points (status, commandBox, drawer, theme) bind tools
 			// but carry no runnable value: no executable run entries.
 			// They stay eligible as add-item `item`-kind sources via
-			// `context.itemEditors` below.
+			// `context.itemControls` below.
 			continue
 		}
 		if (point.type === 'boolean') {
@@ -349,26 +349,26 @@ export function paletteCommandEntries(
 	return entries
 }
 
-/** Build the add-item entries used when creating new toolbar items. Valued + nothing points seed `tool`-kind sources by point name; `context.itemEditors` (`item`-kind) survives only as a fallback for editors no nothing-point claims. */
+/** Build the add-item entries used when creating new toolbar items. Valued + nothing points seed `tool`-kind sources by point name; `context.itemControls` (`item`-kind) survives only as a fallback for controls no nothing-point claims. */
 export function paletteAddItemEntries(
 	points: readonly AnyPoint[],
 	context: CommandBoxContext = {},
-	options: { excludeTools?: readonly string[] } = {}
+	options: { excludePoints?: readonly string[] } = {}
 ): readonly AddItemSource[] {
-	const excluded = new Set(options.excludeTools ?? [])
+	const excluded = new Set(options.excludePoints ?? [])
 	const entries: AddItemSource[] = []
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
 		if (isActionPoint(point)) continue
 		if (isNothingPoint(point)) {
 			// Nothing-points list by point name (Theme, Command, More, …),
-			// not as interchangeable generic editors — each binds 1:1 to
-			// its allowed editor(s) via `point.editors`.
+			// not as interchangeable generic controls — each binds 1:1 to
+			// its allowed control(s) via `point.controls`.
 			const label = point.label ?? humanizeCommandText(point.id)
 			entries.push({
 				id: `tool:${point.id}`,
 				kind: 'tool',
-				toolId: point.id,
+				pointId: point.id,
 				label,
 				meta: 'Add tool',
 				icon: point.icon,
@@ -379,12 +379,12 @@ export function paletteAddItemEntries(
 		}
 		if (!isValuedPoint(point)) continue
 		// Every valued family (boolean/number/enum/…) seeds one add source;
-		// the concrete editor is picked per-variant via `paletteDerivedVariants`.
+		// the concrete control is picked per-variant via `paletteDerivedVariants`.
 		const label = point.label ?? humanizeCommandText(point.id)
 		entries.push({
 			id: `tool:${point.id}`,
 			kind: 'tool',
-			toolId: point.id,
+			pointId: point.id,
 			label,
 			meta: `Add ${point.type} tool`,
 			icon: point.icon,
@@ -392,22 +392,23 @@ export function paletteAddItemEntries(
 			categories: entryCategories(point, ['tools']),
 		})
 	}
-	for (const editor of context.itemEditors ?? []) {
-		// Fallback only: skip editors already claimed 1:1 by a nothing-point
-		// (`point.editors` includes the id), so the list shows points by
-		// name instead of interchangeable generic editors.
+	for (const control of context.itemControls ?? []) {
+		// Fallback only: skip controls already claimed 1:1 by a nothing-point
+		// (`point.controls` includes the id), so the list shows points by
+		// name instead of interchangeable generic controls.
 		const claimed = points.some(
-			(point) => isNothingPoint(point) && !excluded.has(point.id) && point.editors?.includes(editor)
+			(point) =>
+				isNothingPoint(point) && !excluded.has(point.id) && point.controls?.includes(control)
 		)
 		if (claimed) continue
 		entries.push({
-			id: `item:${editor}`,
+			id: `item:${control}`,
 			kind: 'item',
-			editor,
-			label: humanizeCommandText(editor),
-			meta: 'Add editor-only item',
-			keywords: collectKeywords(editor, 'add', 'editor', 'toolbox'),
-			categories: ['editors', 'items'],
+			control,
+			label: humanizeCommandText(control),
+			meta: 'Add control-only item',
+			keywords: collectKeywords(control, 'add', 'control', 'toolbox'),
+			categories: ['controls', 'items'],
 		})
 	}
 	return [...entries].sort((left, right) => left.label.localeCompare(right.label))
@@ -423,66 +424,66 @@ export function paletteDerivedVariants(
 			{
 				id: `${source.id}:item`,
 				kind: 'item',
-				editor: source.editor,
+				control: source.control,
 				label: source.label,
-				meta: 'Editor-only item',
+				meta: 'Control-only item',
 				icon: source.icon,
 				keywords: source.keywords,
 				categories: source.categories,
 			},
 		]
 	}
-	if (source.toolId === undefined) return []
-	const point = points.find((candidate) => candidate.id === source.toolId)
+	if (source.pointId === undefined) return []
+	const point = points.find((candidate) => candidate.id === source.pointId)
 	const label = source.label
 	if (point !== undefined && isActionPoint(point)) {
 		return [
 			{
 				id: `${source.id}:tool`,
 				kind: 'tool',
-				toolId: source.toolId,
+				pointId: source.pointId,
 				label,
 				meta: 'Toolbar command',
 				icon: source.icon,
-				keywords: collectKeywords(source.toolId, label, point.keywords),
+				keywords: collectKeywords(source.pointId, label, point.keywords),
 				categories: [...(source.categories ?? []), 'tool'],
-				spec: source.toolId,
+				spec: source.pointId,
 			},
 		]
 	}
 	if (point === undefined || (!isValuedPoint(point) && !isNothingPoint(point))) {
 		// No point metadata (adapter passed sources without points): fall back
-		// to a generic `set` variant carrying the bare tool spec.
+		// to a generic `set` variant carrying the bare point spec.
 		return [
 			{
 				id: `${source.id}:set`,
 				kind: 'set',
-				toolId: source.toolId,
-				label: `${label} (editor)`,
+				pointId: source.pointId,
+				label: `${label} (control)`,
 				meta: 'Control — configure in inspector',
 				icon: source.icon,
-				keywords: collectKeywords(source.toolId, label, 'set', 'value'),
+				keywords: collectKeywords(source.pointId, label, 'set', 'value'),
 				categories: [...(source.categories ?? []), 'derived'],
-				spec: source.toolId,
+				spec: source.pointId,
 			},
 		]
 	}
 	if (isNothingPoint(point)) {
-		// Nothing-point tool: one variant bound to the point id, editor is
-		// the point's 1:1 editor (`point.editors[0]` when declared).
-		const editor = point.editors?.[0]
+		// Nothing-point tool: one variant bound to the point id, control is
+		// the point's 1:1 control (`point.controls[0]` when declared).
+		const control = point.controls?.[0]
 		return [
 			{
 				id: `${source.id}:tool`,
 				kind: 'tool',
-				toolId: source.toolId,
-				editor,
+				pointId: source.pointId,
+				control,
 				label,
 				meta: 'Add tool',
 				icon: source.icon,
-				keywords: collectKeywords(source.toolId, label, point.keywords),
+				keywords: collectKeywords(source.pointId, label, point.keywords),
 				categories: [...(source.categories ?? []), 'tool'],
-				spec: source.toolId,
+				spec: source.pointId,
 			},
 		]
 	}
@@ -491,14 +492,14 @@ export function paletteDerivedVariants(
 			{
 				id: `${source.id}:set`,
 				kind: 'set',
-				toolId: source.toolId,
-				label: `${label} (editor)`,
+				pointId: source.pointId,
+				label: `${label} (control)`,
 				meta: 'Control — configure on/off in inspector',
 				icon: source.icon,
-				keywords: collectKeywords(source.toolId, label, point.keywords, 'set', 'toggle'),
+				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'toggle'),
 				categories: [...(source.categories ?? []), 'derived'],
 				valueType: 'boolean',
-				spec: source.toolId,
+				spec: source.pointId,
 			},
 		]
 	}
@@ -507,17 +508,17 @@ export function paletteDerivedVariants(
 			{
 				id: `${source.id}:set`,
 				kind: 'set',
-				toolId: source.toolId,
-				label: `${label} (editor)`,
+				pointId: source.pointId,
+				label: `${label} (control)`,
 				meta: 'Control — choose mode in inspector',
 				icon: source.icon,
-				keywords: collectKeywords(source.toolId, label, point.keywords, 'set', 'value'),
+				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
 				categories: [...(source.categories ?? []), 'derived'],
 				valueType: 'enum',
 				values:
 					(point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
 						?.options ?? [],
-				spec: source.toolId,
+				spec: source.pointId,
 			},
 		]
 	}
@@ -525,21 +526,21 @@ export function paletteDerivedVariants(
 		{
 			id: `${source.id}:set`,
 			kind: 'set',
-			toolId: source.toolId,
-			label: `${label} (editor)`,
+			pointId: source.pointId,
+			label: `${label} (control)`,
 			meta: 'Control — numeric field in inspector',
 			icon: source.icon,
-			keywords: collectKeywords(source.toolId, label, point.keywords, 'set', 'value'),
+			keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
 			categories: [...(source.categories ?? []), 'derived'],
 			valueType: 'number',
-			spec: source.toolId,
+			spec: source.pointId,
 		},
 	]
 }
 
 /**
  * Filter enum values using keyword matches derived from option keywords.
- * Pure helper for enum-subset editors (dot-separated names split into words).
+ * Pure helper for enum-subset controls (dot-separated names split into words).
  */
 export function paletteEnumSubsetValues<TValue extends string>(options: {
 	values: readonly EnumOption<TValue>[]

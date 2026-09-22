@@ -1,10 +1,16 @@
-# Creating a head — tutorial
+# Creating a head — tutorial (historical svelte reference)
 
-Vocabulary: **points** are the `PaletteConfig.tools` data definitions (no
+> Frozen reference: `packages/svelette` is DO NOT MAINTAIN. The live head is
+> `packages/vanilla/src/head.ts` (plain-DOM `render*` functions bound to core
+> presenters). Vocabulary below is strict: **point** / **tool** / **control** /
+> **configurator** (see `docs/core-concepts.md`). Svelte code samples are kept
+> verbatim as the port reference; `PaletteEditor*` names are svelte-only.
+
+Vocabulary: **points** are the points-list data definitions (no
 layout); **tools** are the toolbar-bound controls you render here (one head
-component per tool variant, bound to a headless presenter — usually modifying a
-point); **editors** are the configuration panels (`PaletteEditorSpec.configure`,
-e.g. `BaseConfigurator`). `status` / `commandBox` / `drawer` / `theme` are **nothing-point
+component per control, bound to a headless presenter — usually reading/writing a
+point); **configurators** are the configuration panels.
+`status` / `commandBox` / `drawer` / `theme` are **nothing-point
 tools** (context plus enablement, no core value); `theme` presents the `light` / `dark` / `system` options with adapter get/set on the document root.
 the `theme` enum point (it writes the resolved theme onto `<html>` directly).
 See `docs/core-concepts.md` for the full glossary.
@@ -37,13 +43,20 @@ Presenter cheat-sheet:
 | Family | Presenter | View-model |
 | ------ | --------- | ---------- |
 | run | `buttonPresenter(context)` | `{ label, icon, title, tone, can, run }` |
-| boolean | `togglePresenter(context)` | `{ icon, title, tone, pressed, toggle() }` |
-| enum | `selectPresenter(context)` | `{ title, tone, icon, value, options[{value,text}], select }` |
-| number | `sliderPresenter(context)` | `{ title, tone, icon, direction, region, min, max, step, value, set }` |
+| boolean | `togglePresenter(context)` | `{ icon, title, tone, pressed, can, toggle() }` |
+| enum | `selectPresenter(context)` | `{ title, tone, icon, value, isSkeleton, can, options[{value,text}], select }` |
+| number | `sliderPresenter(context)` | `{ title, tone, icon, direction, region, min, max, step, value, can, set }` |
 | item | `commandBoxPresenter({ context })` | `{ title, icon, label, hint, model }` — `model` is a `paletteCommandBoxModel` (combobox) |
 | item | `statusPresenter(item, bound)` | `{ label, icon, title, tone, value, can }` (nothing-point readout from context bags; `can: false` = disabled + placeholder) |
 | item | `themePresenter(item, bound)` | `{ label, icon, title, tone, value, valueIcon, cycle }` (enum-shaped nothing-point; `valueIcon` is the current option's icon — adapters render icon-value only; adapter applies the resolved theme to `<html>`) |
-| any | `configuratorPresenter(context)` | `{ label, icon, hint, tone, editor, editorChoices, setText, setTone, setEditor }` |
+| any | `configuratorPresenter(context)` | `{ label, icon, hint, tone, control, controlChoices, setText, setTone, setControl }` |
+
+`can` on a valued presenter follows `valuedCan(bound)`: an explicit functional
+`can` wins; otherwise a **context tool** (`uses` non-empty) is disabled while its
+value is skeleton (`undefined`) — the context is absent, so there is nothing to
+write to (`writeValue` would throw). Root-only tools (`uses` empty/omitted) stay
+enabled: the consumer hydrates the root store first. Adapters render
+`can: false` as `disabled` (and must guard the click/write path).
 
 Helpers: `headMeta(item)` (config defaults), `headTooltip(item, suffix)`,
 `headLayoutFromSurface(scope, surface)`, `headRegionFromScope(scope)`.

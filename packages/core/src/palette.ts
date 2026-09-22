@@ -77,6 +77,9 @@ export function toServerDescriptor(points: readonly AnyPoint[]): ServerPointDesc
  * descriptors of unknown shape. Absent `defaultValue` = skeleton tool
  * (no rejection — SSR with `values: {}` renders skeletons). Order =
  * descriptor array order (deterministic `Map` iteration, see SSR §5).
+ *
+ * Note: "skeleton tool" here means a toolbar tool with no value yet
+ * (absent key in the values bag), not a point kind.
  */
 export function fromServerDescriptor(
 	descriptors: readonly ServerPointDescriptor[],

@@ -65,7 +65,7 @@ describe('PointTarget (string reference vs inline virtual)', () => {
 	it('narrows inline definitions from string references', () => {
 		expect(isInlineSpec(stash)).toBe(true)
 		expect(isInlineSpec('pause')).toBe(false)
-		expect(isInlineSpec({ tool: 'pause' })).toBe(false)
+		expect(isInlineSpec({ point: 'pause' })).toBe(false)
 		expect(isInlineSpec(null)).toBe(false)
 		expect(isInlineSpec(undefined)).toBe(false)
 	})

@@ -18,7 +18,7 @@ function layoutWithParkingRow() {
 					space: 1,
 					toolbar: [
 						{
-							editor: 'commandBox',
+							control: 'commandBox',
 							config: { icon: '⌘', label: 'Command', hint: 'Search and run a command' },
 						},
 					],
@@ -30,8 +30,8 @@ function layoutWithParkingRow() {
 					space: 1,
 					toolbar: [
 						{
-							tool: 'console',
-							editor: 'button',
+							point: 'console',
+							control: 'button',
 							config: { icon: '💻', label: 'Terminal', hint: 'Head button (run)' },
 						},
 					],
@@ -41,13 +41,13 @@ function layoutWithParkingRow() {
 				{
 					space: 1,
 					toolbar: [
-						{ tool: 'autoOxygen', editor: 'toggle' },
-						{ tool: 'shieldGenerator', editor: 'toggle' },
+						{ point: 'autoOxygen', control: 'toggle' },
+						{ point: 'shieldGenerator', control: 'toggle' },
 					],
 				},
 			],
 		},
-		parking: [[{ tool: 'fastMode', editor: 'toggle' }]],
+		parking: [[{ point: 'fastMode', control: 'toggle' }]],
 	}
 }
 

@@ -1,27 +1,30 @@
 # Core concepts
 
-## Vocabulary
+## Vocabulary (strict — no synonyms)
 
 - **point** — the data definition of what is controlled by the palette: one
-  entry of `PaletteConfig.tools` (no layout). Example: the fact *alert* can be
+  entry of the points list (no layout). Example: the fact *alert* can be
   `green`/`yellow`/`red` is an enum-point. A point is never placed on a
-  toolbar itself — it is placed *as* a tool (button-group, combobox, …).
-  Code names (kept): `PaletteToolRun` (action-point) / `PaletteEditableTool`
-  (option-point: `boolean` / `enum` / `number`). The command-box (as command palette) lists points as
-  executable commands (`paletteCommandEntries`).
-- **tool** — a toolbar-bound control that modifies a point: a
-  `PaletteToolbarItem` (`{ tool: spec, editor?, config? }`) resolved through
+  toolbar itself — it is placed *as* a tool (button, toggle, select, …).
+- **tool** — a toolbar-bound control that reads/writes a point: a
+  `ToolbarItem` (`{ point: spec, control?, config? }`) resolved through
   the registry to a presenter + head component, placed in a toolbar (layout).
   Buttons, toggles, selects, sliders, steppers are tools. `status`,
-  `command-box`, and `drawer` bind **nothing-points** (1:1 — one tool, one
+  `commandBox`, and `drawer` bind **nothing-points** (1:1 — one tool, one
   nothing-point whose `uses` names their context): a status reads
-  `bag?.get('fileName')` to render and never writes; a command-box lists
+  `bag?.get('fileName')` to render and never writes; a commandBox lists
   commands filtered by `uses` at render time; a drawer renders a nested
   toolbar with context flowing down to child tools.
-- **editor** — the configuration panel that comes with a tool
-  (`PaletteEditorSpec.configure`, e.g. `BaseConfigurator`): label/icon/hint,
-  variant chooser (`editorChoices`), tone, delete. Rendered in the console
-  *Details* panel, not on the toolbar.
+- **control** — the chosen front-end of a tool (`'button'`, `'toggle'`,
+  `'select'`, `'segmented'`, `'slider'`, …). The core only manipulates
+  control ids and capability descriptors (`ControlRegistry` +
+  `controlChoicesFor` / `resolveControl`); adapters map ids to components.
+  The item field is `control`, the point field is `controls` (allowlist).
+- **configurator** — the configuration panel that comes with a tool
+  (label/icon/hint, control chooser (`controlChoices`), tone, delete).
+  Rendered in the console *Details* panel, not on the toolbar.
+  The word **editor** is banned: it meant both the front-end and the panel.
+  The word **variant** is banned for controls: use **control**.
 
 ### The `uses` contract (context-sensitive tools)
 
@@ -47,6 +50,13 @@ resolvers, in `uses` order.
   adapters read it via `core.evaluateCan(id)` and subscribe to flips via
   `core.subscribeCan` (flips only — no render storms). Context-bag changes
   reach adapters via `core.subscribeContext((bagName, changedKeys))`.
+  **Skeleton implies disabled for context tools:** a valued point with
+  non-empty `uses` and no explicit `can` evaluates `false` while its value is
+  absent (`undefined`) — the context is absent, so there is nothing to write
+  to (`writeValue` would throw). Selecting/hydrating the bag flips it back on
+  (a `subscribeCan` flip, no value change needed). An explicit functional
+  `can` overrides this default; root-only valued tools (`uses` empty/omitted)
+  stay enabled — the consumer hydrates the root store first.
 - Bags: the root bag `ROOT_CONTEXT` (`''` value, `'root'` alias accepted) is
   core-owned (`core.values` itself — the single source of truth, starts empty,
   no defaults inside; absent key = skeleton `undefined`). `initialValues`
@@ -70,13 +80,8 @@ Strictness: `get(id)` stays lenient (absent → `undefined`, the skeleton probe)
 Strict paths throw on absent: `run` setter, `applyNamedAction` (`id:action`),
 `namedActionCan`, `runStash` source read (`require(id)` helper).
 Skeleton: `resolveRenderTree({ points, values: {} })` renders every tool
-(descriptor + editor + keystrokes, `value: undefined`). Presenters propagate
+(descriptor + control + keystrokes, `value: undefined`). Presenters propagate
 `undefined` instead of coercing (`false` / `0` / `''`).
-
-Code-name map (kept for compatibility): point → `PaletteTool*` types +
-`PaletteToolSpec` strings; tool → `PaletteToolbarItem` +
-`PaletteEditorSpec.editor` + presenter; editor →
-`PaletteEditorSpec.configure` + `configuratorPresenter`.
 
 ## Points (definitions, no layout)
 
@@ -160,29 +165,23 @@ time), `inspecting` (`{ item, palette, region? }`), `dragging` (pointer session)
 
 ## Tools (toolbar-bound controls)
 
-A tool is a toolbar item bound to a point: a `PaletteToolbarItem`
-(`{ tool: spec, editor?, config? }`) resolved through the registry to a
+A tool is a toolbar item bound to a point: a `ToolbarItem`
+(`{ point: spec, control?, config? }`) resolved through the registry to a
 presenter + head component and placed in a toolbar (layout). Buttons,
-toggles, selects, sliders, steppers are tools. Code names (kept):
-`PaletteToolbarItem` + `PaletteEditorSpec.editor` + `*Presenter` + head
-`editors/*` component.
+toggles, selects, sliders, steppers are tools.
 
 Three tools bind **nothing-points** (context plus enablement, no core value) — `status` (read-only display from context bags), `commandBox` (commands-combo-box, runs commands inline), `drawer` (child-toolbar portal trigger bound to a nothing-point, holds other tools), `theme` (enum-shaped nothing-point, adapter get/set on the document root class).
 
-## Editors (configuration panels)
+## Configurators (configuration panels)
 
-An editor is the configuration panel that comes with a tool:
-`PaletteEditorSpec.configure` (today always `BaseConfigurator`): label/icon/hint,
-variant chooser (`editorChoices`), tone, delete. Rendered in the console
-*Details* panel, never on the toolbar. Code names (kept):
-`PaletteEditorSpec.configure` + `configuratorPresenter`.
+A configurator is the configuration panel that comes with a tool:
+label/icon/hint, control chooser (`controlChoices`), tone, delete.
+Rendered in the console *Details* panel, never on the toolbar.
 
-## Tool registry (family → tool variant)
+## Control registry (family → control)
 
-Keyed family → variant. The default head (`src/lib/head/registry.ts`, `headEditors`)
-provides one variant per family (`boolean/toggle`, `enum/select`, `number/slider`,
+Keyed family → control. The default head provides one control per family (`boolean/toggle`, `enum/select`, `number/slider`,
 `run/button`, `item/commandBox+drawer+status`); the demo registry
-(`src/lib/demo/editors/registry.ts`) adds extras and merges per family so the head
 stays the fallback:
 
 - `boolean`: `toggle` (head) — demo adds nothing
@@ -193,46 +192,32 @@ stays the fallback:
 - `item` (nothing-point variants): `commandBox`, `drawer`, `status`, `theme` (head; demo adds nothing)
 
 Head components are dumb: each binds a headless core presenter
-(`src/lib/palette/presenters.svelte.ts` — `button/toggle/select/slider/commandBox/
+(`button/toggle/select/slider/commandBox/
 status/configurator` presenters; see `docs/creating-a-head.md`). Full usage in
 `docs/using-the-default-head.md`; extraction history in `docs/head-extraction.md`.
 
-`spec(editor, configure, footprint?)` builds a `PaletteEditorSpec`; Svelte
-`Component` props are contravariant so broad configurators (`BaseConfigurator`,
-`EnumSubsetConfigurator`) assign without casts. `editorDefaults` picks the variant
-when an item omits `editor` (demo: `{ run: 'button' }`).
+`controlDefaults` picks the control
+when an item omits `control` (demo: `{ run: 'button' }`).
 
-Resolution (`resolveEditor`): editor-only items look up `editors.item[editor]`;
-tool items look up `editors[family][variant]` with capability validation against
+Resolution (`resolveControl`): control-only items look up `controls.item[control]`;
+tool items look up `controls[family][control]` with capability validation against
 the surface (wrong family/axis/`accepts` → first compact fallback for the family).
-`renderEditor` **returns** the component (the adapter renders `<Editor context>`),
-unlike the reference which invoked a JSX factory. Unknown tools / missing editors
-render nothing — inert by design, so broken items never crash the bar.
+Unknown tools / missing controls render nothing — inert by design, so broken items never crash the bar.
 
 ## Scope, surface, context
 
-- `PaletteScope` = `{ palette?, region?, editorChoices?, … }` — the serializable
-  payload editors read. `Ide` publishes `{ palette }`; borders stamp `region`;
-  drawer portals propagate both through `mount` props.
-- `surfaceContextFromScope(scope)`: `left`/`right` → `vertical`, else `horizontal`.
-  Drawer children **invert** the parent axis; child region follows
+- Surface context = `{ axis, region }` — adapters derive `axis` from `region`;
+  drawer children **invert** the parent axis; child region follows
   (`vertical` → `left`, `horizontal` → `top`).
-- `PaletteEditorContext` = `{ item, tool, scope, flags, surface }` — built by
-  `resolveEditorContext`. Configurators get the same shape with an augmented scope
-  (`resolveConfiguratorContext` → `resolveConfiguratorScope` injects
-  `editorChoices` from `describeItemConfiguration`).
 - `describeItemConfiguration({ item, toolbar, index, region }, surface)` returns
   the headless descriptor: `title`/`subtitle`, `structure` (move
-  backward/forward enabled, removable), `presentation` (`currentEditor`,
-  `editorChoices` filtered by capabilities), `bindings` (`shortcut` from
-  `keys.findByTool`). The console (head `Console.svelte`) renders the
+  backward/forward enabled, removable), `presentation` (`currentControl`,
+  `controlChoices` filtered by capabilities), `bindings` (`shortcut` from
+  `keys.findByPoint`). The console renders the
   **presentation-only** configurator for the current selection; structural
   actions (`structure`) are advisory — the demo does not expose move/remove.
 
 ## Icons
 
-Core is icon-agnostic: `PaletteIcon` flows through tools → items → editors, and
-only the editor renders it. `src/lib/head/Icon.svelte` resolves `Component` via
-`<svelte:component>` and strings via a module-level `$state` factory
-(`src/lib/head/icons.svelte.ts`), else `<span data-icon="name">name</span>`.
-No `pure-glyf` port — emoji strings suffice for the demo.
+Core is icon-agnostic: icons flow through points → tools → controls, and
+only the control renders them. No `pure-glyf` port — emoji strings suffice for the demo.

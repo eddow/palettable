@@ -53,7 +53,7 @@ export function iconSpan(icon: string | undefined): HTMLElement | null {
 	return span
 }
 
-// ── Head editor shells ────────────────────────────────────────────────────
+// ── Head control shells ───────────────────────────────────────────────────
 // Live: `head.ts` renderers parse these, then attach data + listeners.
 
 export function buttonShellTemplate(options: {
@@ -276,11 +276,17 @@ export function drawerTriggerShellTemplate(options: {
 	icon?: string
 	axis?: 'horizontal' | 'vertical'
 	region?: string
+	open?: 'click' | 'hover' | 'press'
 }): string {
 	const accessible = options.label !== '' ? options.label : (options.hint ?? 'More')
 	const title = options.label !== '' ? options.label : (options.hint ?? 'More')
 	const layout = options.axis !== undefined ? ` palette-default-layout-${options.axis}` : ''
 	const region = options.region !== undefined ? ` palette-default-region-${options.region}` : ''
+	// Hover-open drawers keep the attached group-field at rest (joint side
+	// square): the popup appears on hover with no click state change, so the
+	// trigger must already read as attached. Click/press drawers are
+	// standalone squares at rest and attach only while open (`aria-expanded`).
+	const openMode = options.open !== undefined ? ` is-open-${options.open}` : ''
 	const icon =
 		options.icon !== undefined
 			? `<span class="palette-default-icon">${escapeHtml(options.icon)}</span>`
@@ -289,7 +295,7 @@ export function drawerTriggerShellTemplate(options: {
 	// axis); it survives as the accessible name + tooltip instead.
 	return (
 		`<button type="button" class="palette-default-tool palette-default-tone-${options.tone}` +
-		` palettable-drawer__trigger${layout}${region}" aria-label="${escapeHtml(accessible)}"` +
+		` palettable-drawer__trigger${layout}${region}${openMode}" aria-label="${escapeHtml(accessible)}"` +
 		` aria-expanded="false" aria-haspopup="true" title="${escapeHtml(title)}">` +
 		`${icon}` +
 		`<span class="palette-default-drawer-chevron" aria-hidden="true">▸</span></button>`
@@ -335,7 +341,7 @@ export function commandBoxShellTemplate(options: {
 		`<input class="palette-default-command-input" data-testid="command-box-input"` +
 		` placeholder="Command…" value="">` +
 		`<button type="button" class="palette-default-command-open"` +
-		` data-testid="command-box-open-editor" aria-label="Edit toolbars"` +
+		` data-testid="command-box-open-configurator" aria-label="Edit toolbars"` +
 		` title="Edit toolbars">✎</button></div></div>` +
 		`<div class="palette-default-command-popover" hidden="">` +
 		`<div class="palette-default-command-results" data-testid="command-box-results"></div>` +

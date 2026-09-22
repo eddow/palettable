@@ -4,7 +4,7 @@
 
 Headless palette primitives + heads — editable toolbars for any app.
 
-The palette owns state, a11y semantics, tool resolution, editing, and drag/drop — **not** styling. Adapters own markup and CSS. Define **points** (what is controlled), bind them to toolbars as **tools** (controls), and configure each tool with an **editor** (config panel).
+The palette owns state, a11y semantics, tool resolution, editing, and drag/drop — **not** styling. Adapters own markup and CSS. Define **points** (what is controlled), bind them to toolbars as **tools** (controls), and configure each tool with a **configurator** (config panel) choosing its **control** (front-end).
 
 - Framework-agnostic core (`@palettable/core`): vanilla TS, zero DOM, SSR-safe.
 - Thin adapters render the core: Svelte 5 runes (`@palettable/svelte`, the reference implementation), vanilla DOM (`@palettable/vanilla`), Vue planned.
@@ -15,11 +15,12 @@ The palette owns state, a11y semantics, tool resolution, editing, and drag/drop 
 | Term | Meaning |
 | ---- | ------- |
 | **point** | A data definition in `tools` — no layout. `action` (runnable, e.g. `saveGame`), `boolean` / `enum` / `number` (valued with restorable default), `nothing` (context-only). Never placed on a toolbar itself — placed *as* a tool. |
-| **tool** | A toolbar-bound control (`{ tool: spec, editor?, config? }`) resolved through the registry to a presenter + head component. Buttons, toggles, selects, sliders, steppers are tools. |
-| **editor** | The tool's variant id (`'button'`, `'toggle'`, …) plus its configuration panel (`BaseConfigurator`: label/icon/hint/variant/tone/delete). Rendered in the console *Details* panel, not on the toolbar. |
-| **pointless tool** | Binds no point: `status` (read-only readout), `command-box` (inline command runner), `drawer` (nested toolbar, axis-inverted popup). |
+| **tool** | A toolbar-bound control (`{ point: spec, control?, config? }`) resolved through the registry to a presenter + head component. Buttons, toggles, selects, sliders, steppers are tools. |
+| **control** | The tool's chosen front-end (`'button'`, `'toggle'`, …). The core only manipulates control ids + capabilities; adapters map ids to components. |
+| **configurator** | The tool's configuration panel (label/icon/hint/control/tone/delete). Rendered in the console *Details* panel, not on the toolbar. |
+| **pointless tool** | Binds no point: `status` (read-only readout), `commandBox` (inline command runner), `drawer` (nested toolbar, axis-inverted popup). |
 
-Tool specs: `toolId` (resolve), `toolId=value` (setter runner, e.g. `alertLevel=red`), `toolId:action` (action runner, e.g. `gameSpeed:inc`).
+Tool specs: `pointId` (resolve), `pointId=value` (setter runner, e.g. `alertLevel=red`), `pointId:action` (action runner, e.g. `gameSpeed:inc`).
 
 ## Packages
 
@@ -69,7 +70,7 @@ core.run('saveGame')
 core.values.set('theme', 'light')
 ```
 
-Svelte + default head:
+Svelte + default head (historical sample — `packages/svelette` is frozen):
 
 ```ts
 import { headEditors } from '$lib/head/registry'
@@ -91,7 +92,7 @@ const palette = new Palette({
 	import Ide from '$lib/palette/components/Ide.svelte'
 	import '$lib/palette/styles/palette.css'
 	import '$lib/head/styles/head-default.css'
-	const top = $state([{ space: 0, toolbar: [{ tool: 'theme', editor: 'select' }] }])
+	const top = $state([{ space: 0, toolbar: [{ point: 'theme', control: 'select' }] }])
 </script>
 
 <Ide {palette} {top}>

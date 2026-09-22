@@ -1,10 +1,10 @@
 /**
- * `@palettable/core` — presenter view-models + SSR variant/axis resolution (Phase 5).
+ * `@palettable/core` — presenter view-models + SSR control/axis resolution (Phase 5).
  *
  * Headless port of the svelte adapter's `presenters.svelte.ts` (which stays
  * adapter-owned until Phase 7). Presenters are pure functions deriving
  * everything a dumb head component needs to render — zero markup, zero CSS.
- * Heads stay dumb: no `tool.value = …` in `.svelte` (see
+ * Heads stay dumb: no `point.value = …` in `.svelte` (see
  * `docs/architecture.md §5`).
  *
  * Deltas from the reference:
@@ -17,7 +17,7 @@
  *   `configuratorPresenter.remove()` (which needs live toolbar/track/border
  *   object identity) stay adapter-owned — core has no runes and no live
  *   layout objects. The configurator's pure parts (label/icon/hint/tone,
- *   editor choices, set-text/tone/editor payloads) land here as
+ *   control choices, set-text/tone/control payloads) land here as
  *   `configuratorModel`.
  * - Presenters take the param-array display shape `(boundValues, boundBags)`
  *   (Context §2.2, §4 step 6); context flows down into drawer child tools
@@ -25,14 +25,15 @@
  *   (`undefined` = unregistered) — `buttonPresenter` evaluates functional
  *   `can` against them unless an explicit `can` override is passed.
  *
- * SSR (§4.3): this module also lands `resolveEditorVariant()` — the
+ * SSR (§4.3): this module also lands `resolveControl()` — the
  * single-id fallback chain the render model needs — alongside the
- * config-surface list `editorChoicesFor()`. Plus `axisForRegion()` and the
+ * config-surface list `controlChoicesFor()`. Plus `axisForRegion()` and the
  * drawer perpendicular-axis rule (moved from adapters so server/client
- * agree on variant eligibility).
+ * agree on control eligibility).
  */
-import type { EditorCapability, EditorDefaults, EditorRegistry } from './editors.js'
-import { familyOfPoint } from './editors.js'
+
+import type { ControlCapability, ControlDefaults, ControlRegistry } from './controls.js'
+import { familyOfPoint } from './controls.js'
 import type { PaletteRegion, SurfaceContext, ToolbarItem } from './layout.js'
 import { isDrawerItem } from './layout.js'
 import type { AnyPoint } from './points.js'
@@ -40,7 +41,25 @@ import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { EnumOption } from './type.js'
 import { matchEnumOption } from './virtual.js'
 
-/** Item `config` payload with head defaults (label/icon/hint/tone). */
+/** Item `config` payload with head defaults (label/icon/hint/tone).
+ *
+ * Canonical per-item config contract (adapters read via the `*Of` helpers /
+ * presenters below — never `config.xxx` inline):
+ * - all heads: `icon/label/hint/tone`
+ * - slider/drawerSlider: `showValue` (opt-out, default shown)
+ * - select/segmented: `showText` (opt-out, default shown; icon-only)
+ * - select only: `showFilter` (opt-in, default hidden)
+ * - slider variant fallback: `sliderVariant` (`inline`/`drawer`, default
+ *   `inline`; explicit `slider`/`drawerSlider` control ids win)
+ * - status: `statusKey` (named bag key; default first non-empty string)
+ * - drawer: `open` (see `DrawerToolbarItem` in `layout.ts`;
+ *   default `click` via `drawerOpenOf`)
+ * Absent key = default everywhere.
+ *
+ * Deliberately NOT config: enum `values`/`keywords` live on the point
+ * definition (consumer-owned); enum subsets arrive via `VirtualPoints`
+ * (`enum-from`), never per-item config.
+ */
 export type HeadItemConfig = {
 	readonly icon?: string
 	readonly label?: string
@@ -52,6 +71,10 @@ export type HeadItemConfig = {
 	readonly showText?: boolean
 	/** Select listbox text-filter opt-in (`select` only; default hidden). */
 	readonly showFilter?: boolean
+	/** Slider range layout fallback (`inline` / `drawer`; default `inline`). */
+	readonly sliderVariant?: string
+	/** Status bag key (`status` only; default first non-empty string). */
+	readonly statusKey?: string
 }
 
 /** Resolved head metadata for an item. */
@@ -60,24 +83,24 @@ export type HeadMeta = {
 	readonly label: string
 	readonly hint: string | undefined
 	readonly tone: 'neutral' | 'accent'
-	readonly editor: string | undefined
+	readonly control: string | undefined
 }
 
 /** Read the item `config` payload with head defaults. */
 export function headMeta(item: ToolbarItem): HeadMeta {
 	const config = ((item as { config?: unknown }).config ?? {}) as HeadItemConfig
-	const tool = (item as { tool?: unknown }).tool
+	const point = (item as { point?: unknown }).point
 	return {
 		icon: typeof config.icon === 'string' ? config.icon : undefined,
 		label:
 			typeof config.label === 'string'
 				? config.label
-				: typeof tool === 'string'
-					? tool
-					: (((item as { editor?: unknown }).editor as string | undefined) ?? 'Item'),
+				: typeof point === 'string'
+					? point
+					: (((item as { control?: unknown }).control as string | undefined) ?? 'Item'),
 		hint: typeof config.hint === 'string' ? config.hint : undefined,
 		tone: config.tone === 'accent' ? 'accent' : 'neutral',
-		editor: (item as { editor?: unknown }).editor as string | undefined,
+		control: (item as { control?: unknown }).control as string | undefined,
 	}
 }
 
@@ -85,6 +108,16 @@ export function headMeta(item: ToolbarItem): HeadMeta {
 export function headTooltip(item: ToolbarItem, suffix?: string): string {
 	const meta = headMeta(item)
 	return suffix !== undefined ? `${meta.label} · ${suffix}` : meta.label
+}
+
+/** Drawer trigger open mode (`config.open`; default `click`). */
+export type DrawerOpenMode = 'click' | 'hover' | 'press'
+
+/** Read the drawer open mode with default (`click`). */
+export function drawerOpenOf(item: ToolbarItem): DrawerOpenMode {
+	const config = (item as { config?: unknown }).config as { open?: unknown } | undefined
+	const value = config?.open
+	return value === 'hover' || value === 'press' ? value : 'click'
 }
 
 /**
@@ -112,27 +145,27 @@ export function drawerChildRegion(axis: 'horizontal' | 'vertical'): PaletteRegio
 }
 
 /**
- * Resolve the single editor variant id for a point on a surface.
+ * Resolve the single control id for a point on a surface.
  * The canonical fallback chain (documented once, here): explicit item
- * `editor` → family default → first eligible registry variant → `undefined`
- * (no eligible variant). SSR §4.3: the render model needs exactly one id,
+ * `control` → family default → first eligible registry control → `undefined`
+ * (no eligible control). SSR §4.3: the render model needs exactly one id,
  * not the choice list adapters interpret themselves.
  */
-export function resolveEditorVariant(
+export function resolveControl(
 	point: AnyPoint | undefined,
 	surface: SurfaceContext,
-	registry: EditorRegistry | undefined,
-	defaults: EditorDefaults | undefined,
-	currentEditor: string | undefined
+	registry: ControlRegistry | undefined,
+	defaults: ControlDefaults | undefined,
+	currentControl: string | undefined
 ): string | undefined {
 	const family = point === undefined ? 'item' : familyOfPoint(point)
-	const variants = registry?.[family] ?? {}
-	// Nothing-point 1:1 subset (`point.editors`) mirrors `editorChoicesFor`.
+	const controls = registry?.[family] ?? {}
+	// Nothing-point 1:1 subset (`point.controls`) mirrors `controlChoicesFor`.
 	const allowed =
-		point !== undefined && isNothingPoint(point) && point.editors !== undefined
-			? new Set(point.editors)
+		point !== undefined && isNothingPoint(point) && point.controls !== undefined
+			? new Set(point.controls)
 			: undefined
-	const eligible = Object.values(variants).filter(
+	const eligible = Object.values(controls).filter(
 		(cap) =>
 			!cap.hidden &&
 			(allowed === undefined || allowed.has(cap.id)) &&
@@ -141,12 +174,12 @@ export function resolveEditorVariant(
 				cap.supportedAxes === surface.axis ||
 				surface.axis === 'both')
 	)
-	if (currentEditor !== undefined) {
-		const explicit = eligible.find((cap) => cap.id === currentEditor)
+	if (currentControl !== undefined) {
+		const explicit = eligible.find((cap) => cap.id === currentControl)
 		if (explicit !== undefined) return explicit.id
-		// Explicit editor ineligible for this surface → fall through to the
-		// first compact eligible variant (mirrors the svelte fallback), else
-		// the first eligible variant.
+		// Explicit control ineligible for this surface → fall through to the
+		// first compact eligible control (mirrors the svelte fallback), else
+		// the first eligible control.
 		const compact = eligible.find((cap) => cap.compact)
 		return compact?.id ?? eligible[0]?.id
 	}
@@ -166,6 +199,23 @@ export type BoundDisplay = {
 	 * explicit `can` override is passed.
 	 */
 	readonly bags?: readonly (import('./context.js').ValuesBag | undefined)[]
+}
+
+/**
+ * Enablement for a valued point (toggle/slider/select/…): an explicit
+ * functional `can` wins; otherwise a **context tool** (`uses` non-empty) is
+ * disabled while its value is skeleton (`undefined`) — the context is absent,
+ * so there is nothing to write to (`writeValue` would throw). Root-only tools
+ * (`uses` empty/omitted) stay enabled: the consumer hydrates the root store
+ * first (strict skeleton throw on write).
+ */
+export function valuedCan(bound: BoundDisplay): boolean {
+	const point = bound.point
+	if (point === undefined) return true
+	if (point.can !== undefined) return point.can(...(bound.bags ?? []))
+	if (!isValuedPoint(point)) return true
+	if ((point.uses ?? []).length === 0) return true
+	return bound.value !== undefined
 }
 
 // ── Button (action) ─────────────────────────────────────────────────────────
@@ -211,6 +261,11 @@ export type TogglePresenter = {
 	readonly tone: 'neutral' | 'accent'
 	/** Pressed flag; `undefined` = skeleton (no value yet). */
 	readonly pressed: boolean | undefined
+	/**
+	 * False when the tool is disabled: explicit `can` returned false, or a
+	 * context tool (`uses` non-empty) is skeleton — adapter renders disabled.
+	 */
+	readonly can: boolean
 	/** Spec string toggling the value (`id=true` / `id=false`). */
 	readonly toggle: string
 }
@@ -229,6 +284,7 @@ export function togglePresenter(item: ToolbarItem, bound: BoundDisplay): ToggleP
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
 		pressed,
+		can: valuedCan(bound),
 		toggle: `${bound.point?.id ?? ''}=${pressed ? 'false' : 'true'}`,
 	}
 }
@@ -244,7 +300,7 @@ export type StatusPresenter = {
 	/** False when the context bag is absent (`undefined` slot) — adapter renders disabled + placeholder. */
 	readonly can: boolean
 	readonly direction: 'horizontal' | 'vertical'
-	/** Docking region, so axis-aware editors can pick the overlay side. */
+	/** Docking region, so axis-aware controls can pick the overlay side. */
 	readonly region: PaletteRegion | undefined
 }
 
@@ -353,7 +409,7 @@ export type SelectOption = {
 	readonly text: string
 	/** Icon part, when the option declares one. */
 	readonly icon: string | undefined
-	/** Label part; `undefined` when the display mode hides text. */
+	/** Label part; `undefined` when `showText` hides text (icon-only). */
 	readonly label: string | undefined
 	/** Option enablement; `false` disables selection. */
 	readonly can: boolean
@@ -362,13 +418,13 @@ export type SelectOption = {
 /** Current option in raw (unfiltered) form — the closed select box source. */
 export type SelectCurrent = {
 	readonly value: string
-	/** Raw declared icon (ignores `choiceDisplay`); `undefined` when none. */
+	/** Raw declared icon; `undefined` when none. */
 	readonly icon: string | undefined
 	/** Raw label (`option.label ?? option.value`); always defined. */
 	readonly label: string
 }
 
-/** Listbox row — always icon (when declared) + full text, ignoring `showText`/`choiceDisplay`. */
+/** Listbox row — always icon (when declared) + full text, ignoring `showText`. */
 export type SelectListOption = {
 	readonly value: string
 	readonly icon: string | undefined
@@ -382,28 +438,31 @@ export type SelectPresenter = {
 	readonly label: string
 	/** Tool icon (`config.icon`); renders before the value icon, like numerics. */
 	readonly toolIcon: string | undefined
-	/** Current value icon (raw declared option icon, ignores `choiceDisplay`);
+	/** Current value icon (raw declared option icon);
 	 * `undefined` when neither the option nor the tool declares one — the
 	 * adapter removes the slot so no space is reserved. */
 	readonly icon: string | undefined
 	readonly direction: 'horizontal' | 'vertical'
-	/** Docking region, so axis-aware editors can pick the overlay side. */
+	/** Docking region, so axis-aware controls can pick the overlay side. */
 	readonly region: PaletteRegion | undefined
 	/** Closed-box + segmented label visibility (`config.showText === false` hides it → icon-only). */
 	readonly showText: boolean
 	/** Listbox text-filter input (`config.showFilter === true` shows it; `select` only). */
 	readonly showFilter: boolean
-	/** Display mode (`config.choiceDisplay`, default `'both'`); gates the closed-box label. */
-	readonly display: ChoiceDisplay
 	/** Current value; `undefined` = skeleton (no option selected). */
 	readonly value: string | undefined
 	/** True when no option matches (`current === undefined`): skeleton or
 	 * unknown value. The adapter renders a watermark (`?`) instead of the
 	 * closed label so the trigger is never an empty box. */
 	readonly isSkeleton: boolean
+	/**
+	 * False when the tool is disabled: explicit `can` returned false, or a
+	 * context tool (`uses` non-empty) is skeleton — adapter renders disabled.
+	 */
+	readonly can: boolean
 	/** Current option in raw form; `undefined` = skeleton or unknown value. */
 	readonly current: SelectCurrent | undefined
-	/** Display-filtered options for `segmented` (honours `choiceDisplay`). */
+	/** Options for `segmented` (label honours `showText`). */
 	readonly options: readonly SelectOption[]
 	/** Unfiltered rows for the select listbox (always full text). */
 	readonly listOptions: readonly SelectListOption[]
@@ -411,32 +470,22 @@ export type SelectPresenter = {
 	readonly select: (value: string) => string
 }
 
-export type ChoiceDisplay = 'icon' | 'text' | 'both'
-
-function choiceDisplayOf(item: ToolbarItem): ChoiceDisplay {
-	const config = (item as { config?: unknown }).config as { choiceDisplay?: unknown } | undefined
-	const value = config?.choiceDisplay
-	return value === 'icon' || value === 'text' || value === 'both' ? value : 'both'
-}
-
-/** Icon part of an option under a display mode (`undefined` when hidden). */
-function choiceIcon(option: EnumOption, display: ChoiceDisplay): string | undefined {
-	if (display === 'text') return undefined
+/** Icon part of an option; `undefined` when none declared. */
+function choiceIcon(option: EnumOption): string | undefined {
 	return typeof option.icon === 'string' ? option.icon : undefined
 }
 
-/** Label part of an option under a display mode (`undefined` when hidden). */
-function choiceLabel(option: EnumOption, display: ChoiceDisplay): string | undefined {
-	if (display === 'icon') return undefined
+/** Label part of an option under `showText` (`undefined` = icon-only). */
+function choiceLabel(option: EnumOption, showText: boolean): string | undefined {
+	if (!showText) return undefined
 	return option.label ?? option.value
 }
 
 /** Merged display string for a single-node renderer (segmented tooltips). */
-function choiceText(option: EnumOption, display: ChoiceDisplay): string {
+function choiceText(option: EnumOption, showText: boolean): string {
 	const label = option.label ?? option.value
-	const icon = choiceIcon(option, display)
-	if (display === 'icon') return icon ?? label
-	if (display === 'text') return label
+	const icon = choiceIcon(option)
+	if (!showText) return icon ?? label
 	return icon !== undefined ? `${icon} ${label}` : label
 }
 
@@ -464,16 +513,16 @@ function showFilterOf(item: ToolbarItem): boolean {
 
 /**
  * Closed select-box label: `undefined` = icon-only trigger. The label shows
- * when text is enabled (`showText` and `display !== 'icon'`); an option with
- * no icon keeps its label as a fallback so the trigger is never empty
- * (mirrors the segmented icon-less fallback).
+ * when text is enabled (`showText`); an option with no icon keeps its label
+ * as a fallback so the trigger is never empty (mirrors the segmented
+ * icon-less fallback).
  */
 export function selectClosedLabel(
-	view: Pick<SelectPresenter, 'showText' | 'display' | 'current'>
+	view: Pick<SelectPresenter, 'showText' | 'current'>
 ): string | undefined {
 	const current = view.current
 	if (current === undefined) return undefined
-	if (view.showText && view.display !== 'icon') return current.label
+	if (view.showText) return current.label
 	if (current.icon === undefined) return current.label
 	return undefined
 }
@@ -494,7 +543,7 @@ export function selectPresenter(
 			? ((bound.point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
 					?.options ?? [])
 			: []
-	const display = choiceDisplayOf(item)
+	const showText = showTextOf(item)
 	const current = optionsList.find((option) => option.value === value)
 	const currentIcon = current !== undefined ? current.icon : undefined
 	const toolIcon = meta.icon
@@ -514,17 +563,17 @@ export function selectPresenter(
 		icon: typeof currentIcon === 'string' ? currentIcon : meta.icon,
 		direction: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
 		region: surface.region,
-		showText: showTextOf(item),
+		showText,
 		showFilter: showFilterOf(item),
-		display,
 		value,
 		isSkeleton: currentEntry === undefined,
+		can: valuedCan(bound),
 		current: currentEntry,
 		options: optionsList.map((option) => ({
 			value: option.value,
-			text: choiceText(option, display),
-			icon: choiceIcon(option, display),
-			label: choiceLabel(option, display),
+			text: choiceText(option, showText),
+			icon: choiceIcon(option),
+			label: choiceLabel(option, showText),
 			can: option.can !== false,
 		})),
 		listOptions: optionsList.map((option) => ({
@@ -572,18 +621,23 @@ export type SliderPresenter = {
 	readonly step: number
 	/** Current value; `undefined` = skeleton (adapters render the unset state). */
 	readonly value: number | undefined
+	/**
+	 * False when the tool is disabled: explicit `can` returned false, or a
+	 * context tool (`uses` non-empty) is skeleton — adapter renders disabled.
+	 */
+	readonly can: boolean
 }
 
 /**
- * Resolve the slider range layout. An explicit slider editor variant id
+ * Resolve the slider range layout. An explicit slider control id
  * (`slider` → inline, `drawerSlider` → drawer) is authoritative — it is the
  * user's choice in the configurator. Otherwise `config.sliderVariant` applies,
  * and the default is `inline` (the range runs along the toolbar axis).
  */
 function sliderVariantOf(item: ToolbarItem): SliderVariant {
-	const editor = (item as { editor?: unknown }).editor
-	if (editor === 'drawerSlider') return 'drawer'
-	if (editor === 'slider') return 'inline'
+	const control = (item as { control?: unknown }).control
+	if (control === 'drawerSlider') return 'drawer'
+	if (control === 'slider') return 'inline'
 	const config = (item as { config?: unknown }).config as { sliderVariant?: unknown } | undefined
 	const value = config?.sliderVariant
 	if (value === 'inline' || value === 'drawer') return value
@@ -634,6 +688,7 @@ export function sliderPresenter(
 		max: constraints.max ?? 100,
 		step: constraints.step ?? 1,
 		value,
+		can: valuedCan(bound),
 	}
 }
 
@@ -644,11 +699,11 @@ export type ConfiguratorModel = {
 	readonly icon: string
 	readonly hint: string
 	readonly tone: 'neutral' | 'accent'
-	readonly editor: string | undefined
+	readonly control: string | undefined
 	readonly removable: boolean
 }
 
-/** Pure configurator view-model (label/icon/hint/tone/editor; mutation stays adapter-owned). */
+/** Pure configurator view-model (label/icon/hint/tone/control; mutation stays adapter-owned). */
 export function configuratorModel(item: ToolbarItem): ConfiguratorModel {
 	const meta = headMeta(item)
 	return {
@@ -656,7 +711,7 @@ export function configuratorModel(item: ToolbarItem): ConfiguratorModel {
 		icon: meta.icon ?? '',
 		hint: meta.hint ?? '',
 		tone: meta.tone,
-		editor: meta.editor,
+		control: meta.control,
 		removable: true,
 	}
 }
@@ -675,28 +730,35 @@ export function configuratorTonePatch(value: string): Record<string, string> {
 }
 
 /**
- * Prune config keys when switching editors (mirrors the svelte `setEditor`
- * cleanup for `values`/`keywords`/`choiceDisplay`).
- * - slider / drawerSlider keep `showValue`, prune the enum-subset keys + `showText` + `showFilter`.
- * - select keeps `showText` + `showFilter` + the enum-subset keys, prunes `showValue`.
- * - segmented keeps `showText` + the enum-subset keys, prunes `showValue` + `showFilter`.
- * - other enum editors keep the enum-subset keys, prune `showValue` + `showText` + `showFilter`.
- * - everything else prunes both.
+ * Prune config keys when switching controls.
+ * - slider / drawerSlider keep `showValue`, prune `showText` + `showFilter`.
+ * - select keeps `showText` + `showFilter`, prunes `showValue`.
+ * - segmented keeps `showText`, prunes `showValue` + `showFilter`.
+ * - other enum controls prune `showValue` + `showText` + `showFilter`.
+ * - drawer keeps `open`, prunes every display key.
+ * - status keeps `statusKey`, prunes every display key.
+ * - everything else prunes all display keys.
+ * `sliderVariant` needs no entry: it is a legacy fallback shadowed by the
+ * explicit `slider` / `drawerSlider` control ids (`sliderVariantOf`).
  * Returns the keys to delete (adapter deletes them from `item.config`).
  */
-export function configuratorEditorCleanup(nextEditor: string): readonly string[] {
-	const isSlider = nextEditor === 'slider' || nextEditor === 'drawerSlider'
+export function configuratorControlCleanup(nextControl: string): readonly string[] {
+	const isSlider = nextControl === 'slider' || nextControl === 'drawerSlider'
 	const isEnum =
-		nextEditor === 'flip' ||
-		nextEditor === 'radio' ||
-		nextEditor === 'select' ||
-		nextEditor === 'segmented' ||
-		nextEditor === 'splitRadio'
-	if (isSlider) return ['values', 'keywords', 'choiceDisplay', 'showText', 'showFilter']
-	if (nextEditor === 'select') return ['showValue']
-	if (nextEditor === 'segmented') return ['showValue', 'showFilter']
+		nextControl === 'flip' ||
+		nextControl === 'radio' ||
+		nextControl === 'select' ||
+		nextControl === 'segmented' ||
+		nextControl === 'splitRadio'
+	if (isSlider) return ['showText', 'showFilter']
+	if (nextControl === 'select') return ['showValue']
+	if (nextControl === 'segmented') return ['showValue', 'showFilter']
 	if (isEnum) return ['showValue', 'showText', 'showFilter']
-	return ['values', 'keywords', 'choiceDisplay', 'showValue', 'showText', 'showFilter']
+	if (nextControl === 'drawer')
+		return ['showValue', 'showText', 'showFilter', 'sliderVariant', 'statusKey']
+	if (nextControl === 'status')
+		return ['showValue', 'showText', 'showFilter', 'sliderVariant', 'open']
+	return ['showValue', 'showText', 'showFilter']
 }
 
 // ── Enum-from / stash display helpers ───────────────────────────────────────
@@ -722,4 +784,4 @@ export function isPresenterDrawerItem(item: ToolbarItem): boolean {
 	return isDrawerItem(item)
 }
 
-export type { EditorCapability }
+export type { ControlCapability }

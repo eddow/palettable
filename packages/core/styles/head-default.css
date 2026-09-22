@@ -4,7 +4,7 @@
  * (`styles/head-dark.css` or `styles/head-light.css`). Never injected at runtime.
  *
  * Layout:  1 buttons · 2 icon/choice/status · 3 shared panel ·
- *          4 command box · 5 overlay/panel · 6 editor groups · 7 select ·
+ *          4 command box · 5 overlay/panel · 6 control groups · 7 select ·
  *          8 slider · 9 stepper/stars · 10 vertical · 11 joined-box ·
  *          12 configurator/add-panel
  * Tokens live in `head-dark.css` / `head-light.css` (§0) — no raw colors here. */
@@ -82,9 +82,9 @@
 	box-shadow: var(--pd-accent-ring);
 }
 
-/* Accent tone on wrapper-stamped editors: the tone class sits on the
+/* Accent tone on wrapper-stamped controls: the tone class sits on the
  * wrapper while the visible chrome lives on children (or on the node
- * itself for status). Each editor gets the same accent border + ring so
+ * itself for status). Each control gets the same accent border + ring so
  * accent reads clearly next to neutral on every control. Segmented
  * options and stepper ± buttons are covered by the descendant rule
  * above; the readout chips and group boxes below complete the set. */
@@ -159,7 +159,7 @@
 
 /* Generic toolbar fill: every default-head root inside a toolbar item
  * fills the standardized perpendicular size on its bar axis, so no item
- * (status, select, or future editors) renders shorter than the bar. Only
+ * (status, select, or future controls) renders shorter than the bar. Only
  * the perpendicular dimension is pinned — longitudinal growth stays
  * allowed, and vertical keeps `block-size: auto` with a fixed inline
  * square (per-component §10 rules). */
@@ -526,8 +526,8 @@
 		color var(--pd-ease);
 }
 
-/* ── 6. Editor groups ── */
-/* All editors are gapless inline groups; §11 collapses the shared edges.
+/* ── 6. Control groups ── */
+/* All controls are gapless inline groups; §11 collapses the shared edges.
  * `stepper`/`stars` carry the group chrome; `slider`/`select`/`segmented`
  * are transparent wrappers whose children carry it. */
 
@@ -692,7 +692,19 @@
 	outline: none;
 }
 
-/* Horizontal: list drops below (above on bottom-docked toolbars). */
+/* Horizontal: list drops below (above on bottom-docked toolbars).
+ * The closed trigger fills the toolbar perpendicular size like `.palette-default-tool`,
+ * so the select reads full-height at rest (the 2rem default is the bare chip size). */
+@container palette style(--layout: horizontal) {
+	.palette-default-select > .palette-default-select-trigger {
+		min-block-size: var(--palette-toolbar-perpendicular);
+	}
+}
+
+.palette-default-select.palette-default-layout-horizontal > .palette-default-select-trigger {
+	min-block-size: var(--palette-toolbar-perpendicular);
+}
+
 .palette-default-select.palette-default-layout-horizontal > .palette-default-select-list {
 	top: calc(100% + 4px);
 	inset-inline-start: 0;
@@ -1335,10 +1347,12 @@
 }
 
 /* Drawer ("More") trigger: always icon-only. Label survives as accessible
- * name + tooltip; no axis-scoped hiding needed. The attached popup adds its
- * own 1px border around a full-size toolbar, so the trigger grows by the
- * same 2px along the joint axis — both land at 42px and read as one
- * group-field. Vertical toolbars share heights, horizontal share widths. */
+ * name + tooltip; no axis-scoped hiding needed. While open (or always for
+ * hover-open drawers, `.is-open-hover`) the attached popup adds its own 1px
+ * border around a full-size toolbar, so the trigger grows by the same 2px
+ * along the joint axis — both land at 42px and read as one group-field.
+ * Click/press triggers at rest are standalone 40px squares. Vertical
+ * toolbars share heights, horizontal share widths. */
 .palette-default-tool.palettable-drawer__trigger {
 	inline-size: var(--palette-toolbar-perpendicular);
 	min-inline-size: var(--palette-toolbar-perpendicular);
@@ -1347,15 +1361,46 @@
 	padding: 0;
 	justify-content: center;
 }
-.palettable-drawer.from-left .palettable-drawer__trigger,
-.palettable-drawer.from-right .palettable-drawer__trigger {
+.palettable-drawer.from-left:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	.palettable-drawer__trigger,
+.palettable-drawer.from-left:has(> .palettable-drawer__trigger.is-open-hover)
+	.palettable-drawer__trigger,
+.palettable-drawer.from-right:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	.palettable-drawer__trigger,
+.palettable-drawer.from-right:has(> .palettable-drawer__trigger.is-open-hover)
+	.palettable-drawer__trigger {
 	block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
 	min-block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
 }
-.palettable-drawer.from-top .palettable-drawer__trigger,
-.palettable-drawer.from-bottom .palettable-drawer__trigger {
+.palettable-drawer.from-top:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	.palettable-drawer__trigger,
+.palettable-drawer.from-top:has(> .palettable-drawer__trigger.is-open-hover)
+	.palettable-drawer__trigger,
+.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger[aria-expanded='true'])
+	.palettable-drawer__trigger,
+.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger.is-open-hover)
+	.palettable-drawer__trigger {
 	inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
 	min-inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+}
+
+/* Drawer chevron: marker beside the icon on horizontal bars, stacked
+ * underneath it on vertical bars (the square trigger has no room beside
+ * the icon). Glyphs stay ▸/▾ — only the position changes. */
+.palette-default-drawer-chevron {
+	font-size: 0.65rem;
+	line-height: 1;
+	color: var(--pd-muted);
+}
+@container palette style(--layout: vertical) {
+	.palettable-drawer__trigger {
+		flex-direction: column;
+		gap: 1px;
+	}
+}
+.palettable-drawer__trigger.palette-default-layout-vertical {
+	flex-direction: column;
+	gap: 1px;
 }
 
 /* ── 10. Vertical axis ── */

@@ -104,7 +104,7 @@ describe('drawer + command-box shells', () => {
 		expect(box.dataset.testid).toBe('command-box-combobox')
 		expect(box.querySelector('[data-testid="command-box-input"]')).not.toBeNull()
 		expect(box.querySelector('[data-testid="command-box-results"]')).not.toBeNull()
-		expect(box.querySelector('[data-testid="command-box-open-editor"]')).not.toBeNull()
+		expect(box.querySelector('[data-testid="command-box-open-configurator"]')).not.toBeNull()
 	})
 })
 

@@ -1,4 +1,8 @@
-# Layout and drag
+# Layout and drag (historical svelte reference + live core engine)
+
+> Frozen svelte paths (`src/lib/palette/*`, `DrawerEditor.svelte`) are kept
+> verbatim as the port reference. The live engine is `packages/core/src/layout.ts`
+> + `drag.ts`, the live renderer `packages/vanilla/src/ide.ts`.
 
 Engine: `src/lib/palette/layout.svelte.ts` (pure helpers + Svelte actions).
 Session helper: `src/lib/palette/drag-session.ts` (pointer capture + window
@@ -44,22 +48,58 @@ remains of the total — never stored, always derived.
   a border location (`border`/`track`/`trackIndex`/`region`) or a parking
   location (`parking`/`parkingIndex`) — never both — and drags, commits,
   and highlights as that container only.
-- `PaletteItem` binds `resolveEditorContext` output to `<Editor context>`.
+- `PaletteItem` binds the resolved control component with its context.
 - `Parking` owns the independent `parking` stack, always rendered (bordered
   empty strip with a hint when empty), with a delete button per row while
   editing (`removeParkedToolbar`) plus dwell-drop stack gaps mirroring a
-  border's stack gaps (flanking gaps on row hover, single gap on direct
-  hover, `draggingEmptiesParkingRow` suppression, `commitDraggedToParkingRow`
+  border's stack gaps (flanking gaps on row hover via `parkingFlanks`, single gap on direct
+  hover, whole-row neighbour suppression via `draggingWholeParkingRow`, `commitDraggedToParkingRow`
   on `configuration.stackDzHoverMs`); drops also land via the toolbar
-  item-space DZs (`commitDraggedToParking`), never by hovering a gap alone;
-  gaps stay lit under console panel-background hover via the `maskActive`
-  prop.
+  item-space DZs (`commitDraggedToParking`), never by hovering a gap alone.
+
+## Drawer toolbar drag (live vanilla)
+
+Drawer content is one child `Track` per drawer item (several toolbars along
+the child axis, perpendicular to the parent). Drawer toolbars are full drag
+participants in edit mode:
+
+- **Locations**: `DrawerToolbarLocation` (`container: 'drawer'`, root
+  border/parking location + drawer-item `path` + `slotIndex`) resolves by
+  `===` identity (`toolbarLocationOf` / `drawerLocationOf`); `DragOrigin`
+  has a matching `kind: 'drawer'` variant carrying the child track + path.
+- **Hover-open**: while editing + dragging, hovering a drawer trigger or its
+  popup opens it (any `config.open` mode; `head.ts` `renderDrawer` threads
+  `isEditing`/`isDragging` from the adapter). Outside a drag,
+  `config.open` (`click`/`hover`/`press`) behaves as before.
+- **Hierarchy close**: in edit mode drawers never close on mouseleave —
+  every drag hover (`renderToolbarElement` bar moves + `renderDrawerTrack`
+  moves) calls `closeDrawersOutside(target)`, which closes only popups whose
+  wrapper does NOT contain the hovered element. Ancestors stay open,
+  siblings close. Run mode keeps click/Escape/outside-click close.
+- **Gap highlight**: drawer item-spaces route through the same `item-gap`
+  session path as borders (`renderDrawerTrack` `pointermove` →
+  `session.over({ kind: 'item-gap', ... })`); the session resolves the
+  drawer container itself (`locateContainerOf` drawer scan) and commits via
+  `commitDraggedToDrawer` (engine `drawer-gap` element). No track/stack gaps
+  inside drawers — plain stacked toolbars only.
+- **Persistent empty toolbar**: `pruneEmptyToolbar` + `pruneDragOrigin` never
+  prune drawer toolbars — dragging the last tool out leaves a zero-item bar
+  whose single DZ renders large (square, toolbar-scale, dashed when idle;
+  `palette.css` drawer empty rules). Border/parking prune is unchanged.
+- **Cross-container**: border ↔ drawer ↔ parking ↔ catalog all merge through
+  the item-space path; the session origin follows into the drawer
+  (`kind: 'drawer'`). Whole-toolbar drawer slides relocate the bar object
+  within its child track (no prune victims).
+- **Adapter sync**: drawer-side `structure` events re-render open popups in
+  place (`syncOpenDrawerTracks` — inner track rebuild, popup stays open);
+  border-side moves still take the surgical `syncTrack`/`syncBorder` path.
 
 Helpers: `actualTrackSpaceAt`, `insertToolbar` (split a gap), `removeToolbar`
 (merge surrounding gaps), `removeParkedToolbar` (parking rows, no spacing),
-`draggingEmptiesParkingRow` (parking analogue of `draggingEmptiesTrackIndex`),
+`draggingWholeParkingRow` (parking analogue of `draggingEmptiesTrackIndex`,
+whole-row scope),
 `insertTrackWithToolbar`, `removeEmptyTrack`,
-`moveToolbarToTrack` / `moveToolbarToStack`, `resizeToolbar`,
+`resizeToolbar`,
 `resolveItemPlacementTarget` (linear cross-region placement). Instance
 identity: `canonicalItemTool` / `itemFingerprint` /
 `findOwnershipViolations` (same object in two containers is a bug).

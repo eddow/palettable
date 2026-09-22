@@ -13,8 +13,8 @@ head modal): `src/lib/palette/console.svelte.ts` + `src/lib/head/Console.svelte`
 | Builder                  | Contents                                                                 |
 | ------------------------ | ------------------------------------------------------------------------ |
 | `paletteCommandEntries`  | Executable commands from points: run points, boolean on/off, enum per-value setters, number inc/dec. `mode: 'catalog'` keeps entries enabled for search/drag. `excludeTools` omits meta-points (the console excludes `console` inside the console). |
-| `paletteAddItemEntries`  | Add sources: one per valued point (boolean/number/enum/… — the concrete editor is picked per-variant) + one per nothing-point by point name (Theme, Command, More, … — each binds 1:1 to its `editors` allowlist). `context.itemEditors` survives only as a fallback for editors no nothing-point claims. Runnable points are excluded (they already have command entries). |
-| `paletteDerivedVariants` | Concrete insertable variants for an add source: `tool` (toolbar command), `set` (boolean/enum/number control — value chosen on bar/inspector), `action`, `item` (editor-only). |
+| `paletteAddItemEntries`  | Add sources: one per valued point (boolean/number/enum/… — the concrete control is picked per-variant) + one per nothing-point by point name (Theme, Command, More, … — each binds 1:1 to its `controls` allowlist). `context.itemControls` survives only as a fallback for controls no nothing-point claims. Runnable points are excluded (they already have command entries). |
+| `paletteDerivedVariants` | Concrete insertable variants for an add source: `tool` (toolbar command), `set` (boolean/enum/number control — value chosen on bar/inspector), `action`, `item` (control-only). |
 | `paletteCatalogEntries`  | Full catalogue (headless helper, not rendered by the console): `mode: 'catalog'` commands + flattened add variants (`add:<variant-id>`), sorted by label. Each carries `catalogDrag` (`{ kind: 'spec' }` or `{ kind: 'variant' }`). |
 | `paletteEnumSubsetValues`| Filter enum values by keywords (powers `EnumSubsetConfigurator` + add-flow keyword filters). |
 
@@ -58,12 +58,12 @@ reactivity (`state_referenced_locally`).
 
 ## Command box (combobox) vs console
 
-The toolbar `commandBox` editor is a real **commands-combo-box** (text input + results popup,
+The toolbar `commandBox` control is a real **commands-combo-box** (text input + results popup,
 Ctrl-Shift-P style) built on `paletteCommandBoxModel` + `paletteCommandEntries` — a **run**
 surface that executes commands inline on the toolbar. It is independent of the console.
 
 When the palette is R/W (`editable !== false`), the combobox's shell also carries a **square
-edit-icon button** (`command-box-open-editor`, `✎`) on the left of the input — a plain action
+edit-icon button** (`command-box-open-configurator`, `✎`) on the left of the input — a plain action
 button (not a check-button/toggle), which opens the console in **edit mode**. Since the
 combobox already runs commands inline, the console opens edit-only when a `commandBox` is
 displayed (no `console-mode-toggle` in the modal itself).
@@ -78,15 +78,15 @@ the left of the command box to enter/leave edit mode. Closing the console always
 
 Edit mode swaps the console box to `paletteAddItemEntries` with `enterAction: 'select'` — a
 **single** list: selecting an add-box result (`console-results`) reveals the *Details* panel
-(`console-details-panel`) with the editor directly (one source = one variant via
+(`console-details-panel`) with the configurator directly (one source = one control via
 `paletteDerivedVariants` — no variant picker; adding happens only via d&d). Run mode shows
 only the run-box results. The console is edit-capable only when the palette is R/W
 (`editable !== false`): the edit button renders only then, and closing the console always
 clears the `palettes.editing` mirror (plus `palettes.inspecting`), so toolbars never stay
 inert after an edit-mode close. Selecting an entry builds a detached draft item
 (`itemFromAddSelection` — the draft binds the point with the bare tool id, no `=value`
-preset) and shows the full configurator (Label/Icon/Hint/Editor/Tone/showValue/showText,
-same rows as the inspector, minus Delete — the draft is detached — and minus Editor
+preset) and shows the full configurator (Label/Icon/Hint/Control/Tone/showValue/showText,
+same rows as the inspector, minus Delete — the draft is detached — and minus Control
 whenever a single choice remains, e.g. 1:1 nothing-points or single-variant families)
 bound to the draft, plus
 a disconnected preview below it (`console-add-preview`): real choices/options from the point
@@ -98,5 +98,5 @@ node in place. The preview content is the sole drag source
 editing.
 
 Payloads: `serializePaletteCatalogDragPayload` / `parsePaletteCatalogDragPayload`
-/ `paletteToolbarItemFromCatalogPayload` (spec → default editor variant +
+/ `paletteToolbarItemFromCatalogPayload` (spec → default control +
 label/icon/hint; variant → item per kind). Invalid payloads return `undefined`.

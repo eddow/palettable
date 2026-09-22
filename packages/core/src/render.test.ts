@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { configuration } from './configuration.js'
+import type { ControlRegistry } from './controls.js'
 import { PaletteCore } from './core.js'
-import type { EditorRegistry } from './editors.js'
 import { PaletteError } from './errors.js'
 import type { SerializedLayout, SerializedToolbarItem } from './layout.js'
 import { defaultLayoutFromPoints } from './layout.js'
@@ -38,7 +38,7 @@ function pointsWithDrawer(): AnyPoint[] {
 	return [...points(), { id: 'drawer', label: 'Drawer', type: 'nothing' }]
 }
 
-const registry: EditorRegistry = {
+const registry: ControlRegistry = {
 	boolean: {
 		toggle: { id: 'toggle', label: 'Toggle', families: ['boolean'], compact: true },
 	},
@@ -99,7 +99,7 @@ describe('node-only import (no DOM, no timers)', () => {
 				layout: core.layout.getSnapshot(),
 				values: core.values.asObject(),
 				keys: core.keys,
-				editors: registry,
+				controls: registry,
 			})
 		} finally {
 			globalThis.queueMicrotask = originalQueueMicrotask
@@ -122,7 +122,7 @@ describe('golden render model', () => {
 			layout: core.layout.getSnapshot(),
 			values: core.values.asObject(),
 			keys: { 'Ctrl+S': 'save' },
-			editors: registry,
+			controls: registry,
 		}
 		const first = resolveRenderTree(input)
 		const second = resolveRenderTree(input)
@@ -132,7 +132,7 @@ describe('golden render model', () => {
 		expect(JSON.stringify(first)).toMatchSnapshot()
 	})
 
-	it('resolves values, descriptors, editors, keystrokes', () => {
+	it('resolves values, descriptors, controls, keystrokes', () => {
 		const core = new PaletteCore(points(), {
 			initialValues: { theme: 'dark', flag: false },
 			virtuals: [...virtuals],
@@ -143,17 +143,17 @@ describe('golden render model', () => {
 			layout: defaultLayoutFromPoints(['theme', 'flag', 'save']),
 			values: core.values.asObject(),
 			keys: { 'Ctrl+S': 'save' },
-			editors: registry,
+			controls: registry,
 		})
 		const items = tree.borders.top.slots[0]?.toolbar.items ?? []
 		expect(items.map((item) => item.pointId)).toEqual(['theme', 'flag', 'save'])
 		expect(items[0]?.value).toBe('dark')
-		expect(items[0]?.editor).toBe('text')
+		expect(items[0]?.control).toBe('text')
 		expect(items[1]?.value).toBe(false)
-		expect(items[1]?.editor).toBe('toggle')
+		expect(items[1]?.control).toBe('toggle')
 		expect(items[2]?.descriptor?.id).toBe('save')
 		expect(items[2]?.value).toBeUndefined()
-		expect(items[2]?.editor).toBe('button')
+		expect(items[2]?.control).toBe('button')
 		expect(items[2]?.keystrokes).toEqual(['Ctrl+S'])
 	})
 
@@ -167,12 +167,12 @@ describe('golden render model', () => {
 			virtuals: core.virtualPoints,
 			layout: defaultLayoutFromPoints(['preset', 'preset=fast', 'pause']),
 			values: core.values.asObject(),
-			editors: registry,
+			controls: registry,
 		})
 		const items = tree.borders.top.slots[0]?.toolbar.items ?? []
 		expect(items[0]?.pointId).toBe('preset')
 		expect(items[0]?.value).toBe('fast')
-		expect(items[0]?.editor).toBe('select')
+		expect(items[0]?.control).toBe('select')
 		expect(items[1]?.value).toBe('fast')
 		expect(items[2]?.pointId).toBe('pause')
 		expect(items[2]?.value).toBe(false)
@@ -189,9 +189,9 @@ describe('golden render model', () => {
 							space: 1,
 							toolbar: [
 								{
-									tool: 'drawer',
-									editor: 'drawer',
-									toolbar: [{ space: 1, toolbar: [{ tool: 'theme' }] }],
+									point: 'drawer',
+									control: 'drawer',
+									toolbar: [{ space: 1, toolbar: [{ point: 'theme' }] }],
 								},
 							],
 						},
@@ -207,10 +207,10 @@ describe('golden render model', () => {
 			points: core.points,
 			layout,
 			values: core.values.asObject(),
-			editors: registry,
+			controls: registry,
 		})
 		const drawer = tree.borders.top.slots[0]?.toolbar.items[0]
-		expect(drawer?.editor).toBe('drawer')
+		expect(drawer?.control).toBe('drawer')
 		expect(
 			drawer?.children.flatMap((slot) => slot.toolbar.items.map((child) => child.pointId))
 		).toEqual(['theme'])
@@ -218,9 +218,9 @@ describe('golden render model', () => {
 
 	it(`rejects drawer nesting beyond ${RENDER_MAX_DEPTH}`, () => {
 		const core = new PaletteCore(pointsWithDrawer())
-		let toolbar: SerializedToolbarItem[] = [{ tool: 'theme' }]
+		let toolbar: SerializedToolbarItem[] = [{ point: 'theme' }]
 		for (let depth = 0; depth < RENDER_MAX_DEPTH + 1; depth++) {
-			toolbar = [{ tool: 'drawer', editor: 'drawer', toolbar: [{ space: 1, toolbar }] }]
+			toolbar = [{ point: 'drawer', control: 'drawer', toolbar: [{ space: 1, toolbar }] }]
 		}
 		const layout: SerializedLayout = {
 			version: 2,
@@ -244,16 +244,16 @@ describe('golden render model', () => {
 			virtuals: core.virtualPoints,
 			layout: defaultLayoutFromPoints(['theme', 'fontSize', 'flag', 'mode', 'save']),
 			values: {},
-			editors: registry,
+			controls: registry,
 		})
 		const items = tree.borders.top.slots[0]?.toolbar.items ?? []
 		expect(items.map((item) => item.pointId)).toEqual(['theme', 'fontSize', 'flag', 'mode', 'save'])
 		// Chrome from descriptors, value undefined — no default fill.
 		for (const item of items) expect(item.value).toBeUndefined()
 		expect(items[0]?.descriptor?.id).toBe('theme')
-		expect(items[0]?.editor).toBe('text')
+		expect(items[0]?.control).toBe('text')
 		expect(items[4]?.descriptor?.id).toBe('save')
-		expect(items[4]?.editor).toBe('button')
+		expect(items[4]?.control).toBe('button')
 	})
 
 	it('rejects unknown versions and unknown points loudly', () => {
@@ -299,14 +299,14 @@ describe('hydration round-trip', () => {
 			virtuals: server.virtualPoints,
 			layout: snapshot.layout,
 			values: snapshot.values,
-			editors: registry,
+			controls: registry,
 		})
 		const clientTree = resolveRenderTree({
 			points: client.points,
 			virtuals: client.virtualPoints,
 			layout: wire.layout,
 			values: client.values.asObject(),
-			editors: registry,
+			controls: registry,
 		})
 		expect(JSON.stringify(clientTree)).toBe(JSON.stringify(serverTree))
 		expect(client.layout.getSnapshot()).toEqual(wire.layout)
@@ -323,7 +323,7 @@ describe('action isolation', () => {
 			points: [{ id: 'save', label: 'Save', type: 'action', run }],
 			layout: defaultLayoutFromPoints(['save']),
 			values: {},
-			editors: registry,
+			controls: registry,
 		})
 		const item = tree.borders.top.slots[0]?.toolbar.items[0]
 		expect(item?.descriptor?.id).toBe('save')
@@ -348,7 +348,7 @@ describe('configuration pinning', () => {
 			points: core.points,
 			layout: zeroed,
 			values: core.values.asObject(),
-			editors: registry,
+			controls: registry,
 			configuration: pinned,
 		}
 		expect(resolveRenderTree(input).borders.top.slots[0]?.space).toBe(0.5)

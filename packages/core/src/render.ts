@@ -16,7 +16,7 @@
  */
 import type { PaletteConfiguration } from './configuration.js'
 import { configuration } from './configuration.js'
-import type { EditorCapability, EditorDefaults, EditorRegistry } from './editors.js'
+import type { ControlCapability, ControlDefaults, ControlRegistry } from './controls.js'
 import { PaletteError } from './errors.js'
 import type { KeyBindings } from './keys.js'
 import { findKeystrokesFor, findKeystrokesForTarget } from './keys.js'
@@ -33,7 +33,7 @@ import { isDrawerItem, snapshotLayout, validateSerializedLayout } from './layout
 import type { ServerPointDescriptor } from './palette.js'
 import type { ActionPoint, AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
-import { axisForRegion, drawerChildAxis, resolveEditorVariant } from './presenters.js'
+import { axisForRegion, drawerChildAxis, resolveControl } from './presenters.js'
 import { canonicalPointId, canonicalSpecId, isInlineSpec, parsePointSpec } from './specs.js'
 import type { VirtualPoint } from './virtual.js'
 import { isEnumFromPoint, isStashPoint, matchEnumOption } from './virtual.js'
@@ -49,10 +49,10 @@ export type ResolvedItem = {
 	readonly descriptor: ServerPointDescriptor | undefined
 	/** Current value / enum-from key / stash pressed-state (see below). */
 	readonly value: unknown
-	/** Single resolved editor variant id (canonical fallback chain). */
-	readonly editor: string | undefined
-	/** Capabilities of the resolved variant (or `undefined` when unresolved). */
-	readonly capability: EditorCapability | undefined
+	/** Single resolved control id (canonical fallback chain). */
+	readonly control: string | undefined
+	/** Capabilities of the resolved control (or `undefined` when unresolved). */
+	readonly capability: ControlCapability | undefined
 	/** Keystrokes bound to this item's spec. */
 	readonly keystrokes: readonly string[]
 	/**
@@ -107,8 +107,8 @@ export type RenderInput = {
 	readonly layout: AnySerializedLayout | PaletteLayout
 	readonly values: Readonly<Record<string, unknown>>
 	readonly keys?: KeyBindings
-	readonly editors?: EditorRegistry
-	readonly editorDefaults?: EditorDefaults
+	readonly controls?: ControlRegistry
+	readonly controlDefaults?: ControlDefaults
 	/**
 	 * Pinned configuration (defaults to the live singleton for back-compat).
 	 * Only `trackGapMinGrow` affects resting geometry: track-gap slots with
@@ -221,7 +221,7 @@ type ResolveContext = {
 }
 
 function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
-	const bound = (item as { tool?: unknown }).tool
+	const bound = (item as { point?: unknown }).point
 	if (typeof bound !== 'string' && !isInlineSpec(bound))
 		throw new PaletteError('resolveRenderTree: toolbar item has no bound point')
 	if (isDrawerItem(item)) {
@@ -242,7 +242,7 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 			pointId: drawerParsed.pointId,
 			descriptor: { ...drawerDescriptor } as ServerPointDescriptor,
 			value: undefined,
-			editor: 'drawer',
+			control: 'drawer',
 			capability: lookupCapability(context, 'item', 'drawer'),
 			keystrokes: findKeystrokesFor(context.keys, drawerParsed.pointId),
 			children: item.toolbar.map((slot) => ({
@@ -278,21 +278,21 @@ function resolveInlineItem(
 ): ResolvedItem {
 	const source = context.definitions.get(virtual.source)
 	const sourceValue = source !== undefined ? context.values[source.id] : undefined
-	// Virtuals have no point definition — resolve the editor variant against
+	// Virtuals have no point definition — resolve the control against
 	// the family they present as (`enum` for enum-from, `action` for stash)
-	// so server/client agree on variant eligibility (SSR §4.3).
+	// so server/client agree on control eligibility (SSR §4.3).
 	// Family probe carries no `defaultValue` (core holds no defaults).
 	const familyPoint = (
 		isEnumFromPoint(virtual)
 			? { id: virtual.id, label: virtual.label, type: 'enum' }
 			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
 	) as AnyPoint
-	const editor = resolveEditorVariant(
+	const control = resolveControl(
 		familyPoint,
 		context.surface,
-		context.input.editors,
-		context.input.editorDefaults,
-		(item as { editor?: string }).editor
+		context.input.controls,
+		context.input.controlDefaults,
+		(item as { control?: string }).control
 	)
 	if (isEnumFromPoint(virtual)) {
 		const key = matchEnumOption(virtual, sourceValue)?.key
@@ -300,8 +300,8 @@ function resolveInlineItem(
 			pointId: virtual.id,
 			descriptor: undefined,
 			value: key,
-			editor,
-			capability: lookupCapability(context, 'enum', editor),
+			control,
+			capability: lookupCapability(context, 'enum', control),
 			keystrokes: findKeystrokesForTarget(context.keys, virtual),
 			children: [],
 			config: (item as { config?: Record<string, unknown> }).config,
@@ -311,8 +311,8 @@ function resolveInlineItem(
 		pointId: virtual.id,
 		descriptor: undefined,
 		value: Object.is(sourceValue, virtual.stashedValue),
-		editor,
-		capability: lookupCapability(context, 'action', editor),
+		control,
+		capability: lookupCapability(context, 'action', control),
 		keystrokes: findKeystrokesForTarget(context.keys, virtual),
 		children: [],
 		config: (item as { config?: Record<string, unknown> }).config,
@@ -334,12 +334,12 @@ function resolveVirtualItem(
 			? { id: virtual.id, label: virtual.label, type: 'enum' }
 			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
 	) as AnyPoint
-	const editor = resolveEditorVariant(
+	const control = resolveControl(
 		familyPoint,
 		context.surface,
-		context.input.editors,
-		context.input.editorDefaults,
-		(item as { editor?: string }).editor
+		context.input.controls,
+		context.input.controlDefaults,
+		(item as { control?: string }).control
 	)
 	if (isEnumFromPoint(virtual)) {
 		const key =
@@ -350,8 +350,8 @@ function resolveVirtualItem(
 			pointId: virtual.id,
 			descriptor: undefined,
 			value: key,
-			editor,
-			capability: lookupCapability(context, 'enum', editor),
+			control,
+			capability: lookupCapability(context, 'enum', control),
 			keystrokes: findKeystrokesFor(context.keys, virtual.id),
 			children: [],
 			config: (item as { config?: Record<string, unknown> }).config,
@@ -362,8 +362,8 @@ function resolveVirtualItem(
 			pointId: virtual.id,
 			descriptor: undefined,
 			value: Object.is(sourceValue, virtual.stashedValue),
-			editor,
-			capability: lookupCapability(context, 'action', editor),
+			control,
+			capability: lookupCapability(context, 'action', control),
 			keystrokes: findKeystrokesFor(context.keys, virtual.id),
 			children: [],
 			config: (item as { config?: Record<string, unknown> }).config,
@@ -379,12 +379,12 @@ function resolvePointItem(
 	context: ResolveContext
 ): ResolvedItem {
 	const pointId = canonicalPointId(spec)
-	const editor = resolveEditorVariant(
+	const control = resolveControl(
 		def,
 		context.surface,
-		context.input.editors,
-		context.input.editorDefaults,
-		(item as { editor?: string }).editor
+		context.input.controls,
+		context.input.controlDefaults,
+		(item as { control?: string }).control
 	)
 	const family = isActionPoint(def)
 		? 'action'
@@ -399,8 +399,8 @@ function resolvePointItem(
 			pointId,
 			descriptor: { ...descriptor } as ServerPointDescriptor,
 			value: undefined,
-			editor,
-			capability: lookupCapability(context, family, editor),
+			control,
+			capability: lookupCapability(context, family, control),
 			keystrokes,
 			children: [],
 			config,
@@ -412,8 +412,8 @@ function resolvePointItem(
 			pointId,
 			descriptor: { ...descriptor } as ServerPointDescriptor,
 			value: context.values[pointId],
-			editor,
-			capability: lookupCapability(context, family, editor),
+			control,
+			capability: lookupCapability(context, family, control),
 			keystrokes,
 			children: [],
 			config,
@@ -425,8 +425,8 @@ function resolvePointItem(
 		pointId,
 		descriptor: { ...nothingDescriptor } as ServerPointDescriptor,
 		value: undefined,
-		editor,
-		capability: lookupCapability(context, family, editor),
+		control,
+		capability: lookupCapability(context, family, control),
 		keystrokes,
 		children: [],
 		config,
@@ -436,13 +436,13 @@ function resolvePointItem(
 function lookupCapability(
 	context: ResolveContext,
 	family: string,
-	editor: string | undefined
-): EditorCapability | undefined {
-	if (editor === undefined) return undefined
-	const variants = context.input.editors?.[family as keyof typeof context.input.editors] as
-		| Record<string, EditorCapability>
+	control: string | undefined
+): ControlCapability | undefined {
+	if (control === undefined) return undefined
+	const controls = context.input.controls?.[family as keyof typeof context.input.controls] as
+		| Record<string, ControlCapability>
 		| undefined
-	return variants?.[editor]
+	return controls?.[control]
 }
 
 // ── Wire snapshot helpers ───────────────────────────────────────────────────
@@ -516,8 +516,8 @@ function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
 function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 	if (item.toolbar !== undefined) {
 		return {
-			tool: typeof item.tool === 'string' ? item.tool : (item.tool ?? 'drawer'),
-			editor: 'drawer',
+			point: typeof item.point === 'string' ? item.point : (item.point ?? 'drawer'),
+			control: 'drawer',
 			config: item.config,
 			toolbar: item.toolbar.map((slot) => ({
 				space: slot.space,
@@ -525,16 +525,16 @@ function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 			})),
 		} as ToolbarItem
 	}
-	if (item.tool === undefined) {
+	if (item.point === undefined) {
 		// Back-compat: pre-nothing-point payloads carry bare
-		// `{ editor: 'status' }` — migrate to `{ tool: editor, editor }`.
+		// `{ control: 'status' }` — migrate to `{ point: control, control }`.
 		return {
-			tool: item.editor ?? 'status',
-			editor: item.editor ?? 'status',
+			point: item.control ?? 'status',
+			control: item.control ?? 'status',
 			config: item.config,
 		} as ToolbarItem
 	}
-	return { tool: item.tool, editor: item.editor, config: item.config } as ToolbarItem
+	return { point: item.point, control: item.control, config: item.config } as ToolbarItem
 }
 
 // ── Value codecs (custom types) ─────────────────────────────────────────────

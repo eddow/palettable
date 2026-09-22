@@ -17,8 +17,8 @@ parameter. For the data model itself see `docs/layout-and-drag.md` and
    merges.
 4. **Emptying a toolbar removes it** (and its track, if that empties too).
 5. **Candidate targets mini-expand** when the pointer gets near.
-6. **Deletion is not drag.** The only ways to remove an editor are editing the
-   editor (a "delete" button on its edit surface) or moving it to parking and
+6. **Deletion is not drag.** The only ways to remove a tool are editing the
+   tool (a "delete" button on its configurator surface) or moving it to parking and
    removing it from there.
 
 ## The drag session
@@ -55,7 +55,7 @@ dragged tools left in my toolbar?"**
 - **yes** → `'restructure'`: the tools are a subset, so the origin toolbar stays
   behind and a track-gap commit extracts them into a fresh singleton toolbar.
 
-The mode is recomputed after **every structural commit** (`refreshDragMode`),
+The mode is recomputed after **every structural commit**,
 never re-derived per pointer move. Two consequences:
 
 - A restructure *becomes* a slide once its tools have been placed in their own
@@ -73,11 +73,10 @@ which is why the mode is cached rather than derived on demand.
 ### The drag session stores the whole-toolbar flag
 
 Core `DraggingState` carries `isWholeToolbar` alongside the cached `mode`:
-derived once at drag-start via `startDraggingState` (adapters must use it,
-never a literal), refreshed by `refreshDragMode` after every commit, and
+derived once at drag-start (adapters use `createDrag`, never a hand-built literal), refreshed after every commit, and
 returned as an update parameter (`{ moved, isWholeToolbar }`) from every
 commit so adapters update without re-deriving. `isSlidingFlank` and the
-commits read the stored flag — never `resolveDragMode` per pointer move.
+commits read the stored flag — never re-derived per pointer move.
 
 ### Core/adapter drag interface (session + events)
 
@@ -89,7 +88,7 @@ The core/adapter drag interface splits responsibilities along the pure/DOM line.
 - Time is core's: the stack/parking dwell (`configuration.stackDzHoverMs`) lives in the session — arms on a directly-hovered gap, cancels on gap change / `null` hover / `end()`, fires the commit itself as a `structure` event. The adapter's `pointerup` / `pointercancel` / `blur` / `visibilitychange` listeners only call `end()`.
 - The adapter holds painted and measured state only — never a decision, never a return value. `isWholeToolbar` / `mode` stay session-internal.
 
-Under the session, the engine rules live in `layout.ts` (`dragStart` / `dragOver` → `DragOverDecision`, `DragElement`, `DragPointer`, `DraggingState` / `DragOrigin` / `DragMode`, `startDraggingState` / `refreshDragMode` / `resolveDragMode`, `wholeToolbarNeighbourEdges`, the veto predicates, the commits, the pure gap-highlight decisions) and reach the session via the injected `DragEngine` (no module cycle). They are pinned by `layout.test.ts` engine tests plus the Phase-2 dual-run oracle pin in `drag.test.ts`.
+Under the session, the engine rules live in `layout.ts` (`dragStart` / `dragOver` → `DragOverDecision`, `DragElement`, `DraggingState` / `DragOrigin` / `DragMode`, `wholeToolbarNeighbourEdges`, the veto predicates, the commits, the pure gap-highlight decisions) and reach the session via the injected `DragEngine` (no module cycle). They are pinned by `layout.test.ts` engine tests plus the Phase-2 dual-run oracle pin in `drag.test.ts`.
 
 ### Core drag engine: `dragStart` / `dragOver` (session internals)
 
@@ -104,19 +103,21 @@ Under the session, the engine rules live in `layout.ts` (`dragStart` / `dragOver
   ("nothing else in my toolbar"). Adapters never pass a hand-built origin.
 - `dragOver(dragging, layout, element, pointer, editing)` — the hovered
   element (`tool` / `toolbar` / `item-gap` / `track-gap` / `stack-gap` /
-  `track` background / `parking-gap` / `parking-row-gap`) plus the pointer
-  position (`{ activeItem?, client? }`). Returns a `DragOverDecision`:
+  `parking-gap` / `parking-row-gap` / `drawer-gap`) plus the pointer
+  position (`{ activeItem? }`). Returns a `DragOverDecision`:
   `itemHighlights` / `trackHighlights` / `stackHighlights` /
   `parkingHighlights` paint sets, whole-toolbar `neighbourEdges`, plus
   `moved` + refreshed `isWholeToolbar`. Restructuring happens ONLY on a
   highlighted DZ: hovering a dark gap returns `moved: false` with no paint
   for that gap. Hovering a tool paints the active-item fallback (no
-  commit); hovering a track background paints the two flanking stack gaps
   commit); hovering a stack gap paints only (the session's dwell timer fires
-  the commit as a `structure` event). The session diffs the decision against
-  its paint baseline and raises per-gap `highlight` events; a `structure`
-  event drops the baseline (the adapter rebuilt those nodes) and the same
-  pass re-emits `on` for what is still live.
+  the commit as a `structure` event). While a whole toolbar slides, the
+  **slide zone** (`g U h`) short-circuits every branch: paint-only, edges
+  derived from the dragged slot (see **Slide zone** below). The session
+  diffs the decision against its paint baseline and raises per-gap
+  `highlight` events; a `structure` event drops the baseline (the adapter
+  rebuilt those nodes) and the same pass re-emits `on` for what is still
+  live.
 
 ### Commits
 
@@ -164,8 +165,7 @@ dwell — unlike track gaps, they never commit on hover alone. A *directly*
 hovered stack DZ (`hoveredStack` in `ToolbarBorder`) arms a one-shot
 `configuration.stackDzHoverMs` timer; on fire
 `commitDraggedToStackSpace(targetBorder, stackIndex)` creates a new
-single-toolbar track at that stack. Track-hover flanking highlights and the
-modal-mask inner DZ (`maskActive`) never arm — direct hover only.
+single-toolbar track at that stack. Track-hover flanking highlights never arm — direct hover only.
 
 Cancel rules: the timer cancels on stack change (moving to another DZ
 restarts it), border leave, or drag end (mouse-up clears `palettes.dragging`,
@@ -184,7 +184,7 @@ as well as the highlight, and the origin is pruned when emptied
 (`pruneDragOrigin` / `removeToolbar` + `removeEmptyTrack`). The stack index is
 adjusted for a same-border prune (`prunedTrack < stack → stack − 1`), and the
 placed track is read back out of the border (proxy hazard, same as track
-gaps). The commit promotes a restructure into a slide (`refreshDragMode`),
+gaps). The commit promotes a restructure into a slide,
 and the border arms slide-follow over the fresh toolbar immediately
 (`retargetToolbarSlide` with `recenter` when the drag has no grab delta yet),
 so the new toolbar sticks under the cursor and moves along the track gaps —
@@ -192,15 +192,13 @@ the track's declarative `$effect` takes over once the DOM flushes.
 
 ### Identity and reactive state
 
-An instantiated tool is `tool + editor + config + position`: the same
-tool+config object must never live in two containers (single ownership).
-`canonicalItemTool` strips setter (`=`/`|`)/action (`:`) suffixes,
-`itemFingerprint` hashes canonical tool + editor + stable-stringified config,
+An instantiated tool is `point + control + config + position`: the same
+point+config object must never live in two containers (single ownership).
+`canonicalItemPoint` strips setter (`=`/`|`)/action (`:`) suffixes,
+`itemFingerprint` hashes canonical point + control + stable-stringified config,
 and `findOwnershipViolations({ borders, parking })` flags shared `===`
 references and structural duplicates. Position is part of instance identity:
-`isDraggingWholeToolbar` only matches the session's own origin toolbar and
-`isDraggedToolbarAt` additionally compares the container (`border` track +
-border vs `parking` stack + index) — so a parking row can never light up as
+`isDraggingWholeToolbar` only matches the session's own origin toolbar — so a parking row can never light up as
 the dragged toolbar of a border drag, even holding the same object.
 
 Parking is an independent stack (`PaletteParking`), never a view over a
@@ -215,12 +213,9 @@ path and prune via `removeParkedToolbar`.
 Parking gaps react like a border's stack gaps: zero-size until highlighted,
 `highlighted` (to `--palette-dz-size`) while editing + dragging, doubled with
 `hovered` on direct hover. Hovering a row highlights its two flanking gaps;
-hovering a gap directly highlights only that one. Gaps flanking a row the
-drag would empty stay dark (`draggingEmptiesParkingRow`, the parking analogue
-of `draggingEmptiesTrackIndex`). While a drag is active and the pointer is
-over the console panel background (outside rows/gaps/popups), the end gap
-stays lit via the `maskActive` prop — the console analogue of `Ide`'s mask
-hover. Gap indices are real stack indices, never filtered-view positions, so
+hovering a gap directly highlights only that one. Gaps flanking a dragged whole row
+stay dark (`draggingWholeParkingRow`, the parking analogue
+of `draggingEmptiesTrackIndex`). Gap indices are real stack indices, never filtered-view positions, so
 hidden commandBox-only rows never collapse the numbering.
 
 The border is `$state`, so a toolbar stored in a track is a *proxy* of the
@@ -243,7 +238,8 @@ Three gap kinds, three axes — every one of them is highlight-able:
   (`isWholeToolbar`), the only TB candidates are the last DZ of the
   previous TB and the first DZ of the next TB on the same track (core
   `wholeToolbarNeighbourEdges`) — the dragged toolbar's own gaps never
-  paint.
+  paint. See **Slide zone** below: while sliding, the edges are derived from
+  the *dragged* slot and paint across the whole zone.
 - **Track gap** (`data-track-space-index`, `track.length + 1` of them): the
   gaps *between toolbars* along one track, sized by `space: xx` (see
   `docs/layout-and-drag.md`). Painted by core `trackSpaceHighlight`, in two
@@ -252,16 +248,41 @@ Three gap kinds, three axes — every one of them is highlight-able:
   (`slotIndex` / `slotIndex + 1`) paints instead, so an edge tool drag still
   shows a candidate on the border (left/right/top/bottom alike, even for a
   plain tool drag); (b) **direct hover** — hovering the gap paints only it.
-  While sliding, the two gaps flanking the moved toolbar never paint
-  (`isSlidingFlank` reads the stored whole-toolbar flag, shared with the
-  commit veto: hovering them is just continuing to move the toolbar).
+  While sliding, the two gaps flanking the moved toolbar are part of the
+  **slide zone** (below) and never commit; `isSlidingFlank` still gates the
+  `trackSpaceHighlight` fallback and the `commitDraggedToTrackSpace` veto.
   Whole-toolbar drags never paint neighbour track gaps at all — only the
   adjacent TB edges above.
 - **Stack gap** (`data-stack-index`, `border.length + 1` of them): the gaps
   *between tracks* (a stack of tracks of toolbars — tracks and toolbars are
-  parallel). Painted by core `borderStackHighlight` / `parkingGapHighlight`
-  with the would-be-emptied veto; drops land via a hover dwell, never on
+  parallel). Painted by core `borderStackHighlight` (borders) / inline whole-row veto + `parkingFlanks`
+  (parking) with the would-be-emptied veto; drops land via a hover dwell, never on
   hover alone.
+
+## Slide zone
+
+While a whole toolbar slides along a border track, the region `g U h` — the
+dragged toolbar's own slot plus its two flanking track gaps — is **one
+paint-only zone**. Any hover inside it (the dragged toolbar's tools, its
+background, its own item gaps, or either flanking track gap) means "keep
+sliding": it paints the two neighbour TB edges and **never commits**.
+
+The edges are derived from the **dragged** slot (`slideZoneOf` →
+`wholeToolbarNeighbourEdges`), never the hovered one. That is what makes the
+paint stable across the whole zone instead of flipping with whichever element
+the pointer happens to be over — the "Toolbars sliding discrepancy": the old
+shape computed the hovered toolbar's own item gaps unconditionally and keyed
+the edges off the *hovered* slot, so hovering `T`'s first DZ painted `T`'s own
+gaps and committed a front-merge into `T`.
+
+Outside the zone, behaviour is unchanged: a neighbour toolbar's tool hover is
+a plain tool hover (its own item gaps), its item gaps still commit merges, and
+track gaps further away still commit relocations. The zone is border-only —
+parking keeps its own `parkingFlanks` / `draggingWholeParkingRow` logic.
+
+The zone deliberately breaks the paint/commit single-decision invariant *for
+itself*: `g` is lit while not committing, because the zone's meaning is "keep
+sliding", not "drop here".
 
 ## Track gaps
 
@@ -374,8 +395,10 @@ click is therefore a legitimate no-op drag rather than a cancelled one.
 ## Gap highlight decisions (core, pure)
 
 Which gaps paint is a **pure decision in core** (`layout.ts`), not an adapter
-re-implementation: `borderStackHighlight` / `parkingGapHighlight` /
-`itemSpaceHighlight` / `trackSpaceHighlight` take the container, the dwell
+re-implementation: `borderStackHighlight` /
+`itemSpaceHighlight` / `trackSpaceHighlight` (+ `parkingFlanks` / `stackFlanks`
+for row/track-hover flanks, inline whole-row veto for direct parking-gap hover)
+take the container, the dwell
 state (`active` row/track, `hovered` gap) and the session, and return a
 `GapHighlight`
 (`{ highlighted: Set<number>, hovered: number | undefined }`).
@@ -383,8 +406,8 @@ state (`active` row/track, `hovered` gap) and the session, and return a
 - Direct hover wins over flanking: a directly hovered gap is the only one that
   paints `hovered` (doubled size) and arms the dwell timer; hovering a row/track
   highlights its two flanking gaps without arming.
-- The **would-be-emptied** veto is shared with the commits:
-  `draggingEmptiesTrackIndex` / `draggingEmptiesParkingRow` keep the gaps
+- The **would-be-emptied / whole-row** veto is shared with the commits:
+  `draggingEmptiesTrackIndex` / `draggingWholeParkingRow` keep the gaps
   touching a track/row the drag would empty dark — and the matching commit
   refuses to land there, so highlight and behaviour can never disagree.
 - Item-space gaps never paint when they touch a dragged tool
@@ -401,8 +424,6 @@ state (`active` row/track, `hovered` gap) and the session, and return a
 - Restructuring happens only on a highlighted DZ: every commit mirrors its
   highlight veto (`isItemSpaceFree` / sliding flanks / emptied neighbours),
   so hovering a dark gap never moves tools.
-- `maskActive` (the console panel background during a drag) paints only the end
-  gap.
 
 `GapDwell` (core `gap-dwell.ts`) owns the timer + one-shot latch
 (`active`/`hovered`/`committed`); the *adapter* owns the reactive fields and the

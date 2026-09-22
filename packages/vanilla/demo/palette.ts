@@ -206,7 +206,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🎨',
 			categories: ['appearance'],
 			keywords: ['color', 'theme', 'dark', 'light', 'system'],
-			editors: ['theme'],
+			controls: ['theme'],
 			options: [
 				{ value: 'light', icon: '☀️', label: 'Light' },
 				{ value: 'dark', icon: '🌙', label: 'Dark' },
@@ -220,7 +220,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⌘',
 			categories: ['system'],
 			keywords: ['command', 'search', 'run', 'palette'],
-			editors: ['commandBox'],
+			controls: ['commandBox'],
 		},
 		{
 			id: 'moreDrawer',
@@ -229,7 +229,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🗂',
 			categories: ['system'],
 			keywords: ['drawer', 'more', 'nested'],
-			editors: ['drawer'],
+			controls: ['drawer'],
 		},
 		{
 			id: 'missionTime',
@@ -238,7 +238,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '⏱️',
 			categories: ['colony'],
 			keywords: ['mission', 'time', 'status', 'clock'],
-			editors: ['status'],
+			controls: ['status'],
 			uses: ['mission'],
 		},
 		{
@@ -354,7 +354,7 @@ export function demoPoints(): AnyPoint[] {
 			icon: '🚀',
 			categories: ['fleet'],
 			keywords: ['ship', 'fleet', 'selection', 'status'],
-			editors: ['status'],
+			controls: ['status'],
 			uses: ['ship'],
 		},
 		{
@@ -417,28 +417,28 @@ const rwComboboxLayout: Borders = {
 				space: 0.1,
 				toolbar: [
 					{
-						tool: 'commandBox',
-						editor: 'commandBox',
+						point: 'commandBox',
+						control: 'commandBox',
 						config: { icon: '⌘', label: 'Command', hint: 'Search and run a command' },
 					},
 					{
-						tool: 'emergencyProtocol',
-						editor: 'button',
+						point: 'emergencyProtocol',
+						control: 'button',
 						config: { icon: '🚨', label: 'Lockdown', hint: 'Head button (run)', tone: 'accent' },
 					},
 					{
-						tool: 'autoOxygen',
-						editor: 'toggle',
+						point: 'autoOxygen',
+						control: 'toggle',
 						config: { icon: '💨', label: 'Life support', hint: 'Compact icon toggle' },
 					},
 					{
-						tool: 'shieldGenerator',
-						editor: 'toggle',
+						point: 'shieldGenerator',
+						control: 'toggle',
 						config: { icon: '🛡️', label: 'Shields', hint: 'Compact icon toggle' },
 					},
 					{
-						tool: 'alertLevel',
-						editor: 'segmented',
+						point: 'alertLevel',
+						control: 'segmented',
 						config: { icon: '⚠️', label: 'Threat', hint: 'Head segmented (enum)' },
 					},
 				],
@@ -447,8 +447,8 @@ const rwComboboxLayout: Borders = {
 				space: 0.9,
 				toolbar: [
 					{
-						tool: 'theme',
-						editor: 'theme',
+						point: 'theme',
+						control: 'theme',
 						config: { icon: '🎨', label: 'Theme', hint: 'Theme cycle (nothing-point)' },
 					},
 				],
@@ -461,8 +461,8 @@ const rwComboboxLayout: Borders = {
 				space: 1,
 				toolbar: [
 					{
-						tool: 'gameSpeed',
-						editor: 'slider',
+						point: 'gameSpeed',
+						control: 'slider',
 						config: {
 							icon: '⏱️',
 							label: 'Sim speed',
@@ -470,8 +470,8 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'colonyTheme',
-						editor: 'select',
+						point: 'colonyTheme',
+						control: 'select',
 						config: {
 							icon: '🪐',
 							label: 'Atmosphere',
@@ -480,20 +480,25 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'powerPriority',
-						editor: 'segmented',
-						config: { icon: '🔌', label: 'Power focus', hint: 'Head segmented (enum)' },
+						point: 'powerPriority',
+						control: 'segmented',
+						config: {
+							icon: '🔌',
+							label: 'Power focus',
+							hint: 'Head segmented (enum)',
+							showText: false,
+						},
 					},
 					{
-						tool: 'moreDrawer',
-						editor: 'drawer',
+						point: 'moreDrawer',
+						control: 'drawer',
 						toolbar: [
 							{
 								space: 1,
 								toolbar: [
 									{
-										tool: 'colonyTheme',
-										editor: 'select',
+										point: 'colonyTheme',
+										control: 'select',
 										config: {
 											icon: '🪐',
 											label: 'Atmosphere',
@@ -502,14 +507,19 @@ const rwComboboxLayout: Borders = {
 										},
 									},
 									{
-										tool: 'gameSpeed',
-										editor: 'stepper',
+										point: 'gameSpeed',
+										control: 'stepper',
 										config: { icon: '⏱️', label: 'Sim speed', hint: 'Nested drawer stepper' },
 									},
 								],
 							},
 						],
-						config: { icon: '🗂', label: 'More', hint: 'Nested drawer (axis inversion)' },
+						config: {
+							icon: '🗂',
+							label: 'More',
+							hint: 'Nested drawer (axis inversion)',
+							open: 'hover',
+						},
 					},
 				],
 			},
@@ -521,8 +531,8 @@ const rwComboboxLayout: Borders = {
 				space: 0,
 				toolbar: [
 					{
-						tool: 'commandBox',
-						editor: 'commandBox',
+						point: 'commandBox',
+						control: 'commandBox',
 						config: {
 							icon: '⌘',
 							label: 'Command',
@@ -530,8 +540,8 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'taxRate',
-						editor: 'slider',
+						point: 'taxRate',
+						control: 'slider',
 						config: {
 							icon: '🪙',
 							label: 'Tax rate',
@@ -539,23 +549,23 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'solarEfficiency',
-						editor: 'stepper',
+						point: 'solarEfficiency',
+						control: 'stepper',
 						config: { icon: '☀️', label: 'Solar', hint: 'Head stepper (number)' },
 					},
 					{
-						tool: 'gameSpeed',
-						editor: 'drawerSlider',
+						point: 'gameSpeed',
+						control: 'drawerSlider',
 						config: { icon: '⏩', label: 'Sim speed drawer', hint: 'Drawer slider (vertical)' },
 					},
 					{
-						tool: 'satisfaction',
-						editor: 'stars',
+						point: 'satisfaction',
+						control: 'stars',
 						config: { icon: '⭐', label: 'Morale', hint: 'Demo stars rating' },
 					},
 					{
-						tool: 'missionTime',
-						editor: 'status',
+						point: 'missionTime',
+						control: 'status',
 						config: {
 							icon: '⏱️',
 							label: 'Mission time',
@@ -572,38 +582,38 @@ const rwComboboxLayout: Borders = {
 				space: 0.5,
 				toolbar: [
 					{
-						tool: 'console',
-						editor: 'button',
+						point: 'console',
+						control: 'button',
 						config: { icon: '💻', label: 'Terminal', hint: 'Head button (run)' },
 					},
 					{
-						tool: 'saveGame',
-						editor: 'button',
+						point: 'saveGame',
+						control: 'button',
 						config: { icon: '💾', label: 'Save', hint: 'Head button (run)' },
 					},
 					{
-						tool: 'resetSimulation',
-						editor: 'button',
+						point: 'resetSimulation',
+						control: 'button',
 						config: { icon: '🔄', label: 'Reset', hint: 'Head button (run)', tone: 'accent' },
 					},
 					{
-						tool: 'fastMode',
-						editor: 'toggle',
+						point: 'fastMode',
+						control: 'toggle',
 						config: { icon: '⚡', label: 'Hyper-tick', hint: 'Compact icon toggle' },
 					},
 					{
-						tool: 'missionTime',
-						editor: 'status',
+						point: 'missionTime',
+						control: 'status',
 						config: { icon: '⏱️', label: 'Mission time', hint: 'Status readout (nothing-point)' },
 					},
 					{
-						tool: 'taxRate',
-						editor: 'drawerSlider',
+						point: 'taxRate',
+						control: 'drawerSlider',
 						config: { icon: '📉', label: 'Tax drawer', hint: 'Drawer slider (horizontal)' },
 					},
 					{
-						tool: 'shipStatus',
-						editor: 'status',
+						point: 'shipStatus',
+						control: 'status',
 						config: {
 							icon: '🚀',
 							label: 'Selected ship',
@@ -612,8 +622,8 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'shipShields',
-						editor: 'toggle',
+						point: 'shipShields',
+						control: 'toggle',
 						config: {
 							icon: '🛡️',
 							label: 'Ship shields',
@@ -621,8 +631,8 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'shipPower',
-						editor: 'slider',
+						point: 'shipPower',
+						control: 'slider',
 						config: {
 							icon: '🔋',
 							label: 'Ship reactor',
@@ -630,8 +640,8 @@ const rwComboboxLayout: Borders = {
 						},
 					},
 					{
-						tool: 'fireTorpedo',
-						editor: 'button',
+						point: 'fireTorpedo',
+						control: 'button',
 						config: {
 							icon: '💥',
 							label: 'Fire',
@@ -653,7 +663,7 @@ for (const region of ['top', 'right', 'bottom', 'left'] as const) {
 		track.map((slot) => ({
 			...slot,
 			toolbar: slot.toolbar.filter(
-				(item) => (item as { editor?: unknown }).editor !== 'commandBox'
+				(item) => (item as { control?: unknown }).control !== 'commandBox'
 			),
 		}))
 	) as Borders[typeof region]

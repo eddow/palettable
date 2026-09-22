@@ -29,14 +29,14 @@ function twoItemLayout(): SerializedLayout {
 		version: 2,
 		borders: {
 			top: [
-				[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }] }],
-				[{ space: 1, toolbar: [{ tool: 'c' }] }],
+				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }] }],
+				[{ space: 1, toolbar: [{ point: 'c' }] }],
 			],
 			right: [],
 			bottom: [],
 			left: [],
 		},
-		parking: [[{ tool: 'p' }]],
+		parking: [[{ point: 'p' }]],
 	}
 }
 
@@ -44,7 +44,9 @@ function fourItemLayout(): SerializedLayout {
 	return {
 		version: 2,
 		borders: {
-			top: [[{ space: 1, toolbar: [{ tool: 'a' }, { tool: 'b' }, { tool: 'c' }, { tool: 'd' }] }]],
+			top: [
+				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }, { point: 'c' }, { point: 'd' }] }],
+			],
 			right: [],
 			bottom: [],
 			left: [],
@@ -83,7 +85,7 @@ describe('createDrag session shell', () => {
 
 	it('catalog grabs create a pending creation (no origin until placement)', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		expect(session.layout).toBe(tree)
 		// No live toolbar owns the chrome until the first placement inserts.
@@ -147,7 +149,12 @@ describe('createDrag session shell', () => {
 		if (!item) throw new Error('expected item')
 		const session = tree.createDrag({ kind: 'tool', toolbar, item })
 		session.over({ kind: 'item-gap', toolbar, gap: 3 }, sample)
-		expect(toolbar.map((entry) => (entry as { tool?: unknown }).tool)).toEqual(['a', 'c', 'b', 'd'])
+		expect(toolbar.map((entry) => (entry as { point?: unknown }).point)).toEqual([
+			'a',
+			'c',
+			'b',
+			'd',
+		])
 		session.end()
 	})
 
@@ -239,8 +246,8 @@ describe('slide geometry home (Phase 4)', () => {
 			version: 2,
 			borders: {
 				top: [
-					[{ space: 0.2, toolbar: [{ tool: 'a' }] }],
-					[{ space: 0.3, toolbar: [{ tool: 'b' }] }],
+					[{ space: 0.2, toolbar: [{ point: 'a' }] }],
+					[{ space: 0.3, toolbar: [{ point: 'b' }] }],
 				],
 				right: [],
 				bottom: [],
@@ -744,7 +751,7 @@ describe('event completeness (every transition is an event)', () => {
 		const singleItemLayout: SerializedLayout = {
 			version: 2,
 			borders: {
-				top: [[{ space: 1, toolbar: [{ tool: 'x' }] }], [{ space: 1, toolbar: [{ tool: 'y' }] }]],
+				top: [[{ space: 1, toolbar: [{ point: 'x' }] }], [{ space: 1, toolbar: [{ point: 'y' }] }]],
 				right: [],
 				bottom: [],
 				left: [],
@@ -940,6 +947,109 @@ describe('vocabulary cleanup (Phase 5)', () => {
 		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
 		expect(trackGapEvents(events)).toHaveLength(0)
 		expect(events.some((event) => event.type === 'structure')).toBe(false)
+		session.end()
+	})
+
+	/**
+	 * Slide zone (`g U h`) at the session level: while a whole toolbar slides,
+	 * every hover inside its own slot or the two flanking track gaps paints
+	 * the same two neighbour TB edges and never commits. Regression anchor for
+	 * the "Toolbars sliding discrepancy" — the old shape keyed the edges off
+	 * the *hovered* slot, so hovering `T`'s first DZ painted `T`'s own gaps
+	 * and committed a front-merge into `T`.
+	 */
+	it('slide zone: every in-zone hover paints the same two edges, never commits', () => {
+		// `T=[t1,t2] g U=[x] h V=[v]` — one track, three toolbars.
+		function threeToolbarLayout(): SerializedLayout {
+			return {
+				version: 2,
+				borders: {
+					top: [
+						[
+							{ space: 1, toolbar: [{ point: 't1' }, { point: 't2' }] },
+							{ space: 1, toolbar: [{ point: 'x' }] },
+							{ space: 1, toolbar: [{ point: 'v' }] },
+						],
+					],
+					right: [],
+					bottom: [],
+					left: [],
+				},
+				parking: [],
+			}
+		}
+		/** Item-gap highlights as `{ toolbar, gap }` (the edges arrive as item-gaps). */
+		function edgeEvents(events: DragEvent[]) {
+			return events
+				.filter(
+					(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+						event.type === 'highlight' && event.dz.kind === 'item-gap'
+				)
+				.map((event) =>
+					event.dz.kind === 'item-gap'
+						? { toolbar: event.dz.toolbar, gap: event.dz.gap }
+						: undefined
+				)
+		}
+		const cases: Array<{ label: string; hover: (ctx: any) => Hoverable }> = [
+			{ label: 'dragged tool', hover: (c) => ({ kind: 'tool', toolbar: c.U, item: c.U[0] }) },
+			{ label: 'dragged bar', hover: (c) => ({ kind: 'toolbar', toolbar: c.U }) },
+			{ label: 'own gap 0', hover: (c) => ({ kind: 'item-gap', toolbar: c.U, gap: 0 }) },
+			{ label: 'own gap 1', hover: (c) => ({ kind: 'item-gap', toolbar: c.U, gap: 1 }) },
+			{ label: 'flank gap g', hover: (c) => ({ kind: 'track-gap', track: c.track, gap: 1 }) },
+			{ label: 'flank gap h', hover: (c) => ({ kind: 'track-gap', track: c.track, gap: 2 }) },
+		]
+		for (const { label, hover } of cases) {
+			const tree = new PaletteLayoutTree(threeToolbarLayout())
+			const live = tree.getLayout()
+			const track = live.borders.top[0] ?? []
+			const T = track[0]?.toolbar ?? []
+			const U = track[1]?.toolbar ?? []
+			const V = track[2]?.toolbar ?? []
+			const session = tree.createDrag({ kind: 'toolbar', toolbar: U })
+			const { events } = collectEvents(session)
+			session.over(hover({ track, T, U, V }), sample)
+			// Paint-only: no commit, no track-gap paint.
+			expect(
+				events.some((event) => event.type === 'structure'),
+				label
+			).toBe(false)
+			expect(trackGapEvents(events), label).toEqual([])
+			// Exactly the two neighbour edges: last DZ of T, first DZ of V.
+			expect(edgeEvents(events), label).toEqual([
+				{ toolbar: T, gap: T.length },
+				{ toolbar: V, gap: 0 },
+			])
+			session.end()
+		}
+	})
+
+	it('slide zone: outside it, T/V tool hovers are plain tool hovers', () => {
+		const tree = new PaletteLayoutTree(fourItemLayout())
+		const live = tree.getLayout()
+		const first = live.borders.top[0]?.[0]?.toolbar ?? []
+		const track = live.borders.top[0] ?? []
+		// Extract one tool so the track holds two toolbars.
+		const setup = tree.createDrag({ kind: 'tool', toolbar: first, item: first[0]! })
+		setup.over({ kind: 'track-gap', track, gap: 1 }, sample)
+		setup.end()
+		const T = track[0]?.toolbar ?? []
+		const U = track[1]?.toolbar ?? []
+		const session = tree.createDrag({ kind: 'toolbar', toolbar: U })
+		const { events } = collectEvents(session)
+		// Hover T's own tool: T's own item gaps paint, no neighbour edges.
+		session.over({ kind: 'tool', toolbar: T, item: T[0]! }, sample)
+		expect(events.some((event) => event.type === 'structure')).toBe(false)
+		expect(trackGapEvents(events)).toEqual([])
+		const edges = events
+			.filter(
+				(event): event is Extract<DragEvent, { type: 'highlight' }> =>
+					event.type === 'highlight' && event.dz.kind === 'item-gap'
+			)
+			.map((event) => (event.dz.kind === 'item-gap' ? event.dz.toolbar : undefined))
+		// Every painted item-gap belongs to T (never to U, the dragged one).
+		expect(edges.every((toolbar) => toolbar === T)).toBe(true)
+		expect(edges.length).toBeGreaterThan(0)
 		session.end()
 	})
 })
@@ -1437,7 +1547,7 @@ describe('outside + catalog (Phase 6)', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
 		const target = live.borders.top[1]?.[0]?.toolbar ?? []
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		const { events } = collectEvents(session)
 		const before = target.length
@@ -1460,7 +1570,7 @@ describe('outside + catalog (Phase 6)', () => {
 		const live = tree.getLayout()
 		const track = live.borders.top[1] ?? []
 		const before = track.length
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		session.over({ kind: 'track-gap', track, gap: 1 }, sample)
 		expect(track).toHaveLength(before + 1)
@@ -1472,7 +1582,7 @@ describe('outside + catalog (Phase 6)', () => {
 		vi.useFakeTimers()
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		const before = live.borders.top.length
 		session.over({ kind: 'stack-gap', border: live.borders.top, gap: 0 }, sample)
@@ -1485,7 +1595,7 @@ describe('outside + catalog (Phase 6)', () => {
 		vi.useFakeTimers()
 		const tree = new PaletteLayoutTree(twoItemLayout())
 		const live = tree.getLayout()
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		const before = live.parking.length
 		session.over({ kind: 'parking-gap', parking: live.parking, gap: 1 }, sample)
@@ -1499,7 +1609,7 @@ describe('outside + catalog (Phase 6)', () => {
 		const live = tree.getLayout()
 		const first = live.borders.top[0]?.[0]?.toolbar ?? []
 		const second = live.borders.top[1]?.[0]?.toolbar ?? []
-		const item = { tool: 'fresh' } as ToolbarItem
+		const item = { point: 'fresh' } as ToolbarItem
 		const session = tree.createDrag({ kind: 'catalog', item })
 		session.over({ kind: 'item-gap', toolbar: first, gap: 1 }, sample)
 		const placedLength = first.length

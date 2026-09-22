@@ -43,7 +43,7 @@ export type DragEngine = {
 		session: DraggingState,
 		layout: PaletteLayout,
 		element: DragElement,
-		pointer: { readonly activeItem?: number; readonly client?: number },
+		pointer: { readonly activeItem?: number },
 		editing: boolean
 	): DragOverDecision
 	commitDraggedToStackSpace(
@@ -251,13 +251,23 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 			const at = locateContainerOf(hover.toolbar, layout)
 			if (at === undefined) return undefined
 			// The container decides the commit: a border toolbar merges, a parking
-			// row transfers ownership. Same hover kind, two engine elements.
+			// row transfers ownership, a drawer toolbar merges into the drawer.
+			// Same hover kind, three engine elements.
 			if (at.kind === 'parking') {
 				return {
 					kind: 'parking-row-gap',
 					toolbar: hover.toolbar,
 					parking: at.parking,
 					index: at.index,
+					gap: hover.gap,
+				}
+			}
+			if (at.kind === 'drawer') {
+				return {
+					kind: 'drawer-gap',
+					toolbar: hover.toolbar,
+					track: at.track,
+					path: at.path,
 					gap: hover.gap,
 				}
 			}
@@ -286,10 +296,11 @@ function toDragElement(hover: Hoverable, layout: PaletteLayout): DragElement | u
 	}
 }
 
-/** Where a toolbar lives: a border track, or a parking row. */
+/** Where a toolbar lives: a border track, a parking row, or a drawer child track. */
 type ToolbarContainer =
 	| { readonly kind: 'border'; readonly track: Track; readonly border: Border }
 	| { readonly kind: 'parking'; readonly parking: Parking; readonly index: number }
+	| { readonly kind: 'drawer'; readonly track: Track; readonly path: readonly ToolbarItem[] }
 
 function locateContainerOf(toolbar: Toolbar, layout: PaletteLayout): ToolbarContainer | undefined {
 	const regions = ['top', 'right', 'bottom', 'left'] as const
@@ -298,11 +309,42 @@ function locateContainerOf(toolbar: Toolbar, layout: PaletteLayout): ToolbarCont
 		for (const track of border) {
 			for (const slot of track) {
 				if (slot.toolbar === toolbar) return { kind: 'border', track, border }
+				const found = locateDrawerToolbar(slot.toolbar, toolbar, [])
+				if (found !== undefined) return found
 			}
 		}
 	}
-	const index = layout.parking.indexOf(toolbar)
-	if (index >= 0) return { kind: 'parking', parking: layout.parking, index }
+	for (const parked of layout.parking) {
+		if (parked === toolbar) {
+			const index = layout.parking.indexOf(toolbar)
+			return { kind: 'parking', parking: layout.parking, index }
+		}
+		const found = locateDrawerToolbar(parked, toolbar, [])
+		if (found !== undefined) return found
+	}
+	return undefined
+}
+
+/** Recursive drawer scan (session-local copy — avoids the layout value-import cycle). */
+function locateDrawerToolbar(
+	toolbar: Toolbar,
+	target: Toolbar,
+	path: readonly ToolbarItem[]
+):
+	| { readonly kind: 'drawer'; readonly track: Track; readonly path: readonly ToolbarItem[] }
+	| undefined {
+	for (const item of toolbar) {
+		const child = (item as { control?: unknown; toolbar?: unknown }).toolbar
+		if ((item as { control?: unknown }).control !== 'drawer' || !Array.isArray(child)) continue
+		const track = child as Track
+		for (const slot of track) {
+			if (slot.toolbar === target) return { kind: 'drawer', track, path: [...path, item] }
+		}
+		for (const slot of track) {
+			const found = locateDrawerToolbar(slot.toolbar, target, [...path, item])
+			if (found !== undefined) return found
+		}
+	}
 	return undefined
 }
 
@@ -325,6 +367,72 @@ function toolbarLocationOf(toolbar: Toolbar, layout: PaletteLayout): ToolbarLoca
 	}
 	const toolbarIndex = layout.parking.indexOf(toolbar)
 	if (toolbarIndex >= 0) return { container: 'parking', toolbarIndex }
+	return drawerLocationOf(toolbar, layout)
+}
+
+/** Drawer location (session-local copy — avoids the layout value-import cycle). */
+function drawerLocationOf(
+	toolbar: Toolbar,
+	layout: PaletteLayout
+): Extract<ToolbarLocation, { container: 'drawer' }> | undefined {
+	const regions = ['top', 'right', 'bottom', 'left'] as const
+	const visitTrack = (
+		track: Track,
+		root:
+			| {
+					readonly container: 'border'
+					readonly region: (typeof regions)[number]
+					readonly trackIndex: number
+					readonly toolbarIndex: number
+			  }
+			| { readonly container: 'parking'; readonly toolbarIndex: number },
+		path: readonly ToolbarItem[]
+	): Extract<ToolbarLocation, { container: 'drawer' }> | undefined => {
+		for (let slotIndex = 0; slotIndex < track.length; slotIndex += 1) {
+			const slot = track[slotIndex]
+			if (slot === undefined) continue
+			if (slot.toolbar === toolbar) return { container: 'drawer', root, path, slotIndex }
+			for (const item of slot.toolbar) {
+				const child = (item as { control?: unknown; toolbar?: unknown }).toolbar
+				if ((item as { control?: unknown }).control !== 'drawer' || !Array.isArray(child)) continue
+				const found = visitTrack(child as Track, root, [...path, item])
+				if (found !== undefined) return found
+			}
+		}
+		return undefined
+	}
+	for (const region of regions) {
+		const border = layout.borders[region]
+		for (let trackIndex = 0; trackIndex < border.length; trackIndex += 1) {
+			const track = border[trackIndex]!
+			for (let toolbarIndex = 0; toolbarIndex < track.length; toolbarIndex += 1) {
+				const slot = track[toolbarIndex]
+				if (slot === undefined) continue
+				if (slot.toolbar === toolbar) return undefined
+				for (const item of slot.toolbar) {
+					const child = (item as { control?: unknown; toolbar?: unknown }).toolbar
+					if ((item as { control?: unknown }).control !== 'drawer' || !Array.isArray(child))
+						continue
+					const found = visitTrack(
+						child as Track,
+						{ container: 'border', region, trackIndex, toolbarIndex },
+						[item]
+					)
+					if (found !== undefined) return found
+				}
+			}
+		}
+	}
+	for (let toolbarIndex = 0; toolbarIndex < layout.parking.length; toolbarIndex += 1) {
+		const parked = layout.parking[toolbarIndex]!
+		if (parked === toolbar) return undefined
+		for (const item of parked) {
+			const child = (item as { control?: unknown; toolbar?: unknown }).toolbar
+			if ((item as { control?: unknown }).control !== 'drawer' || !Array.isArray(child)) continue
+			const found = visitTrack(child as Track, { container: 'parking', toolbarIndex }, [item])
+			if (found !== undefined) return found
+		}
+	}
 	return undefined
 }
 
@@ -546,6 +654,16 @@ class CoreToolbarDrag implements ToolbarDrag {
 					parking: at.parking,
 					index: at.index,
 				}
+			} else if (at.kind === 'drawer') {
+				if (!this.engine.isItemSpaceFree(this.session, hover.toolbar, hover.gap)) return false
+				const clamped = Math.min(Math.max(hover.gap, 0), hover.toolbar.length)
+				hover.toolbar.splice(clamped, 0, item)
+				this.session.origin = {
+					kind: 'drawer',
+					toolbar: hover.toolbar,
+					track: at.track,
+					path: at.path,
+				}
 			} else {
 				if (!this.engine.isItemSpaceFree(this.session, hover.toolbar, hover.gap)) return false
 				const clamped = Math.min(Math.max(hover.gap, 0), hover.toolbar.length)
@@ -680,12 +798,14 @@ class CoreToolbarDrag implements ToolbarDrag {
 						pruned.push({ kind: 'track', toolbar: originToolbar, from: originBefore })
 					}
 				}
-			} else {
+			} else if (originBefore.container === 'parking') {
 				// Parking: detect pruned origin row (removed from parking array).
 				if (!isSlide && !live.parking.includes(originToolbar)) {
 					pruned.push({ kind: 'row', toolbar: originToolbar, from: originBefore })
 				}
 			}
+			// Drawer origins never prune (empty drawer toolbars persist), so
+			// no victim detection for `container: 'drawer'`.
 		}
 
 		// `from` is the pre-mutation origin location (where the dragged tools
@@ -1167,6 +1287,11 @@ function dropZoneKey(dz: DropZone, live: PaletteLayout): string {
 			const at = locateContainerOf(dz.toolbar, live)
 			if (at === undefined) return `orphan:${dz.gap}`
 			if (at.kind === 'parking') return `parking-row:${at.index}:${dz.gap}`
+			if (at.kind === 'drawer') {
+				const slot = at.track.findIndex((entry) => entry.toolbar === dz.toolbar)
+				const depth = at.path.length
+				return `drawer:${depth}:${slot}:${dz.gap}`
+			}
 			const region = regionOf(at.border, live)
 			const track = at.border.indexOf(at.track)
 			const slot = at.track.findIndex((entry) => entry.toolbar === dz.toolbar)

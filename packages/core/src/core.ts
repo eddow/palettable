@@ -7,7 +7,7 @@
  */
 
 import type { ContextName, ValuesBag } from './context.js'
-import type { EditorDefaults, EditorRegistry } from './editors.js'
+import type { ControlDefaults, ControlRegistry } from './controls.js'
 import { PaletteError } from './errors.js'
 import type { Unsubscribe } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
@@ -37,8 +37,8 @@ import {
 
 export type PaletteCoreOptions = {
 	readonly keys?: KeyBindings
-	readonly editors?: EditorRegistry
-	readonly editorDefaults?: EditorDefaults
+	readonly controls?: ControlRegistry
+	readonly controlDefaults?: ControlDefaults
 	readonly initialLayout?: AnySerializedLayout | PaletteLayout
 	// Note: not completely implemented, still under construction
 	/** End-user-defined virtual points (`enum-from` / `stash`). */
@@ -89,8 +89,8 @@ export class PaletteCore {
 	readonly values: PaletteStateStore
 	readonly layout: PaletteLayoutTree
 	readonly keys: KeyBindings
-	readonly editors: EditorRegistry | undefined
-	readonly editorDefaults: EditorDefaults | undefined
+	readonly controls: ControlRegistry | undefined
+	readonly controlDefaults: ControlDefaults | undefined
 	private definitions = new Map<string, AnyPoint>()
 	private virtuals = new Map<string, VirtualPoint>()
 	/** Cached definition arrays (invalidated on registry mutation). */
@@ -120,8 +120,8 @@ export class PaletteCore {
 				? new PaletteLayoutTree(options.initialLayout)
 				: new PaletteLayoutTree(defaultLayoutFromPoints(points.map((point) => point.id)))
 		this.keys = { ...(options.keys ?? {}) }
-		this.editors = options.editors
-		this.editorDefaults = options.editorDefaults
+		this.controls = options.controls
+		this.controlDefaults = options.controlDefaults
 	}
 
 	/** All registered point definitions (cached; invalidated on registry mutation). */
@@ -303,15 +303,21 @@ export class PaletteCore {
 
 	/**
 	 * Evaluate a point's enablement with currently-registered bags
-	 * (missing → `undefined` slot). Omitted `can` = enabled. Throws
-	 * `PaletteError` on unknown point ids.
+	 * (missing → `undefined` slot). Omitted `can` = enabled, except for
+	 * **context tools**: a valued point with non-empty `uses` and no
+	 * explicit `can` is disabled while its value is skeleton (`undefined`)
+	 * — the context is absent, so there is nothing to write to
+	 * (`writeValue` would throw). Root-only tools stay enabled (the
+	 * consumer hydrates the root store first). Throws `PaletteError` on
+	 * unknown point ids.
 	 */
 	evaluateCan(pointId: string): boolean {
 		const id = canonicalPointId(pointId)
 		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
-		if (def.can === undefined) return true
-		return def.can(...this.resolveBags(def.uses))
+		if (def.can !== undefined) return def.can(...this.resolveBags(def.uses))
+		if (isValuedPoint(def) && (def.uses ?? []).length > 0) return this.readValue(id) !== undefined
+		return true
 	}
 
 	/** Subscribe to context-bag changes (global, across all bags). */

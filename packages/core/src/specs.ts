@@ -58,7 +58,7 @@ export function canonicalPointId(spec: string): string {
  * inline virtual definition (`EnumFromDefinition` / `StashDefinition`).
  *
  * Serialized data uses this union wherever a point is specified
- * (`ToolToolbarItem.tool`, `KeyBindings` values): a string is a reference
+ * (`ToolToolbarItem.point`, `KeyBindings` values): a string is a reference
  * into the points-list + virtuals, an inline definition carries its own
  * derivation (`source` + options / `stashedValue`) and needs no registry
  * entry. Both forms rebuild the same run-time structures from configuration

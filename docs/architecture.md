@@ -1,6 +1,9 @@
 # Architecture — palettable
-Note: `svelette` has become `@palettable/svelte` + `@palettable/core`
-Foundational decisions for the Svelte 5 re-implementation of `@sursaut/ui/palette`.
+> Historical note: §§1–20 describe the frozen svelte adapter (`packages/svelette`,
+> DO NOT MAINTAIN) and its extraction history. The live stack is `core` +
+> `vanilla` with strict vocabulary **point** / **tool** / **control** /
+> **configurator** (see `docs/core-concepts.md`). Svelte `PaletteEditor*` names
+> below are svelte-only and kept verbatim as the port reference.
 Start with `README.md`, then `docs/getting-started.md`. Topic guides:
 `core-concepts.md` (tools, registry, scope), `layout-and-drag.md`,
 `command-box.md`, `theming.md`, `testing.md`, `using-the-default-head.md`,
@@ -11,7 +14,7 @@ runtime mapping, and phase history.
 
 - **@palettable/svelte** = the Svelte 5 (runes) adapter for `@palettable/core` — a port of `@sursaut/ui/palette` (headless palette subsystem **only**).
 - **Headless** contract is preserved: the palette owns state, a11y semantics, tool resolution,
-  editing, and drag/drop — **not** styling. Adapters (demo editors) own markup and CSS.
+  editing, and drag/drop — **not** styling. Adapters (demo controls) own markup and CSS.
 - Read-only reference source lives in `ui/` (symlink). Never edit it; treat it as the spec.
 - **Out of scope:** the rest of `@sursaut/ui` — the `*Model` functions (button/checkbox/select/…),
   directives, and the `uiComponent` variant factory (styled variants + dot-syntax accessors). The
@@ -57,7 +60,7 @@ runtime mapping, and phase history.
 - Public entry points: `src/lib/palette/core.svelte.ts` (read-only display + run),
   `src/lib/palette/edition.svelte.ts` (mutation surface, re-exports `core`).
 
-## 5. Editors are components — no model / variant layer
+## 5. Controls are components — no model / variant layer (svelte, historical)
 
 The palette does **not** use `@sursaut/ui`'s `*Model` lazy-getter pattern (`buttonModel`,
 `checkboxModel`, …). That pattern belongs to the general UI library, which is out of scope.
@@ -79,7 +82,7 @@ The palette does **not** use `@sursaut/ui`'s `*Model` lazy-getter pattern (`butt
   `version` to close all open drawers synchronously.
 - Both live in `.svelte.ts` modules so any importer reacts to changes.
 
-## 7. Editor registry
+## 7. Control registry (svelte, historical)
 
 - Registries are keyed **family → variant** (`run`, `boolean`, `number`, `enum`, `item`).
 - A `PaletteEditorSpec.editor` is a Svelte **component** (not a JSX factory). Rendering resolves the
@@ -97,7 +100,7 @@ is merely *one* such factory.
 @palettable/svelte mirrors that split, in a Svelte-idiomatic way:
 
 - **Palette core stays icon-agnostic.** `PaletteIcon = string | Component` flows through
-  tools / entries / toolbar items to the editor, which is the *only* thing that renders it.
+  tools / entries / toolbar items to the control, which is the *only* thing that renders it.
   (`Snippet` is excluded: `Component` and `Snippet` are both callables with no runtime
   discriminator, so the `Icon` helper could never render a `Snippet` member. Callers with
   inline markup wrap it in a component or render it directly with `{@render}`.)
@@ -197,7 +200,7 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
 
 - `src/lib/palette/layout.svelte.ts` ports `ui/src/palette/components.tsx` headless logic:
   track spacing (`actualTrackSpaceAt`/`insertToolbar`/`removeToolbar`/`resizeToolbar`),
-  toolbar moves (`moveToolbarToTrack`/`moveToolbarToStack`), hit-testing
+  toolbar moves (track/stack commit primitives), hit-testing
   (`resolveTrackSpaceTarget`/`resolveToolbarSpaceTarget`/`resolveStackSpaceTarget`),
   toolbar preview (`previewToolbarItems`/`finalizeToolbarPreview`), catalogue insert
   (`beginPaletteCatalogInsertDrag` + native `dragover`/`dragend` window listeners), and
@@ -382,7 +385,7 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   ownership-transfer commits (`commitDraggedToParking` + parking stack gaps).
   Drag origins carry `kind: 'border' | 'parking'` so a top-bar drag can never
   light up a parking row as dragged (position is part of instance identity;
-  `isDraggedToolbarAt` compares the container, not just the object).
+  the session exposes the live origin toolbar, never a container scan).
 - Persistence: `+page.svelte` seeds `structuredClone(demoLayoutFor('rw-combobox').*)` `$state`
   at init (server + client first render identical, no hydration mismatch; also avoids mutating
   the shared module objects) plus an empty `$state` parking stack, and splices a validated
@@ -610,7 +613,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` (no `defaultValue` — core holds no defaults; absent key = skeleton) + per-type aliases, `NothingPoint` (`type: 'nothing'` — context + enablement only; `isNothingPoint` guard), `isActionPoint` / `isValuedPoint` (type-guarded, `false` for nothing-points), `ROOT_CONTEXT` + `isRootContext` (`''` value, `'root'` alias); `PointBase.uses` (optional bags, load-bearing in Phase 8) + functional `can(...bags)` on all kinds (omitted = enabled) |
 | `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
 | `store.ts` | `PaletteStateStore` (single source of truth, starts empty — no hydration from definitions, no defaults; `has`/`require` strict helpers, `get` lenient skeleton probe) + `setTree` batching (all writes land before any listener runs, returns changed keys). Phase 9 removed the dead `getOr` / `update` helpers (tests-only, zero production callers). Data-owning removed `reset`/`resetAll` (consumer resets via `setMany`). |
-| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `isDraggedToolbarAt`, `draggingEmptiesTrackIndex/ParkingRow`, `resolveDragMode`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `moveToolbarToTrack/Stack`), and the pure gap-highlight decisions (`borderStackHighlight`, `parkingGapHighlight`, `itemSpaceHighlight` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
+| `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `draggingEmptiesTrackIndex`, `draggingWholeParkingRow`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `commitDraggedToDrawer`), and the pure gap-highlight decisions (`borderStackHighlight`, `itemSpaceHighlight`, `trackSpaceHighlight`, `parkingFlanks` / `stackFlanks` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
 | `drag.ts` | drag session (`GrabTarget` / `Hoverable` / `DropZone` / `PointerSample` / `SlideFrame` / `ToolbarDrag` + `createToolbarDrag`): `Hoverable` in, `DragEvent` out (`highlight` diffs + `slide` / `clearSlide` / `resize` + `structure` ops, emission order structure → highlight → slide); owns the paint baseline, the dwell timer (`configuration.stackDzHoverMs`), the slide frame + pending split, and the catalog `catalogPending` creation — delegates decisions + commits to the `layout.ts` engine via the injected `DragEngine` (no module cycle); `isWholeToolbar` / `mode` stay session-internal |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |

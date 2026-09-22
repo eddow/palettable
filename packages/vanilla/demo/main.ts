@@ -67,7 +67,7 @@ function hasCommandBoxTool(): boolean {
 	for (const region of ['top', 'right', 'bottom', 'left'] as const) {
 		for (const track of layout.borders[region]) {
 			for (const slot of track) {
-				if (slot.toolbar.some((item) => (item as { editor?: unknown }).editor === 'commandBox')) {
+				if (slot.toolbar.some((item) => (item as { control?: unknown }).control === 'commandBox')) {
 					return true
 				}
 			}
@@ -230,7 +230,7 @@ const ide = createIDE(ideHost, {
 	core,
 	consoleStore,
 	isEditable: () => editable,
-	itemEditors: ['commandBox', 'drawer', 'status', 'theme'],
+	itemControls: ['commandBox', 'drawer', 'status', 'theme'],
 	paletteId: 'demo',
 })
 

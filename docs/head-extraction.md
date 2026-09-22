@@ -1,5 +1,9 @@
 TODO: remove this file once review is done
-# Head extraction — what was done
+# Head extraction — what was done (historical svelte reference)
+
+> Frozen reference: `packages/svelette` is DO NOT MAINTAIN. Kept verbatim as
+> the port reference for `core` + `vanilla`. `PaletteEditor*` names below are
+> svelte-only.
 
 Why the head exists: the palette core owns logic + functioning, **including HTML
 structure** (layout components `Ide`/`Toolbar`/`ToolbarTrack`/`ToolbarBorder`/
@@ -15,9 +19,9 @@ functions from `PaletteEditorContext` to render data, zero markup, zero CSS:
 | Presenter | Family | Returns |
 | --------- | ------ | ------- |
 | `buttonPresenter(context)` | run | `{ label, icon, title, tone, can, run }` |
-| `togglePresenter(context)` | boolean | `{ icon, title, tone, pressed, toggle() }` |
-| `selectPresenter(context)` | enum | `{ title, tone, icon, value, options[{value,text}], select }` |
-| `sliderPresenter(context)` | number | `{ title, tone, icon, direction, region, min, max, step, value, set }` |
+| `togglePresenter(context)` | boolean | `{ icon, title, tone, pressed, can, toggle() }` |
+| `selectPresenter(context)` | enum | `{ title, tone, icon, value, isSkeleton, can, options[{value,text}], select }` |
+| `sliderPresenter(context)` | number | `{ title, tone, icon, direction, region, min, max, step, value, can, set }` |
 | `commandBoxPresenter({ context })` | item | `{ title, icon, label, hint, model }` (a real combobox — runs commands inline) |
 | `configuratorPresenter(context)` | any | `{ label, icon, hint, tone, editor, editorChoices, setText, setTone, setEditor }` |
 

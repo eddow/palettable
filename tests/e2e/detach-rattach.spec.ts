@@ -29,7 +29,7 @@ async function topBars(page: import('@playwright/test').Page) {
 		const border = document.querySelector('.toolbar-border[data-region="top"]')
 		if (!border) return []
 		return [...border.querySelectorAll('.toolbar')].map((bar) =>
-			[...bar.querySelectorAll('.toolbar-item')].map((w) => w.getAttribute('data-tool'))
+			[...bar.querySelectorAll('.toolbar-item')].map((w) => w.getAttribute('data-point'))
 		)
 	})
 }
@@ -40,7 +40,7 @@ async function highlighted(page: import('@playwright/test').Page) {
 			const bar = (n as HTMLElement).closest('.toolbar')
 			const tools = bar
 				? [...bar.querySelectorAll('.toolbar-item')]
-						.map((w) => w.getAttribute('data-tool'))
+						.map((w) => w.getAttribute('data-point'))
 						.join(',')
 				: '-'
 			const kind = (n as HTMLElement).hasAttribute('data-item-space-index')

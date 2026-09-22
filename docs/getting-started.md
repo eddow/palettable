@@ -67,7 +67,7 @@ only (current option icon, no text) on the top bar's single track, resolves via
 `prefers-color-scheme` and syncs `.palette-default-theme-light` + `data-theme` +
 `color-scheme` onto `<html>` (see `docs/theming.md`).
 
-## Your first palette
+## Your first palette (historical svelte sample — live API is `core` + `vanilla`)
 
 ```ts
 import { headEditors } from '$lib/head/registry'
@@ -98,7 +98,7 @@ Full walkthrough: `docs/using-the-default-head.md`. Custom heads:
 	import Ide from '$lib/palette/components/Ide.svelte'
 	import '$lib/palette/styles/palette.css'
 	import '$lib/head/styles/head-default.css'
-	const top = $state([{ space: 0, toolbar: [{ tool: 'theme', editor: 'select' }] }])
+	const top = $state([{ space: 0, toolbar: [{ point: 'theme', control: 'select' }] }])
 </script>
 
 <Ide {palette} {top}>

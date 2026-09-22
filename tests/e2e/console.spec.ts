@@ -91,7 +91,7 @@ test('add-to-toolbar flow selects entry, then configures + previews', async ({ p
 		.click()
 	const panel = page.getByTestId('console-details-panel')
 	await expect(panel).toContainText('Life Support')
-	// Selecting the entry opens the editor + disconnected preview
+	// Selecting the entry opens the configurator + disconnected preview
 	// directly (no variant picker — adding happens only via d&d).
 	await expect(panel.getByTestId('console-add-preview')).toBeVisible()
 	await expect(panel.locator('.palette-default-config-table').first()).toBeVisible()
