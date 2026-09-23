@@ -195,6 +195,10 @@
 		> .palette-default-choice,
 	.palette-default-select
 		> .palette-default-select-trigger
+		> .palette-default-choice,
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		)
 		> .palette-default-choice {
 		border: 1px solid var(--pd-border-soft);
 		border-radius: var(--pd-r-l);
@@ -304,7 +308,7 @@
 	display: none;
 }
 
-/* Pills (svelte-only: CommandBoxView chips + suggestions). */
+/* Pills (command-box chips + suggestions). */
 .palette-default-command-chip,
 .palette-default-command-suggestion {
 	display: inline-flex;
@@ -1674,6 +1678,65 @@
 @container palette style(--region: left) {
 	.palette-default-segmented
 		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
+		> .palette-default-choice {
+		inset-inline-end: auto;
+		inset-inline-start: calc(100% + 1px);
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		transform: translateX(-0.4rem);
+	}
+}
+
+/* Run button at rest: icon-only square; label overlays beside it on button
+ * hover (segmented pattern). Icon-less buttons keep their label in flow —
+ * the `:has(> .palette-default-icon)` gate means no overlay chrome and no
+ * reserved popout space. Toggle/theme/drawer triggers carry no
+ * `.palette-default-choice` node, so they never match. */
+@container palette style(--layout: vertical) {
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		) {
+		position: relative;
+		overflow: visible;
+	}
+
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		)
+		> .palette-default-choice {
+		position: absolute;
+		inset-block: -1px;
+		inset-inline-end: calc(100% + 1px);
+		display: inline-flex;
+		align-items: center;
+		inline-size: max-content;
+		padding-inline: 0.72rem;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		white-space: nowrap;
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(0.4rem);
+		transition:
+			transform var(--pd-slide),
+			opacity var(--pd-ease);
+	}
+
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		):hover
+		> .palette-default-choice,
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		):focus-within
+		> .palette-default-choice {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@container palette style(--region: left) {
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		)
 		> .palette-default-choice {
 		inset-inline-end: auto;
 		inset-inline-start: calc(100% + 1px);

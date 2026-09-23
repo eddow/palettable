@@ -8,7 +8,7 @@
  *
  * Architectural rules:
  * - No `HTMLElement`, no framework components, no browser APIs (`KeyboardEvent`,
- *   `document`, …). Adapters (Svelte / Vue / vanilla-DOM) own all rendering and
+ *   `document`, …). Adapters (vanilla-DOM / Vue) own all rendering and
  *   translate their events into the abstract strings/ids below.
  * - The core manages semantic metadata (points), runtime values (store) and
  *   pure-data layout (borders / tracks / toolbars / items). Drag math, hit
@@ -57,5 +57,6 @@ export * from './presenters.js'
 export * from './render.js'
 export * from './runnable.js'
 export * from './store.js'
+export * from './strings.js'
 export * from './type.js'
 export * from './virtual.js'

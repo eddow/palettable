@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-// Vanilla demo parity smoke: the vanilla demo is the same Stellar Outpost
-// demo as the svelte one (mitosis Phase 10) — heading, IDE chrome, and the
+// Vanilla demo smoke: heading, IDE chrome, and the
 // toolbar command-box combobox render on first paint.
 test('vanilla demo renders the Stellar Outpost IDE', async ({ page }) => {
 	await page.goto('/')
@@ -11,8 +10,7 @@ test('vanilla demo renders the Stellar Outpost IDE', async ({ page }) => {
 	await expect(page.getByTestId('work-zone')).toBeVisible()
 })
 
-// ── Axis-aware items (vanilla-only: the svelte demo has no vertical
-// command box / vertical segmented yet) ────────────────────────────────────
+// ── Axis-aware items ───────────────────────────────────────────────────────
 
 test.beforeEach(async ({ page }) => {
 	await page.goto('/')
@@ -103,6 +101,24 @@ test('vertical groups round their visual ends, not their DOM ends', async ({ pag
 	// Last DOM child = visual top: rounded top, flat bottom.
 	expect(Number.parseFloat(last.top)).toBeGreaterThan(0)
 	expect(Number.parseFloat(last.bottom)).toBe(0)
+})
+
+test('vertical run button shows its label as a hover overlay without resizing', async ({
+	page,
+}) => {
+	// The left border hosts the `saveGame` button (icon + label).
+	const button = page.getByRole('button', { name: '💾 Save' }).first()
+	await expect(button).toBeVisible()
+	const label = button.locator('.palette-default-choice')
+	await expect(label).toHaveCSS('opacity', '0')
+	const bar = page.locator('.toolbar-border[data-region="left"] .toolbar').first()
+	const before = await bar.evaluate((node) => node.getBoundingClientRect().width)
+
+	// Hovering the button reveals its own label only (not the group).
+	await button.hover({ force: true })
+	await expect(label).toHaveCSS('opacity', '1')
+	const after = await bar.evaluate((node) => node.getBoundingClientRect().width)
+	expect(after).toBeCloseTo(before, 0)
 })
 
 test('drawer slider keeps its toolbar width and reveals a perpendicular range', async ({

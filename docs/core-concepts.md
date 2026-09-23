@@ -142,26 +142,26 @@ Unknown tools, non-editable setters, and unknown steps throw `PaletteError`
 not plain `Error`). Argumented actions and stash-style push-aside/pop-back
 are consumer-owned: presets provide specific argument-less action points.
 
-Key bindings (`src/lib/palette/keys.ts`): pass a raw map (`keys: { E: 'emergencyProtocol' }`)
-— `Palette` normalizes it internally via `createPaletteKeys` (also accepts a
-prebuilt registry). Keystrokes normalize (`Ctrl`/`Alt`/`Shift`/`Meta` order, `cmd`→`Meta`,
-`escape`→`Esc`, single chars uppercased). `paletteRoot` resolves `keydown` on the
-IDE root (skips editable targets) and runs the tool: run tools execute when
-`can`, boolean tools toggle. Demo bindings live in `src/lib/demo/palette.svelte.ts`
+Key bindings (`packages/core/src/keys.ts`): pass a raw map
+(`keys: { E: 'emergencyProtocol' }`) — each adapter normalizes it against its
+own `KeyboardEvent`. Keystrokes normalize (`Ctrl`/`Alt`/`Shift`/`Meta` order, `cmd`→`Meta`,
+`escape`→`Esc`, single chars uppercased). The IDE root resolves `keydown`
+(skips editable targets) and runs the tool: run tools execute when
+`can`, boolean tools toggle. Demo bindings live in `packages/vanilla/demo/`
 (`` ` `` console toggle, `N` life support, `S` shields, `E` lockdown,
 `Ctrl+S` save, `+`/`-` sim speed (`gameSpeed+=0.5` / `gameSpeed-=0.5`), `1/2/3` threat presets).
 
-## Palette class (`src/lib/palette/palette.svelte.ts`)
+## PaletteCore (`packages/core/src/core.ts`)
 
-Construct with `PaletteConfig`: `tools`, `keys`, `editable?`, `editors?`,
-`editorDefaults?`, `editor?`/`configurator?` fallbacks, `runner?`/`setter?`
-wrappers, `editorCapabilities?`. `palette.editing` is true when
-`editable !== false && palettes.editing === this` (class instances are never
-proxied, so `===` is exact). `dispose()` is a no-op kept for API parity.
+Construct with `PaletteCoreOptions`: `points`, `initialValues?`, `keys?`,
+`controls?`, `controlDefaults?`, `configuration?`, `strings?`. Core exposes
+`values` (the store), `run`/`runStash`/`canRunAction`, the context registry
+(`setContext`/`getBag`/`resolveBags`/`evaluateCan`), `layout`, `defineVirtual`,
+and `dispose()` (drops value + layout + context listeners).
 
-Shared module state (`palettes`, a `$state` object): `editing` (one palette at a
-time), `inspecting` (`{ item, palette, region? }`), `dragging` (pointer session),
-`catalogDrag` (native HTML5 session). `isEditing(palette)` mirrors the getter.
+Adapter-side runtime state (one palette editable at a time, the active
+drag session, the current inspection) is mirrored by each adapter in its own
+reactivity; core owns the semantics and the subscribe channels.
 
 ## Tools (toolbar-bound controls)
 
@@ -191,10 +191,10 @@ stays the fallback:
 - `run`: `button` (head) — demo adds nothing
 - `item` (nothing-point variants): `commandBox`, `drawer`, `status`, `theme` (head; demo adds nothing)
 
-Head components are dumb: each binds a headless core presenter
-(`button/toggle/select/slider/commandBox/
-status/configurator` presenters; see `docs/creating-a-head.md`). Full usage in
-`docs/using-the-default-head.md`; extraction history in `docs/head-extraction.md`.
+Head controls are dumb: each binds a headless core presenter
+(`button/toggle/select/slider/status/configurator` presenters; see
+`docs/creating-a-head.md`). Full usage in
+`docs/using-the-default-head.md`.
 
 `controlDefaults` picks the control
 when an item omits `control` (demo: `{ run: 'button' }`).

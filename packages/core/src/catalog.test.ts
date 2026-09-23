@@ -203,4 +203,40 @@ describe('bindableEntries', () => {
 		expect(off?.keywords).toContain('disable')
 		expect(off?.keywords).not.toContain('unset')
 	})
+
+	it('localizes sentences, keywords and label overrides via context.strings', () => {
+		const fr = {
+			toggle: (label: string) => `Basculer ${label}`,
+			enable: (label: string) => `Activer ${label}`,
+			disable: (label: string) => `Désactiver ${label}`,
+			setTo: (label: string, value: string) => `Régler ${label} sur ${value}`,
+			increase: (label: string) => `Augmenter ${label}`,
+			toggleKeywords: ['basculer', 'inverser'],
+			onKeywords: ['activer'],
+			offKeywords: ['desactiver'],
+			stepUpKeywords: ['augmenter'],
+			stepDownKeywords: ['diminuer'],
+			pointLabels: { notifications: 'Notifications FR' },
+			optionLabels: { theme: { dark: 'Sombre' } },
+		}
+		const entries = actionableEntries(points(), { strings: fr })
+		expect(entries.find((entry) => entry.id === 'notifications:toggle')?.label).toBe(
+			'Basculer Notifications FR'
+		)
+		expect(entries.find((entry) => entry.id === 'notifications:set:true')?.label).toBe(
+			'Activer Notifications FR'
+		)
+		expect(entries.find((entry) => entry.id === 'theme:set:"dark"')?.label).toBe(
+			'Régler Theme sur Sombre'
+		)
+		expect(entries.find((entry) => entry.id === 'fontSize:inc:1')?.label).toBe(
+			'Augmenter Font Size'
+		)
+		expect(entries.find((entry) => entry.id === 'notifications:toggle')?.keywords).toContain(
+			'basculer'
+		)
+		expect(entries.find((entry) => entry.id === 'notifications:set:true')?.keywords).toContain(
+			'activer'
+		)
+	})
 })

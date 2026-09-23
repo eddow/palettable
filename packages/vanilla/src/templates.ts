@@ -25,6 +25,11 @@ export function escapeHtml(value: string): string {
 		.replace(/'/g, '&#39;')
 }
 
+// `IdeStrings` is imported as a type only (no runtime cycle — the caller
+// resolves the table and passes the needed fields as plain options).
+import type { IdeStrings } from './strings.js'
+import { defaultIdeStrings } from './strings.js'
+
 /** Parse one HTML string into its root plus the queried sub-elements, in order. */
 export function sel(html: string, ...queries: string[]): HTMLElement[] {
 	const root = elementFromHtml(html)
@@ -111,13 +116,17 @@ export function selectOptionShellTemplate(options: {
  * (`config.showFilter === true`). Plain input + empty-state sibling live
  * here as structure only — the caller owns filtering + keyboard.
  */
-export function selectFilterShellTemplate(options: { placeholder?: string }): string {
+export function selectFilterShellTemplate(options: {
+	placeholder?: string
+	ariaLabel?: string
+	emptyText?: string
+}): string {
 	return (
 		`<div class="palette-default-select-filter">` +
 		`<input class="palette-default-select-filter-input" data-testid="select-filter-input"` +
 		` type="text" placeholder="${escapeHtml(options.placeholder ?? 'Filter…')}" value=""` +
-		` aria-label="Filter options">` +
-		`<div class="palette-default-command-empty" data-testid="select-filter-empty" hidden="">No matches</div></div>`
+		` aria-label="${escapeHtml(options.ariaLabel ?? 'Filter options')}">` +
+		`<div class="palette-default-command-empty" data-testid="select-filter-empty" hidden="">${escapeHtml(options.emptyText ?? 'No matches')}</div></div>`
 	)
 }
 
@@ -257,9 +266,11 @@ export function drawerTriggerShellTemplate(options: {
 	tone: 'neutral' | 'accent'
 	icon?: string
 	open?: 'hover' | 'toggle'
+	fallback?: string
 }): string {
-	const accessible = options.label !== '' ? options.label : (options.hint ?? 'More')
-	const title = options.label !== '' ? options.label : (options.hint ?? 'More')
+	const fallback = options.fallback ?? 'More'
+	const accessible = options.label !== '' ? options.label : (options.hint ?? fallback)
+	const title = options.label !== '' ? options.label : (options.hint ?? fallback)
 	// Hover-open drawers keep the attached group-field at rest (joint side
 	// square): the popup appears on hover with no click state change, so the
 	// trigger must already read as attached. Toggle drawers are
@@ -301,7 +312,17 @@ export function drawerPopupShellTemplate(
  * Vertical boxes size to the perpendicular var and open their overlay like a
  * drawer over the IDE (CSS-only, no portal).
  */
-export function commandBoxShellTemplate(options: { hint: string; icon: string }): string {
+export function commandBoxShellTemplate(options: {
+	hint: string
+	icon: string
+	placeholder?: string
+	editLabel?: string
+	strings?: IdeStrings
+}): string {
+	const strings = options.strings
+	const placeholder =
+		options.placeholder ?? strings?.commandPlaceholder ?? defaultIdeStrings.commandPlaceholder
+	const editLabel = options.editLabel ?? strings?.editToolbars ?? defaultIdeStrings.editToolbars
 	return (
 		`<div class="palette-default-command-box is-floating"` +
 		` data-has-text="false" data-testid="command-box-combobox">` +
@@ -312,10 +333,10 @@ export function commandBoxShellTemplate(options: { hint: string; icon: string })
 		`<span class="palette-default-command-text is-hint" aria-hidden="true">` +
 		`${escapeHtml(options.hint)}</span>` +
 		`<input class="palette-default-command-input" data-testid="command-box-input"` +
-		` placeholder="Command…" value="">` +
+		` placeholder="${escapeHtml(placeholder)}" value="">` +
 		`<button type="button" class="palette-default-command-open"` +
-		` data-testid="command-box-open-configurator" aria-label="Edit toolbars"` +
-		` title="Edit toolbars">✎</button></div></div>` +
+		` data-testid="command-box-open-configurator" aria-label="${escapeHtml(editLabel)}"` +
+		` title="${escapeHtml(editLabel)}">✎</button></div></div>` +
 		`<div class="palette-default-command-popover" hidden="">` +
 		`<div class="palette-default-command-results" data-testid="command-box-results"></div>` +
 		`</div></div>`

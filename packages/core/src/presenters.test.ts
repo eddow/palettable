@@ -104,6 +104,53 @@ describe('headMeta / headTooltip', () => {
 		).toMatchObject({ label: 'A', tone: 'accent', icon: 'x', hint: 'h' })
 		expect(headTooltip({ point: 'a' }, 'hint')).toBe('a · hint')
 	})
+
+	it('falls back dictionary → config → point.label → id', () => {
+		const point = { id: 'save', label: 'Save', type: 'action', run: () => {} } as const
+		// point.label wins over the bare id when no config/dictionary.
+		expect(headMeta({ point: 'save' }, undefined, point as never)).toMatchObject({
+			label: 'Save',
+		})
+		// dictionary wins over point.label.
+		expect(
+			headMeta({ point: 'save' }, { pointLabels: { save: 'Enregistrer' } }, point as never)
+		).toMatchObject({ label: 'Enregistrer' })
+		// dictionary wins over config (locale bundle is authoritative).
+		expect(
+			headMeta(
+				{ point: 'save', config: { label: 'Custom' } },
+				{ pointLabels: { save: 'Enregistrer' } },
+				point as never
+			)
+		).toMatchObject({ label: 'Enregistrer' })
+		// config wins over point.label when no dictionary.
+		expect(
+			headMeta({ point: 'save', config: { label: 'Custom' } }, undefined, point as never)
+		).toMatchObject({ label: 'Custom' })
+		// hint dictionary.
+		expect(
+			headMeta({ point: 'save' }, { pointHints: { save: 'Astuce' } }, point as never).hint
+		).toBe('Astuce')
+	})
+
+	it('resolves option labels dictionary → option.label → value', () => {
+		const item = { point: 'theme' } as never
+		const bound = {
+			point: {
+				id: 'theme',
+				label: 'Theme',
+				type: 'enum',
+				constraints: { options: [{ value: 'dark', label: 'Dark' }] },
+			},
+			value: 'dark',
+		} as never
+		const surface = { axis: 'horizontal', region: 'top' } as never
+		expect(selectPresenter(item, bound, surface).current?.label).toBe('Dark')
+		expect(
+			selectPresenter(item, bound, surface, { optionLabels: { theme: { dark: 'Sombre' } } }).current
+				?.label
+		).toBe('Sombre')
+	})
 })
 
 describe('buttonPresenter / togglePresenter / statusPresenter', () => {
@@ -114,7 +161,7 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 			{ kind: 'action', point: 'save' }
 		)
 		expect(view).toMatchObject({
-			label: 'save',
+			label: 'Save',
 			can: true,
 			run: { kind: 'action', point: 'save' },
 		})

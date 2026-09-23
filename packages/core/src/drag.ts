@@ -851,7 +851,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 	 * engine's `stackFlanks` so the emptied veto (and the `layout.ts`
 	 * ownership of it) stays in one place. Parking-row hovers merge the
 	 * two flanking parking gaps instead (via `parkingFlanks`) — same
-	 * active-row fallback the svelte `Parking` paints locally.
+	 * active-row fallback the reference adapter paints locally.
 	 */
 	private addTrackFlanks(hover: Hoverable, zones: Map<string, DropZone>): void {
 		const live = this.layout.getLayout()

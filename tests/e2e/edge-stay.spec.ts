@@ -26,8 +26,7 @@ async function openConsole(page: import('@playwright/test').Page) {
 // Conformance: a DZ beside a dragged tool is never highlighted. When ABCD
 // has D dragged, the TB-gap after D stays dark and the candidate moves out
 // to the track gap after the toolbar (core `trackSpaceHighlight` fallback);
-// symmetrically, dragging A paints the track gap before the toolbar. Future
-// adapters (vue, thinned svelte) must satisfy both cases. Uses the left
+// symmetrically, dragging A paints the track gap before the toolbar. Uses the left
 // border (4 tools: slider, select, segmented, drawer) to stay clear of the
 // centered console overlay.
 async function dragOntoTool(page: import('@playwright/test').Page, index: number): Promise<void> {

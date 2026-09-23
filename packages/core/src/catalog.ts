@@ -40,6 +40,7 @@ import type { AnyPoint, NumberPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { Runnable } from './runnable.js'
 import { runnableKey } from './runnable.js'
+import { type CatalogStrings, humanizeId, resolveCatalogStrings } from './strings.js'
 import type { EnumOption } from './type.js'
 
 // ── Shared text + keyword helpers (single source of truth) ─────────────────
@@ -74,9 +75,7 @@ export function splitCommandWords(value: string): string[] {
 }
 
 export function humanizeCommandText(value: string): string {
-	const words = splitCommandWords(value)
-	if (words.length === 0) return value
-	return words.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
+	return humanizeId(value)
 }
 
 export function collectKeywords(...sources: (string | readonly string[] | undefined)[]): string[] {
@@ -198,8 +197,25 @@ export type AddableEntry = {
 
 // ── Shared helpers (single implementation for all three lists) ──────────────
 
-function pointLabel(point: AnyPoint): string {
-	return point.label ?? humanizeCommandText(point.id)
+/** Resolved strings table for a builder context (partial merged over English default). */
+function stringsOf(context: Pick<CommandBoxContext, 'strings'>): CatalogStrings {
+	return resolveCatalogStrings(context.strings)
+}
+
+function pointLabel(point: AnyPoint, strings?: CatalogStrings): string {
+	const override = strings?.pointLabels?.[point.id]
+	if (typeof override === 'string' && override.length > 0) return override
+	const label = (point as { label?: unknown }).label
+	if (typeof label === 'string' && label.length > 0) return label
+	return humanizeCommandText(point.id)
+}
+
+function optionLabelOf(point: AnyPoint, option: EnumOption, strings?: CatalogStrings): string {
+	const override = strings?.optionLabels?.[point.id]?.[option.value]
+	if (typeof override === 'string' && override.length > 0) return override
+	const label = (option as { label?: unknown }).label
+	if (typeof label === 'string' && label.length > 0) return label
+	return humanizeCommandText(option.value)
 }
 
 function defaultStepOf(point: AnyPoint): number {
@@ -221,13 +237,6 @@ function actionEnabled(context: CommandBoxContext, id: string): boolean {
 	return context.actionCan?.[id] ?? true
 }
 
-/** Boolean keyword families. No `unset` (shell confusion) — `clear` / `deactivate` instead. */
-const TOGGLE_KEYWORDS = ['toggle', 'switch', 'flip'] as const
-const ON_KEYWORDS = ['enable', 'on', 'true', 'activate', 'set'] as const
-const OFF_KEYWORDS = ['disable', 'off', 'false', 'deactivate', 'clear'] as const
-const STEP_UP_KEYWORDS = ['increase', 'increment', 'up', 'more'] as const
-const STEP_DOWN_KEYWORDS = ['decrease', 'decrement', 'down', 'less'] as const
-
 // ── Actionable (run surfaces: command box, console run mode) ────────────────
 // Mirrors the `paletteCommandEntries` run branch row-for-row (same ids,
 // labels, metas, keywords, `can`), plus `kind` / `point` / `value` / `delta`.
@@ -245,9 +254,10 @@ export function actionableEntries(
 ): readonly ActionableEntry[] {
 	const excluded = new Set(options.excludePoints ?? [])
 	const entries: ActionableEntry[] = []
+	const strings = stringsOf(context)
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
-		const label = pointLabel(point)
+		const label = pointLabel(point, strings)
 		if (isActionPoint(point)) {
 			const run: Runnable = { kind: 'action', point: point.id }
 			entries.push({
@@ -257,7 +267,7 @@ export function actionableEntries(
 				value: undefined,
 				needsParam: false,
 				label,
-				meta: entryMeta(context, run, 'Run command'),
+				meta: entryMeta(context, run, strings.runCommand),
 				icon: point.icon,
 				keywords: collectKeywords(point.id, label, point.keywords),
 				run,
@@ -275,17 +285,17 @@ export function actionableEntries(
 				point: point.id,
 				value: undefined,
 				needsParam: false,
-				label: `Toggle ${label}`,
-				meta: entryMeta(context, toggleRun, `Toggle ${label}`),
+				label: strings.toggle(label),
+				meta: entryMeta(context, toggleRun, strings.toggle(label)),
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, [...TOGGLE_KEYWORDS]),
+				keywords: collectKeywords(point.id, label, point.keywords, [...strings.toggleKeywords]),
 				run: toggleRun,
 				can: currentValue(context, point.id) !== undefined,
 				uses: point.uses,
 			})
 			for (const [value, verb, family] of [
-				[true, 'Enable', ON_KEYWORDS],
-				[false, 'Disable', OFF_KEYWORDS],
+				[true, strings.enable, strings.onKeywords],
+				[false, strings.disable, strings.offKeywords],
 			] as const) {
 				const run: Runnable = { kind: 'set', point: point.id, value }
 				entries.push({
@@ -294,8 +304,8 @@ export function actionableEntries(
 					point: point.id,
 					value,
 					needsParam: false,
-					label: `${verb} ${label}`,
-					meta: entryMeta(context, run, `Set ${label}`),
+					label: verb(label),
+					meta: entryMeta(context, run, strings.setValue(label)),
 					icon: point.icon,
 					keywords: collectKeywords(point.id, label, point.keywords, [...family]),
 					run,
@@ -307,7 +317,7 @@ export function actionableEntries(
 		}
 		if (point.type === 'enum') {
 			for (const option of enumOptionsOf(point)) {
-				const optionLabel = option.label ?? humanizeCommandText(option.value)
+				const optionLabel = optionLabelOf(point, option, strings)
 				const run: Runnable = { kind: 'set', point: point.id, value: option.value }
 				const current = currentValue(context, point.id)
 				entries.push({
@@ -316,7 +326,7 @@ export function actionableEntries(
 					point: point.id,
 					value: option.value,
 					needsParam: false,
-					label: `Set ${label} to ${optionLabel}`,
+					label: strings.setTo(label, optionLabel),
 					meta: entryMeta(context, run, label),
 					icon: option.icon ?? point.icon,
 					keywords: collectKeywords(
@@ -337,8 +347,8 @@ export function actionableEntries(
 		if (point.type === 'number') {
 			const step = defaultStepOf(point)
 			for (const [delta, actionLabel, family] of [
-				[step, `Increase ${label}`, STEP_UP_KEYWORDS],
-				[-step, `Decrease ${label}`, STEP_DOWN_KEYWORDS],
+				[step, strings.increase(label), strings.stepUpKeywords],
+				[-step, strings.decrease(label), strings.stepDownKeywords],
 			] as const) {
 				const run: Runnable =
 					delta >= 0
@@ -352,7 +362,7 @@ export function actionableEntries(
 					delta: Math.abs(delta),
 					needsParam: false,
 					label: actionLabel,
-					meta: entryMeta(context, run, `Adjust ${label}`),
+					meta: entryMeta(context, run, strings.adjust(label)),
 					icon: point.icon,
 					keywords: collectKeywords(point.id, label, point.keywords, [...family]),
 					run,
@@ -380,21 +390,22 @@ export function actionableEntries(
  */
 export function addableEntries(
 	points: readonly AnyPoint[],
-	context: Pick<CommandBoxContext, 'itemControls'> = {},
+	context: Pick<CommandBoxContext, 'itemControls' | 'strings'> = {},
 	options: { excludePoints?: readonly string[] } = {}
 ): readonly AddableEntry[] {
 	const excluded = new Set(options.excludePoints ?? [])
 	const entries: AddableEntry[] = []
+	const strings = stringsOf(context)
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
-		const label = pointLabel(point)
+		const label = pointLabel(point, strings)
 		if (isActionPoint(point)) {
 			entries.push({
 				id: `tool:${point.id}`,
 				label,
-				meta: 'Add action',
+				meta: strings.addAction,
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
+				keywords: collectKeywords(point.id, label, point.keywords, [...strings.addToolKeywords]),
 				kind: 'tool',
 				pointId: point.id,
 				activity: 'action',
@@ -405,9 +416,9 @@ export function addableEntries(
 			entries.push({
 				id: `tool:${point.id}`,
 				label,
-				meta: 'Add tool',
+				meta: strings.addTool,
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
+				keywords: collectKeywords(point.id, label, point.keywords, [...strings.addToolKeywords]),
 				kind: 'tool',
 				pointId: point.id,
 				activity: 'nothing',
@@ -418,9 +429,9 @@ export function addableEntries(
 		entries.push({
 			id: `tool:${point.id}`,
 			label,
-			meta: `Add ${point.type} tool`,
+			meta: strings.addValued(point.type),
 			icon: point.icon,
-			keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
+			keywords: collectKeywords(point.id, label, point.keywords, [...strings.addToolKeywords]),
 			kind: 'tool',
 			pointId: point.id,
 			activity: 'valued',
@@ -435,8 +446,8 @@ export function addableEntries(
 		entries.push({
 			id: `item:${control}`,
 			label: humanizeCommandText(control),
-			meta: 'Add control-only item',
-			keywords: collectKeywords(control, 'add', 'control', 'toolbox'),
+			meta: strings.addControlOnly,
+			keywords: collectKeywords(control, [...strings.addControlKeywords]),
 			kind: 'item',
 			control,
 			activity: 'item',
@@ -460,15 +471,16 @@ export function addableEntries(
  */
 export function bindableEntries(
 	points: readonly AnyPoint[],
-	context: Pick<CommandBoxContext, 'keys'> = {},
+	context: Pick<CommandBoxContext, 'keys' | 'strings'> = {},
 	options: { excludePoints?: readonly string[] } = {}
 ): readonly BindableEntry[] {
 	const excluded = new Set(options.excludePoints ?? [])
 	const entries: BindableEntry[] = []
-	const keyContext: CommandBoxContext = { keys: context.keys }
+	const strings = stringsOf(context)
+	const keyContext: CommandBoxContext = { keys: context.keys, strings }
 	for (const point of points) {
 		if (excluded.has(point.id)) continue
-		const label = pointLabel(point)
+		const label = pointLabel(point, strings)
 		if (isActionPoint(point)) {
 			const run: Runnable = { kind: 'action', point: point.id }
 			entries.push({
@@ -478,7 +490,7 @@ export function bindableEntries(
 				value: undefined,
 				needsParam: false,
 				label,
-				meta: entryMeta(keyContext, run, 'Run command'),
+				meta: entryMeta(keyContext, run, strings.runCommand),
 				icon: point.icon,
 				keywords: collectKeywords(point.id, label, point.keywords),
 				run,
@@ -493,15 +505,14 @@ export function bindableEntries(
 				point: point.id,
 				value: undefined,
 				needsParam: true,
-				label: `Set ${label}…`,
-				meta: 'Choose value when binding',
+				label: strings.setGeneric(label),
+				meta: strings.chooseValue,
 				icon: point.icon,
 				keywords: collectKeywords(point.id, label, point.keywords, [
-					'set',
-					'value',
-					...ON_KEYWORDS,
-					...OFF_KEYWORDS,
-					...TOGGLE_KEYWORDS,
+					...strings.setValueKeywords,
+					...strings.onKeywords,
+					...strings.offKeywords,
+					...strings.toggleKeywords,
 				]),
 			})
 			const toggleRun: Runnable = { kind: 'toggle', point: point.id }
@@ -511,15 +522,15 @@ export function bindableEntries(
 				point: point.id,
 				value: undefined,
 				needsParam: false,
-				label: `Toggle ${label}`,
-				meta: entryMeta(keyContext, toggleRun, `Toggle ${label}`),
+				label: strings.toggle(label),
+				meta: entryMeta(keyContext, toggleRun, strings.toggle(label)),
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, [...TOGGLE_KEYWORDS]),
+				keywords: collectKeywords(point.id, label, point.keywords, [...strings.toggleKeywords]),
 				run: toggleRun,
 			})
 			for (const [value, verb, family] of [
-				[true, 'Enable', ON_KEYWORDS],
-				[false, 'Disable', OFF_KEYWORDS],
+				[true, strings.enable, strings.onKeywords],
+				[false, strings.disable, strings.offKeywords],
 			] as const) {
 				const run: Runnable = { kind: 'set', point: point.id, value }
 				entries.push({
@@ -528,8 +539,8 @@ export function bindableEntries(
 					point: point.id,
 					value,
 					needsParam: false,
-					label: `${verb} ${label}`,
-					meta: entryMeta(keyContext, run, `Set ${label}`),
+					label: verb(label),
+					meta: entryMeta(keyContext, run, strings.setValue(label)),
 					icon: point.icon,
 					keywords: collectKeywords(point.id, label, point.keywords, [...family]),
 					run,
@@ -544,13 +555,16 @@ export function bindableEntries(
 				point: point.id,
 				value: undefined,
 				needsParam: true,
-				label: `Set ${label}…`,
-				meta: 'Choose value when binding',
+				label: strings.setGeneric(label),
+				meta: strings.chooseValue,
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, 'set', 'value', 'choose'),
+				keywords: collectKeywords(point.id, label, point.keywords, [
+					...strings.setValueKeywords,
+					strings.chooseKeyword,
+				]),
 			})
 			for (const option of enumOptionsOf(point)) {
-				const optionLabel = option.label ?? humanizeCommandText(option.value)
+				const optionLabel = optionLabelOf(point, option, strings)
 				const run: Runnable = { kind: 'set', point: point.id, value: option.value }
 				entries.push({
 					id: entryIdOf(run),
@@ -558,7 +572,7 @@ export function bindableEntries(
 					point: point.id,
 					value: option.value,
 					needsParam: false,
-					label: `Set ${label} to ${optionLabel}`,
+					label: strings.setTo(label, optionLabel),
 					meta: entryMeta(keyContext, run, label),
 					icon: option.icon ?? point.icon,
 					keywords: collectKeywords(
@@ -581,15 +595,15 @@ export function bindableEntries(
 				point: point.id,
 				value: undefined,
 				needsParam: true,
-				label: `Set ${label}…`,
-				meta: 'Choose value when binding',
+				label: strings.setGeneric(label),
+				meta: strings.chooseValue,
 				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, 'set', 'value'),
+				keywords: collectKeywords(point.id, label, point.keywords, [...strings.setValueKeywords]),
 			})
 			const step = defaultStepOf(point)
 			for (const [delta, actionLabel, family] of [
-				[step, `Increase ${label}…`, STEP_UP_KEYWORDS],
-				[-step, `Decrease ${label}…`, STEP_DOWN_KEYWORDS],
+				[step, strings.increaseGeneric(label), strings.stepUpKeywords],
+				[-step, strings.decreaseGeneric(label), strings.stepDownKeywords],
 			] as const) {
 				entries.push({
 					id: `${point.id}${delta >= 0 ? '+=' : '-='}?`,
@@ -599,7 +613,7 @@ export function bindableEntries(
 					delta,
 					needsParam: true,
 					label: actionLabel,
-					meta: 'Choose step when binding',
+					meta: strings.chooseStep,
 					icon: point.icon,
 					keywords: collectKeywords(point.id, label, point.keywords, [...family]),
 				})
@@ -613,10 +627,10 @@ export function bindableEntries(
 			point: point.id,
 			value: undefined,
 			needsParam: true,
-			label: `Set ${label}…`,
-			meta: 'Choose value when binding',
+			label: strings.setGeneric(label),
+			meta: strings.chooseValue,
 			icon: point.icon,
-			keywords: collectKeywords(point.id, label, point.keywords, 'set', 'value'),
+			keywords: collectKeywords(point.id, label, point.keywords, [...strings.setValueKeywords]),
 		})
 	}
 	return entries

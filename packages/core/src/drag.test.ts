@@ -26,7 +26,7 @@ afterEach(() => {
 
 function twoItemLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }] }],
@@ -42,7 +42,7 @@ function twoItemLayout(): SerializedLayout {
 
 function fourItemLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }, { point: 'c' }, { point: 'd' }] }],
@@ -243,7 +243,7 @@ describe('createDrag session shell', () => {
 describe('slide geometry home (Phase 4)', () => {
 	function wholeToolbarLayout(): SerializedLayout {
 		return {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [
 					[{ space: 0.2, toolbar: [{ point: 'a' }] }],
@@ -749,7 +749,7 @@ describe('event completeness (every transition is an event)', () => {
 		// Use a layout where the origin toolbar has exactly one item, so
 		// dragging it out empties and prunes the toolbar.
 		const singleItemLayout: SerializedLayout = {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [[{ space: 1, toolbar: [{ point: 'x' }] }], [{ space: 1, toolbar: [{ point: 'y' }] }]],
 				right: [],
@@ -962,7 +962,7 @@ describe('vocabulary cleanup (Phase 5)', () => {
 		// `T=[t1,t2] g U=[x] h V=[v]` — one track, three toolbars.
 		function threeToolbarLayout(): SerializedLayout {
 			return {
-				version: 2,
+				version: 1,
 				borders: {
 					top: [
 						[

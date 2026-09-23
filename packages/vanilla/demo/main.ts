@@ -1,5 +1,11 @@
 import { ConsoleStore, PaletteCore, ValuesBag, validateSerializedLayout } from '@palettable/core'
 import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
+import {
+	catalogStringsForLocale,
+	type DemoLocale,
+	isDemoLocale,
+	localeBundleForLocale,
+} from './i18n.js'
 import { DEMO_ICON_CHOICES, demoIconResolver, renderDemoIconField } from './icons.js'
 import '../../core/styles/palette.css'
 import '../../core/styles/head-default.css'
@@ -61,6 +67,7 @@ const core = new PaletteCore(demoPoints(), {
 	// `demoLayoutFor` returns a fresh clone and the tree clones again,
 	// so no extra copy is needed here.
 	initialLayout: { borders: initial.borders, parking: initial.parking },
+	strings: catalogStringsForLocale('en') ?? {},
 })
 
 function hasCommandBoxTool(): boolean {
@@ -106,9 +113,8 @@ const valueLens = createValueProxy<DemoState>(
 )
 bindDemoLens(valueLens.proxy)
 const demo = valueLens.proxy
-// Hydrate BEFORE createIDE: the IDE renders tool DOM once at construction
-// (then subscribes per-tool for updates), so values must be present first.
-core.setMany({ ...CONSUMER_DEFAULTS })
+// `locale` seed happens below (after `applyLocale` is defined) via
+// `applyLocaleSeed()` — hydration order matters (before `createIDE`).
 bindResetViaCore(() => {
 	core.setMany(resetColonyValues())
 	demo.lastAction = 'Colony reset to defaults'
@@ -227,6 +233,35 @@ shipBag.subscribe((changed) => {
 })
 renderFleet()
 
+// Demo locale: system value like `theme` — never enters the colony bag,
+// stays out of defaults/dirty/reset. Seeded before `createIDE` so the
+// first paint already uses the right tables; `document.lang` follows.
+// (The live locale lives in `core.values`; no local mirror needed.)
+function applyLocale(locale: DemoLocale): void {
+	document.documentElement.lang = locale
+	// Catalog strings follow via the IDE (`stringsForLocale` bundle →
+	// `syncCatalogStrings`); keep the direct call as the pre-IDE seed so
+	// the first paint already uses the right table.
+	core.setStrings(catalogStringsForLocale(locale))
+}
+
+/** Seed `locale` before `createIDE` (hydration order matters — see above). */
+function applyLocaleSeed(): void {
+	applyLocale('en')
+	core.setMany({ ...CONSUMER_DEFAULTS, locale: 'en' })
+	core.values.subscribe('locale', (value) => {
+		if (!isDemoLocale(value)) return
+		applyLocale(value)
+	})
+}
+
+// Hydrate BEFORE createIDE: the IDE renders tool DOM once at construction
+// (then subscribes per-tool for updates), so values must be present first.
+// `locale` is a valued enum point (system value like `theme` is nothing —
+// but locale needs a store value for the segmented control), seeded here
+// and excluded from CONSUMER_DEFAULTS/dirty/reset by convention.
+applyLocaleSeed()
+
 const ide = createIDE(ideHost, {
 	core,
 	consoleStore,
@@ -236,6 +271,8 @@ const ide = createIDE(ideHost, {
 	iconResolver: demoIconResolver,
 	iconChoices: DEMO_ICON_CHOICES,
 	renderIconField: renderDemoIconField,
+	localePointId: 'locale',
+	stringsForLocale: (locale) => (isDemoLocale(locale) ? localeBundleForLocale(locale) : undefined),
 })
 
 // Per-tool DOM updates are owned by the IDE's own bindings; chrome

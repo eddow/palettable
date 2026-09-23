@@ -47,57 +47,23 @@ Run: `pnpm --filter @palettable/vanilla test`. Config:
 | `src/value-sync.test.ts` | the fine-DOM reconciliation contract: per-tool value sync in place (same node: toggle / slider / focused-slider guard), editing chrome without rebuild (`syncEditing`/`applyEditing` — root classes, `inert`, guards, same `.toolbar` identity), `setInspecting` two-node flip, selection patch re-rendering the details panel only, `can` flips toggling `disabled` in place |
 | `src/drag.test.ts` | slide measuring + add-item probes: `extractionGrabOffset` (intra-button offset, middle fallbacks) + `itemFromAddSelection` (set/tool/action/item variants, family mismatch → `undefined`); `clampSlideDelta` lives in core (single copy) |
 
-## Svelte unit (Vitest, jsdom) — 179 tests, 17 files
+## E2E (Playwright)
 
-Run: `pnpm test`. Config: `vitest.config.ts` (`environment: `jsdom`,
-`resolve.conditions: ['browser']`, alias `$lib`, setup `tests/setup.ts`).
-
-| File | Count | Covers |
-| ---- | ----- | ------ |
-| `tests/smoke.test.ts` | 1 | harness sanity |
-| `tests/component.test.ts` | 1 | testing-library Svelte mount |
-| `tests/palette/keys.test.ts` | 6 | keystroke normalization, event derivation, binding resolution |
-| `tests/palette/palette.test.ts` | 17 | tool resolution, setter/action runners, control resolution, configurator scope, surface axis, `dragend` clearing, multi-setter divergence, hydrated reactivity (`HydratedBordersProbe`) |
-| `tests/palette/serialization.test.ts` | 19 | `serialize` / `validate` / `hydrate` round-trips, parking persistence + ownership, instance fingerprints |
-| `tests/palette/command-box.test.ts` | 26 | entry builders, model search/filter/score, keyboard, non-runnable `PaletteError` (`CommandBoxEntriesProbe` for reactive entries) |
-| `tests/palette/components.test.ts` | 16 | `paletteRoot`, item drag/inspect, `Ide`, `Parking` independent stack (`PaletteRootProbe`, `PaletteItemDragProbe`, `IdeProbe`, `ParkingProbe`, `ParkingEditorStub`) |
-| `tests/palette/item-movement.test.ts` | 13 | `resolveItemPlacementTarget` contract |
-| `tests/palette/drag-invariants.test.ts` | 12 | mode model + container-scoped identity (border drag never matches parking, parking↔border ownership transfer) |
-| `tests/palette/track-gap.test.ts` | 4 | track-gap hover commits, slide disarm on merge |
-| `tests/palette/drawer.test.ts` | 6 | factory shape, open/Escape, collapse signal, axis inversion, popup scope, hover travel |
-| `tests/palette/editors.test.ts` | 3 | toggle/select editors, `BaseConfigurator` editor-choices |
-| `tests/palette/export-split.test.ts` | 2 | core/edition boundary (core lacks mutation, edition re-exports core) |
-| `tests/palette/console.test.ts` | 5 | console without `commandBox`: run shows toggle + run box only, edit shows add box + details (tools panel after selection), toggle flips mode, edit add-box results are draggable tools, read-only (`editable: false`) shows no toggle and stays in run mode |
-
-Gotchas:
-
-- Run `svelte-kit sync` before Vitest (generated `.svelte-kit/tsconfig.json` is
-  required by the resolver) — `pnpm check` covers this.
-- `resolve.conditions: ['browser']` is mandatory, else Svelte resolves to its
-  server build and `mount()` throws `lifecycle_function_unavailable`.
-- `$state` proxies force `toStrictEqual` over `toBe` for `inspecting.item` and
-  the catalogue seed border.
-- `paletteCommandBoxModel` / `hydratePaletteLayout` must be created during
-  probe init, never in handlers (same init-time constraint as app code).
-
-## E2E (Playwright) — 37 tests, 8 files, 3 projects
-
-Run: `pnpm test:e2e`. `playwright.config.ts` runs the shared suite against
-**both** demos — `svelte` (build + preview on `:4173`) and `vanilla` (vite dev
-on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
+Run: `pnpm test:e2e`. `playwright.config.ts` serves the vanilla demo
+(vite dev on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
 `test.beforeEach` clears `localStorage` and reloads. The suite is the
-**adapter conformance contract**: every future adapter (vue, thinned svelte)
-must satisfy the same specs — new highlight/commit behaviour lands with its
-spec first, core unit anchors second.
+**adapter conformance contract**: every adapter (vue, svelte — see
+`plans/extraction.md`) must satisfy the same specs — new highlight/commit
+behaviour lands with its spec first, core unit anchors second.
 
-- `e2e/smoke.spec.ts` (1, both demos): home page renders.
-- `e2e/palette.spec.ts` (5, both demos): command-box combobox runs commands
+- `e2e/smoke.spec.ts` (1): home page renders.
+- `e2e/palette.spec.ts` (5): command-box combobox runs commands
   inline + `.palette-ide.editing` chrome; drawer open with axis inversion
   (left drawer → `is-horizontal`) + Escape close; inspector via `pointerdown`
   on the edit-mode `.toolbar-item-guard` (presentation-only configurator,
   selected item highlighted); layout save → reload → restored badge → preset
   load.
-- `e2e/console.spec.ts` (9, both demos): backtick opens the edit-only console
+- `e2e/console.spec.ts` (9): backtick opens the edit-only console
   (Ide root focused first — the IDE listens on the root `keydown`); Terminal
   button + Escape (+ work-zone `is-dimmed` while open); command-first mode (no
   combobox → console command-first + square edit button); read-only mode;
@@ -105,9 +71,9 @@ spec first, core unit anchors second.
   a `commandBox` tool is displayed; add flow (entry → variant card → value);
   add-box rows are click-to-select (not draggable); add-box click selects an
   entry.
-- `e2e/drag-invariants.spec.ts` (1, both demos): movement is stripped — locks
+- `e2e/drag-invariants.spec.ts` (1): movement is stripped — locks
   the static edit-mode layout (no empty toolbars/tracks).
-- `e2e/drag-highlight.spec.ts` (1, both demos): dragging a tool highlights a
+- `e2e/drag-highlight.spec.ts` (1): dragging a tool highlights a
   free item-space DZ — guard `pointerdown` → hover a neighbouring tool →
   `.toolbar-drop-zone.highlighted` appears. Uses the *left* border (the
   centered console panel covers the top toolbar's right-hand tools); hovers
@@ -127,15 +93,14 @@ spec first, core unit anchors second.
 - `e2e/reorder-forward.spec.ts` (1, conformance): same-toolbar forward moves
   land between, not after — dragging the second tool onto gap 3 reorders to
   `[0, 2, 1, 3]`, never `[0, 2, 3, 1]`. Reads live `data-tool` order via
-  `toolOrder`; svelte oracle fails (expected divergence). Core anchor:
+  `toolOrder`. Core anchor:
   `layout.test.ts` "forward move lands between, not after" (ABCD + backward
   case).
 - `e2e/whole-toolbar.spec.ts` (1, conformance): a whole-toolbar drag never
   highlights neighbour track gaps — only the last TB-DZ of the previous TB
   and the first TB-DZ of the next TB (same track). Extracts a singleton via
   guard → leading track gap, then hovers the fresh toolbar: own flanking
-  track gaps stay dark while a neighbour TB edge paints. Vanilla passes,
-  svelte fails (expected divergence — oracle predates the rule). Core
+  track gaps stay dark while a neighbour TB edge paints. Core
   anchors: `layout.test.ts` "whole-toolbar drag paints neighbour TB edges"
   + "derives the whole-toolbar flag at drag-start".
 - `e2e/dark-gap-no-move.spec.ts` (1, conformance): re-organisation happens
@@ -167,8 +132,7 @@ E2E lessons (see `docs/architecture.md` §19–§20):
 
 ## Gates
 
-- Core: `pnpm --filter @palettable/core check` / `build` / `test` (264).
-- Vanilla: `pnpm --filter @palettable/vanilla check` / `test` (45).
-- Svelte: `pnpm --filter @palettable/svelte check` / `test` (179).
+- Core: `pnpm --filter @palettable/core check` / `build` / `test`.
+- Vanilla: `pnpm --filter @palettable/vanilla check` / `test`.
 - `npx biome check packages/core packages/vanilla tests/e2e playwright.config.ts` (clean).
-- `pnpm test:e2e` (37 passed).
+- `pnpm test:e2e`.

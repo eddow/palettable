@@ -40,7 +40,7 @@ test('ABCD vertical bottom-aligned pop-A then slide before BCD', async ({ page }
 	// Stage ABCD bottom-docked on the left border (space:1 pushes to bottom).
 	// Mirror parking-drop.spec.ts: seed storage, reload, then Load layout.
 	const layout = {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [],
 			right: [],

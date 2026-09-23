@@ -12,18 +12,18 @@ pnpm install
 
 | Command | What it does |
 | ------------------ | ----------------------------------------------- |
-| `pnpm dev` | Vite dev server (default SvelteKit port) |
-| `pnpm check` | `svelte-kit sync && svelte-check` |
-| `pnpm test` | Vitest unit suite (jsdom) |
-| `pnpm test:e2e` | Playwright (builds + previews on port 4173) |
+| `pnpm dev` / `pnpm dev:vanilla` | Vanilla demo dev server (`:4174`) |
+| `pnpm check` | `tsc --noEmit` per package |
+| `pnpm test` | Vitest unit suites |
+| `pnpm test:e2e` | Playwright (serves dev on port 4174) |
 | `pnpm lint` | Biome check (tabs, single quotes, width 100) |
 | `pnpm build` / `pnpm preview` | Production build / local preview |
 
 Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
 
-## Demo tour (`src/routes/+page.svelte`)
+## Demo tour (`packages/vanilla/demo/main.ts`)
 
-The demo is a **Stellar Outpost** space-colony sim (`src/lib/demo/palette.svelte.ts`)
+The demo is a **Stellar Outpost** space-colony sim
 rendering an `Ide` with all four borders plus center content. It ships **three
 preset loads** (`demoConfigs`) in the demo bar — plain command buttons (no
 toggle state), each loading a fresh clone of its configuration's layout:
@@ -67,49 +67,19 @@ only (current option icon, no text) on the top bar's single track, resolves via
 `prefers-color-scheme` and syncs `.palette-default-theme-light` + `data-theme` +
 `color-scheme` onto `<html>` (see `docs/theming.md`).
 
-## Your first palette (historical svelte sample — live API is `core` + `vanilla`)
+## Your first palette (live API is `core` + `vanilla`)
 
 ```ts
-import { headEditors } from '$lib/head/registry'
-import { Palette } from '$lib/palette/core.svelte'
+import { PaletteCore } from '@palettable/core'
 
-const palette = new Palette({
-	tools: {
-		theme: {
-			type: 'enum',
-			label: 'Theme',
-			value: 'dark',
-			default: 'dark',
-			values: [{ value: 'light' }, { value: 'dark' }]
-		}
-	},
-	keys: { E: 'alertLevel=red' },
-	editable: true,
-	editors: headEditors as never,
-	editorDefaults: { enum: 'select' }
-})
+const core = new PaletteCore([
+	{ id: 'theme', label: 'Theme', type: 'enum', value: 'dark', default: 'dark', values: [{ value: 'light' }, { value: 'dark' }] },
+])
 ```
 
 Full walkthrough: `docs/using-the-default-head.md`. Custom heads:
 `docs/creating-a-head.md`.
 
-```svelte
-<script>
-	import Ide from '$lib/palette/components/Ide.svelte'
-	import '$lib/palette/styles/palette.css'
-	import '$lib/head/styles/head-default.css'
-	const top = $state([{ space: 0, toolbar: [{ point: 'theme', control: 'select' }] }])
-</script>
-
-<Ide {palette} {top}>
-	<div>center content</div>
-</Ide>
-```
-
 Rules that bite newcomers (see `docs/core-concepts.md` for why):
 
-- Runes only compile in `.svelte.ts` / `.svelte` — pure logic stays in `.ts`.
-- `paletteCommandBoxModel(...)` and `hydratePaletteLayout(...)` must run during
-  component/module init, never in handlers or after `await`.
-- Tools are plain `$state` objects you supply; mutate `tool.value` directly.
-- `Palette` instances are never `$state`-proxied — identity is plain `===`.
+- Tools are plain objects you supply; the core owns values + layout.

@@ -5,8 +5,9 @@ Vocabulary: the command-box (as command palette) lists **points**
 binding one to a toolbar creates a **tool**. `status` / `command-box` / `drawer`
 are **nothing-point tools** (context plus enablement, no core value). See `docs/core-concepts.md` for the glossary.
 
-Builders and model live in `src/lib/palette/command-box.svelte.ts`. Console (headless core +
-head modal): `src/lib/palette/console.svelte.ts` + `src/lib/head/Console.svelte`.
+Builders and the query model live in `packages/core/src/command-box.ts`; the console
+state machine lives in `packages/core/src/console.ts`. The console **modal** is
+adapter-owned (`renderConsole` in the reference head).
 
 ## Entry builders
 

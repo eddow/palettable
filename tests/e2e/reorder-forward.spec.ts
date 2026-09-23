@@ -68,9 +68,6 @@ async function dragOnto(
 // Conformance: same-toolbar forward moves land between, not after. The left
 // border holds [slider, select, segmented, drawer]: dragging the second tool
 // (select) onto the gap between the third and fourth must reorder to
-// [slider, segmented, select, drawer] — not [slider, segmented, drawer,
-// select]. Backward moves already land correctly. Future adapters (vue,
-// thinned svelte) must satisfy this case.
 test('dragging a tool forward lands between, not after', async ({ page }) => {
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()

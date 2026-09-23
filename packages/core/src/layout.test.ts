@@ -28,7 +28,6 @@ import {
 	refreshDragMode,
 	resolveDragMode,
 	type SerializedLayout,
-	type SerializedLayoutV1,
 	startDraggingState,
 	type Track,
 	toolbarLocationOf,
@@ -39,7 +38,7 @@ import {
 
 function twoItemLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }] }],
@@ -53,27 +52,10 @@ function twoItemLayout(): SerializedLayout {
 	}
 }
 
-/** Legacy v1 flat payload (back-compat read path). */
-function twoItemLayoutV1(): SerializedLayoutV1 {
-	return {
-		version: 1,
-		borders: {
-			top: [
-				{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }] },
-				{ space: 1, toolbar: [{ point: 'c' }] },
-			],
-			right: [],
-			bottom: [],
-			left: [],
-		},
-		parking: [[{ point: 'p' }]],
-	}
-}
-
 /** Four-tool single toolbar: the ABCD fixture for edge-drag conformance. */
 function fourItemLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }, { point: 'c' }, { point: 'd' }] }],
@@ -91,7 +73,7 @@ function fourItemLayout(): SerializedLayout {
  * the tests below instead. */
 function _threeToolbarLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[{ space: 0.2, toolbar: [{ point: 'a' }] }],
@@ -130,7 +112,7 @@ function borderDrag(toolbarIndex = 0, toolCount = 1): DraggingState {
 describe('defaultLayoutFromPoints', () => {
 	it('puts every point in one top toolbar', () => {
 		expect(defaultLayoutFromPoints(['a', 'b'])).toEqual({
-			version: 2,
+			version: 1,
 			borders: {
 				top: [[{ space: 1, toolbar: [{ point: 'a' }, { point: 'b' }] }]],
 				right: [],
@@ -149,20 +131,19 @@ describe('defaultLayoutFromPoints', () => {
 
 	it('validates serialized layouts (version, regions, items, inline tools)', () => {
 		expect(validateSerializedLayout(twoItemLayout())).toBe(true)
-		expect(validateSerializedLayout(twoItemLayoutV1())).toBe(true)
 		expect(validateSerializedLayout({ version: 3, borders: {} })).toBe(false)
-		expect(validateSerializedLayout({ version: 2, borders: {} })).toBe(false)
+		expect(validateSerializedLayout({ version: 1, borders: {} })).toBe(false)
 		expect(validateSerializedLayout({ version: 2 })).toBe(false)
-		expect(validateSerializedLayout({ version: 2, borders: { top: [] } })).toBe(false)
+		expect(validateSerializedLayout({ version: 1, borders: { top: [] } })).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 2,
+				version: 1,
 				borders: { top: [[{ space: 'x', toolbar: [] }]], right: [], bottom: [], left: [] },
 			})
 		).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 2,
+				version: 1,
 				borders: {
 					top: [[{ space: 1, toolbar: [{ point: 123 }] }]],
 					right: [],
@@ -171,10 +152,10 @@ describe('defaultLayoutFromPoints', () => {
 				},
 			})
 		).toBe(false)
-		// v2 regions must be track lists — a flat slot list is rejected.
+		// Regions must be track lists — a flat slot list is rejected.
 		expect(
 			validateSerializedLayout({
-				version: 2,
+				version: 1,
 				borders: {
 					top: [{ space: 1, toolbar: [] }],
 					right: [],
@@ -185,7 +166,7 @@ describe('defaultLayoutFromPoints', () => {
 		).toBe(false)
 		expect(
 			validateSerializedLayout({
-				version: 2,
+				version: 1,
 				borders: {
 					top: [
 						[
@@ -213,7 +194,7 @@ describe('defaultLayoutFromPoints', () => {
 		).toBe(true)
 		expect(
 			validateSerializedLayout({
-				version: 2,
+				version: 1,
 				borders: {
 					top: [[{ space: 1, toolbar: [{ point: { kind: 'bogus' } }] }]],
 					right: [],
@@ -229,23 +210,14 @@ describe('PaletteLayoutTree construction', () => {
 	it('starts empty with no initial layout', () => {
 		const tree = new PaletteLayoutTree()
 		expect(tree.getSnapshot()).toEqual({
-			version: 2,
+			version: 1,
 			borders: { top: [], right: [], bottom: [], left: [] },
 			parking: [],
 		})
 	})
 
-	it('hydrates a v2 serialized layout preserving track boundaries', () => {
+	it('hydrates a serialized layout preserving track boundaries', () => {
 		const tree = new PaletteLayoutTree(twoItemLayout())
-		const live = tree.getLayout()
-		expect(live.borders.top).toHaveLength(2)
-		expect(live.borders.top[0]).toHaveLength(1)
-		expect(live.borders.top[0]?.[0]?.toolbar).toEqual([{ point: 'a' }, { point: 'b' }])
-		expect(live.parking).toEqual([[{ point: 'p' }]])
-	})
-
-	it('hydrates a legacy v1 flat layout (each slot in its own track)', () => {
-		const tree = new PaletteLayoutTree(twoItemLayoutV1())
 		const live = tree.getLayout()
 		expect(live.borders.top).toHaveLength(2)
 		expect(live.borders.top[0]).toHaveLength(1)
@@ -270,7 +242,7 @@ describe('PaletteLayoutTree construction', () => {
 		}
 		const tree = new PaletteLayoutTree(live)
 		const snapshot = tree.getSnapshot()
-		expect(snapshot.version).toBe(2)
+		expect(snapshot.version).toBe(1)
 		const reloaded = new PaletteLayoutTree(snapshot)
 		const top = reloaded.getLayout().borders.top
 		expect(top).toHaveLength(1)
@@ -296,7 +268,7 @@ describe('PaletteLayoutTree construction', () => {
 
 	it('clones inputs on load (mutating the constructor arg never touches the tree)', () => {
 		const input = {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [[{ space: 1, toolbar: [{ point: 'a', config: { label: 'A' } }] }]],
 				right: [],
@@ -314,7 +286,7 @@ describe('PaletteLayoutTree construction', () => {
 
 	it('round-trips drawer items through snapshot', () => {
 		const tree = new PaletteLayoutTree({
-			version: 2,
+			version: 1,
 			borders: {
 				top: [
 					[
@@ -356,7 +328,7 @@ describe('PaletteLayoutTree construction', () => {
 			options: [{ key: 'slow', value: 0.5 }],
 		} as const
 		const tree = new PaletteLayoutTree({
-			version: 2,
+			version: 1,
 			borders: {
 				top: [[{ space: 1, toolbar: [{ point: preset }] }]],
 				right: [],
@@ -1559,7 +1531,7 @@ describe('slide zone (whole-toolbar drag)', () => {
 	/** `T=[t1,t2] g U=[x] h V=[v]` — one track, three toolbars. */
 	function threeToolbarLayout(): SerializedLayout {
 		return {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [
 					[
@@ -1755,7 +1727,7 @@ describe('slide zone (whole-toolbar drag)', () => {
 
 	it('a parking whole-row drag has no border zone', () => {
 		const tree = new PaletteLayoutTree({
-			version: 2,
+			version: 1,
 			borders: { top: [], right: [], bottom: [], left: [] },
 			parking: [[{ point: 'p' }], [{ point: 'q' }]],
 		})
@@ -1788,7 +1760,7 @@ describe('isDrawerItem', () => {
 /** Drawer layout: top toolbar [a, drawer(more: [x, y] + [z])]. */
 function drawerLayout(): SerializedLayout {
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: [
 				[

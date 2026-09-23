@@ -14,8 +14,8 @@ export default defineConfig({
 		fs: {
 			strict: false,
 		},
-		// Dedicated port: the svelte demo serves on :4173, so vanilla takes
-		// :4174. Playwright's `vanilla` project targets this origin.
+		// Dedicated port: the vanilla demo serves on :4174. Playwright's
+		// `vanilla` project targets this origin.
 		port: 4174,
 		strictPort: true,
 	},

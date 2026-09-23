@@ -1,7 +1,7 @@
 # Toolbar movement & reorganisation
 
 Engine: the drag-session code lives in the adapters
-(`packages/vanilla/src/`, and `src/lib/palette/layout.svelte.ts` for svelte);
+(`packages/vanilla/src/`);
 the **structural commits, veto predicates and gap-highlight decisions** live in
 `packages/core/src/layout.ts` and take the drag session as an explicit
 parameter. For the data model itself see `docs/layout-and-drag.md` and
@@ -345,18 +345,18 @@ free span): while limited the session emits `slideLimit` (`atLimit: true`,
 `data-dragged` chrome — it "hits" the neighbour — and recovers it
 (`atLimit: false`) when moving free again.
 
-Slide-follow is armed **declaratively** in svelte: an `$effect` in
-`ToolbarTrack` keyed on `mode === 'slide' && origin.track === track` reads the
-sliding toolbar's live element and arms `retargetToolbarSlide`; when the mode
-is no longer `'slide'` the same effect **disarms** (`clearToolbarSlide`). It
-is the only disarm path for a mode change. `$effect` runs after Svelte flushes
-the DOM, so a freshly committed toolbar is already measurable — no manual
-`tick()`, no attribute-selector lookup from the pointer handler. The vanilla
-adapter arms **imperatively** instead: `armSlide` at whole-TB grab time plus
-re-arm after every gap commit that promotes to a whole-toolbar slide (the
-`syncBorder` re-render has already placed the fresh node, so it is
-measurable; `NodeRegistry.get` resolves it). Gaps are recalculated by the
-core commits (`insertToolbar` splits the target gap, `removeToolbar` merges
+Slide-follow can be armed **declaratively or imperatively** — both are valid,
+the contract is what matters: while `mode === 'slide'` the sliding toolbar's
+live element is measured and a mid-drag re-target re-arms on it, and a mode
+change **disarms** (the only disarm path). A declarative adapter arms it from a
+reactive effect keyed on the mode, which runs after the DOM flush, so a freshly
+committed toolbar is already measurable — no manual `tick()`, no
+attribute-selector lookup from the pointer handler. The reference adapter arms
+**imperatively** instead: `armSlide` at whole-TB grab time plus re-arm after
+every gap commit that promotes to a whole-toolbar slide (the structural
+re-render has already placed the fresh node, so it is measurable;
+`NodeRegistry.get` resolves it). Gaps are recalculated by
+the core commits (`insertToolbar` splits the target gap, `removeToolbar` merges
 the neighbours); the adapter never touches `space` directly during the drag.
 
 ### The slide anchor
@@ -380,13 +380,12 @@ spot, so the toolbar lands centered on the cursor.
 
 ## Session lifecycle
 
-`svelte/src/lib/palette/drag-session.ts: startPaletteDragSession` and
-`packages/vanilla/src/drag-session.ts: startDragSession` both install
+`packages/vanilla/src/drag-session.ts: startDragSession` installs
 window-level `pointermove`/`pointerup`/`pointercancel`/`blur` listeners plus a
 document `visibilitychange` listener. There is deliberately **no pointer
 capture**: capturing on the drag-origin element retargets every subsequent
 move to that element, so `target` never leaves the origin and the drop zones
-freeze.
+freeze. Every adapter must keep that property.
 
 There is also deliberately **no activation threshold**: a drag is live from
 `pointerdown`, and a commit happens on hover, not on release. A zero-pixel

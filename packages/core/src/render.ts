@@ -412,7 +412,7 @@ type LiveSlots = {
 
 function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
 	const version = (layout as { version?: unknown }).version
-	if (version === 1 || version === 2) {
+	if (version === 1) {
 		const serialized = layout as AnySerializedLayout
 		let validated = false
 		try {
@@ -427,12 +427,8 @@ function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
 			{ readonly space: number; readonly toolbar: readonly ToolbarItem[] }[]
 		>
 		for (const region of regions) {
-			// v2 regions are track lists (boundaries preserved); v1 regions
-			// are flat slot lists (each slot = its own single-slot track).
-			const border =
-				version === 2
-					? (serialized as SerializedLayout).borders[region].flat()
-					: (serialized as import('./layout.js').SerializedLayoutV1).borders[region]
+			// Regions are track lists (boundaries preserved).
+			const border = serialized.borders[region].flat()
 			borders[region] = border.map((slot) => ({
 				space: slot.space,
 				toolbar: slot.toolbar.map((item) => serializedItemToLive(item)),
@@ -471,22 +467,13 @@ function toLiveSlots(layout: AnySerializedLayout | PaletteLayout): LiveSlots {
 function serializedItemToLive(item: SerializedToolbarItem): ToolbarItem {
 	if (item.toolbar !== undefined) {
 		return {
-			point: typeof item.point === 'string' ? item.point : (item.point ?? 'drawer'),
+			point: item.point,
 			control: 'drawer',
 			config: item.config,
 			toolbar: item.toolbar.map((slot) => ({
 				space: slot.space,
 				toolbar: slot.toolbar.map((child) => serializedItemToLive(child)),
 			})),
-		} as ToolbarItem
-	}
-	if (item.point === undefined) {
-		// Back-compat: pre-nothing-point payloads carry bare
-		// `{ control: 'status' }` — migrate to `{ point: control, control }`.
-		return {
-			point: item.control ?? 'status',
-			control: item.control ?? 'status',
-			config: item.config,
 		} as ToolbarItem
 	}
 	return { point: item.point, control: item.control, config: item.config } as ToolbarItem

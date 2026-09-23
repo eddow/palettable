@@ -6,7 +6,7 @@
  * children (the work-zone) in `.palette-ide-middle > .palette-ide-center`,
  * and renders the four border stacks around it from `core.layout`.
  * The console overlay (when open) mounts inside the center next to the
- * work-zone, mirroring the svelte `Ide` + `Console` structure the e2e
+ * work-zone, mirroring the `Ide` + `Console` structure the e2e
  * suite asserts.
  *
  * Presentation only: all reads go through core builders/presenters, all
@@ -25,13 +25,16 @@ import {
 	addableEntries,
 	axisForRegion,
 	type Border,
+	bundleCatalogStrings,
 	buttonPresenter,
 	type ConsoleStore,
+	type ControlRegistry,
 	canonicalItemPoint,
 	configuration,
 	configuratorControlCleanup,
 	controlChoicesFor,
 	type DerivedVariant,
+	type DisplayStrings,
 	type DragEvent,
 	type DraggingState,
 	type DropZone,
@@ -84,6 +87,7 @@ import { createVanillaKeys, isEditableTarget } from './keys.js'
 import { NodeRegistry } from './nodes.js'
 import { outsideGapForTrack } from './outside.js'
 import { extractionGrabOffset, toolbarGrabOffset, toolbarSlideBounds } from './slide.js'
+import { type IdeStrings, resolveIdeStrings, type VanillaLocaleBundle } from './strings.js'
 import {
 	el,
 	iconSpan,
@@ -99,6 +103,19 @@ export type IdeOptions = {
 	/** Control-only item ids for the console add-box (`controls.item` keys). */
 	readonly itemControls?: readonly string[]
 	readonly paletteId?: string
+	/** Localizable chrome strings (partial — merged over the English default).
+	 * Static table; `stringsForLocale` (below) wins when both are given. */
+	readonly strings?: Partial<IdeStrings>
+	/** Static display dictionaries (locale bundle wins when both are given).
+	 * Every field is optional — absent dictionary falls back to the
+	 * item-config field, then the definition field, then `humanize(id)`. */
+	readonly display?: DisplayStrings
+	/** Live locale resolver: called per render with the current locale value
+	 * (read from `localePointId` below, default `'locale'`). Return a bundle
+	 * for that locale; absent/unknown locale = English default. */
+	readonly stringsForLocale?: (locale: string | undefined) => VanillaLocaleBundle | undefined
+	/** Valued point id holding the live locale (default `'locale'`; absent = static). */
+	readonly localePointId?: string
 	/** Optional string-glyph icon resolver (consumer-owned, e.g. the demo
 	 * maps `icon:moon` via a hard-coded dictionary). Threaded into every
 	 * `HeadContext`; absent = identity (emoji passthrough). */
@@ -283,7 +300,8 @@ function updateToolNode(
 	item: ToolbarItem,
 	surface: SurfaceContext,
 	node: HTMLElement,
-	resolver?: IconResolver
+	resolver?: IconResolver,
+	display?: DisplayStrings
 ): void {
 	const control = (item as { control?: unknown }).control
 	const pointId = pointIdOf(item)
@@ -292,7 +310,7 @@ function updateToolNode(
 	const bags = core.resolveBags(point?.uses)
 	switch (control) {
 		case 'toggle': {
-			const view = togglePresenter(item, { point, value, bags })
+			const view = togglePresenter(item, { point, value, bags }, display)
 			const button = node.querySelector('button')
 			if (!button) return
 			button.disabled = !view.can
@@ -305,7 +323,7 @@ function updateToolNode(
 			return
 		}
 		case 'select': {
-			const view = selectPresenter(item, { point, value, bags }, surface)
+			const view = selectPresenter(item, { point, value, bags }, surface, display)
 			const closedLabel = selectClosedLabel(view)
 			const trigger = node.querySelector('.palette-default-select-trigger')
 			// Icons nest inside the value chip (tool icon + value icon, like
@@ -395,7 +413,7 @@ function updateToolNode(
 			return
 		}
 		case 'segmented': {
-			const view = selectPresenter(item, { point, value, bags }, surface)
+			const view = selectPresenter(item, { point, value, bags }, surface, display)
 			const group =
 				node.classList.contains('palette-default-segmented') && node instanceof HTMLElement
 					? node
@@ -415,7 +433,7 @@ function updateToolNode(
 			return
 		}
 		case 'stars': {
-			const view = sliderPresenter(item, { point, value, bags }, surface)
+			const view = sliderPresenter(item, { point, value, bags }, surface, display)
 			const buttons = node.querySelectorAll('button[role="radio"]')
 			buttons.forEach((button, index) => {
 				const star = index + 1
@@ -429,7 +447,7 @@ function updateToolNode(
 		}
 		case 'slider':
 		case 'drawerSlider': {
-			const view = sliderPresenter(item, { point, value, bags }, surface)
+			const view = sliderPresenter(item, { point, value, bags }, surface, display)
 			// The readout always follows the model — including mid-drag, which
 			// is when it matters most: the pointer focuses the range, so a
 			// guard placed before this would leave the number stale while the
@@ -466,7 +484,7 @@ function updateToolNode(
 			return
 		}
 		case 'stepper': {
-			const view = sliderPresenter(item, { point, value, bags }, surface)
+			const view = sliderPresenter(item, { point, value, bags }, surface, display)
 			const buttons = node.querySelectorAll('button')
 			const readout = node.querySelector('.palette-default-stepper-value')
 			const minus = buttons[0]
@@ -483,7 +501,7 @@ function updateToolNode(
 			return
 		}
 		case 'status': {
-			const view = statusPresenter(item, { point, value, bags }, surface)
+			const view = statusPresenter(item, { point, value, bags }, surface, display)
 			syncStatusValue(node, view.value)
 			if (view.can) node.removeAttribute('aria-disabled')
 			else node.setAttribute('aria-disabled', 'true')
@@ -496,7 +514,8 @@ function updateToolNode(
 				item,
 				{ point, value: undefined, bags },
 				{ kind: 'action', point: pointId },
-				can
+				can,
+				display
 			)
 			const button = node.querySelector('button')
 			if (!(button instanceof HTMLButtonElement)) return
@@ -505,7 +524,7 @@ function updateToolNode(
 			return
 		}
 		case 'theme': {
-			const view = themePresenter(item, { point, value: readThemeSetting(), bags })
+			const view = themePresenter(item, { point, value: readThemeSetting(), bags }, display)
 			const button = node.querySelector('button')
 			if (button instanceof HTMLButtonElement) {
 				button.title = view.title
@@ -570,30 +589,33 @@ function directionFor(region: PaletteRegion): 'horizontal' | 'vertical' {
 }
 
 /** Vanilla head capability registry for the configurator control choices. */
-const VANILLA_CONTROL_REGISTRY = {
-	boolean: {
-		toggle: { id: 'toggle', label: 'Toggle', families: ['boolean'] as const },
-	},
-	enum: {
-		select: { id: 'select', label: 'Select', families: ['enum'] as const },
-		segmented: { id: 'segmented', label: 'Segmented', families: ['enum'] as const },
-	},
-	number: {
-		slider: { id: 'slider', label: 'Slider', families: ['number'] as const },
-		drawerSlider: { id: 'drawerSlider', label: 'Drawer slider', families: ['number'] as const },
-		stepper: { id: 'stepper', label: 'Stepper', families: ['number'] as const },
-		stars: { id: 'stars', label: 'Stars', families: ['number'] as const },
-	},
-	item: {
-		commandBox: { id: 'commandBox', label: 'Command box', families: ['item'] as const },
-		drawer: { id: 'drawer', label: 'Drawer', families: ['item'] as const },
-		status: { id: 'status', label: 'Status', families: ['item'] as const },
-		theme: { id: 'theme', label: 'Theme', families: ['item'] as const },
-	},
-	run: {
-		button: { id: 'button', label: 'Button', families: ['action'] as const },
-	},
-} as never
+const VANILLA_CONTROL_IDS = {
+	boolean: ['toggle'],
+	enum: ['select', 'segmented'],
+	number: ['slider', 'drawerSlider', 'stepper', 'stars'],
+	item: ['commandBox', 'drawer', 'status', 'theme'],
+	run: ['button'],
+} as const
+
+function vanillaControlRegistry(strings: IdeStrings): ControlRegistry {
+	const name = (id: string): string => strings.controlNames[id] ?? id
+	const familyOf: Record<string, 'boolean' | 'enum' | 'number' | 'item' | 'action'> = {
+		boolean: 'boolean',
+		enum: 'enum',
+		number: 'number',
+		item: 'item',
+		run: 'action',
+	}
+	const registry: Record<string, Record<string, unknown>> = {}
+	for (const [group, ids] of Object.entries(VANILLA_CONTROL_IDS)) {
+		const family = familyOf[group] ?? 'item'
+		registry[group] = {}
+		for (const id of ids) {
+			registry[group][id] = { id, label: name(id), families: [family] }
+		}
+	}
+	return registry as never
+}
 
 const VANILLA_CONTROL_DEFAULTS = {
 	run: 'button',
@@ -627,8 +649,70 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	const iconChoices = options.iconChoices ?? []
 	const renderIconField = options.renderIconField
 	const headGeometry = options.headContext
+	const localePointId = options.localePointId ?? 'locale'
 	const keys = createVanillaKeys(core.keys)
 	const nodes = new NodeRegistry()
+
+	/** Live locale value (`undefined` = static/English default). */
+	function currentLocale(): string | undefined {
+		try {
+			const value = core.values.get(localePointId)
+			return typeof value === 'string' ? value : undefined
+		} catch {
+			return undefined
+		}
+	}
+
+	/** Locale bundle for this render (memoized per locale value). */
+	let bundleCache: { locale: string | undefined; bundle: VanillaLocaleBundle | undefined } = {
+		locale: undefined,
+		bundle: undefined,
+	}
+	function currentBundle(): VanillaLocaleBundle | undefined {
+		const locale = currentLocale()
+		if (bundleCache.locale !== locale) {
+			bundleCache = {
+				locale,
+				bundle: locale !== undefined ? options.stringsForLocale?.(locale) : undefined,
+			}
+		}
+		return bundleCache.bundle
+	}
+
+	/**
+	 * Push the locale bundle's catalog table into the core so console
+	 * catalog rows follow the locale without a consumer `setStrings` call.
+	 * Runs per render (cheap: `setStrings` rebuilds only on override
+	 * change — see below) and on locale-point change via `syncStructure`.
+	 */
+	function syncCatalogStrings(): void {
+		if (options.stringsForLocale === undefined) return
+		const catalog = bundleCatalogStrings(currentBundle())
+		core.setStrings(catalog)
+	}
+
+	/** Resolved chrome strings for this render (locale bundle wins over static). */
+	function currentStrings(): IdeStrings {
+		const fromLocale = currentBundle()?.ide
+		if (fromLocale !== undefined) return resolveIdeStrings(fromLocale)
+		return resolveIdeStrings(options.strings)
+	}
+
+	/**
+	 * Render-time display dictionaries for this render (toolbar tools +
+	 * presenters). Locale bundle wins over the static `display` option.
+	 * Every field is optional — absent dictionary falls back to the
+	 * item-config field, then the definition field, then `humanize(id)`.
+	 */
+	function currentDisplay(): DisplayStrings {
+		const bundle = currentBundle()
+		const pointLabels = bundle?.pointLabels ?? options.display?.pointLabels
+		const pointHints = bundle?.pointHints ?? options.display?.pointHints
+		const optionLabels = bundle?.optionLabels ?? options.display?.optionLabels
+		if (pointLabels === undefined && pointHints === undefined && optionLabels === undefined)
+			return {}
+		return { pointLabels, pointHints, optionLabels }
+	}
 	/**
 	 * Live per-tool bindings: content element → subscriptions. Dropped when
 	 * the owning host rebuilds (per-border / console / full sync) or on
@@ -666,7 +750,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const control = (item as { control?: unknown }).control
 		const pointId = pointIdOf(item)
 		const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
-		const update = () => updateToolNode(core, item, surface, content, iconResolver)
+		const update = () =>
+			updateToolNode(core, item, surface, content, iconResolver, currentDisplay())
 		const unsubs: Unsubscribe[] = []
 		if (point !== undefined && isValuedPoint(point)) {
 			unsubs.push(core.values.subscribe(point.id, () => update()))
@@ -743,17 +828,24 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	/** Last applied editing flag — drives the no-rebuild chrome pass. */
 	let lastEditing: boolean | undefined
 	/**
-	 * Live drag session (Phase 1: the spec `ToolbarDrag` shell; the legacy
-	 * `DraggingState` stays reachable via `sessionState()` until Phase 7
-	 * makes mode/origin session-internal).
+	 * Live drag session (the spec `ToolbarDrag` shell; the
+	 * `DraggingState` stays reachable via `sessionState()`).
 	 */
 	let dragSession: ToolbarDrag | undefined
-	/**
-	 * Legacy alias — the explicit session the engine still takes as a param.
-	 *
-	 * @deprecated Phase 7 — mode/origin go session-internal; do not add new readers.
-	 */
+	/** The explicit session the engine still takes as a param. */
 	let dragging: DraggingState | undefined
+	/**
+	 * Open drawer items, keyed by the live `ToolbarItem` object.
+	 *
+	 * A structural rebuild (`syncBorder` / `syncTrack` / `syncStructure`)
+	 * recreates the drawer wrapper + popup nodes from scratch, and a fresh
+	 * popup starts hidden — so a commit landing while the pointer is over a
+	 * DZ *inside* an open drawer used to close that drawer under the cursor.
+	 * Tracking the open items by identity lets the rebuild re-open exactly
+	 * the drawers that were open (the item object survives structural
+	 * commits; only whole-layout loads replace it).
+	 */
+	const openDrawerItems = new Set<ToolbarItem>()
 	/**
 	 * Mask paint ownership: which end gaps the mask affordances (`paintMask`
 	 * per region, `paintPanelMask` for parking) lit themselves. The mask
@@ -768,7 +860,6 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * After a commit the fresh toolbar sits under the pointer — keeping the
 	 * memo (not clearing it) absorbs the repeat move, so a second toolbar
 	 * is never built for the same gap. Only a *different* gap commits again.
-	 * Mirrors the svelte `ToolbarTrack` memo.
 	 */
 	let hoveredTrackSpace: number | undefined
 
@@ -778,8 +869,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * drag — the toolbar follows the pointer via compositor-only `transform`
 	 * from core `slide` events; `clearSlide` drops the transform and disarms
 	 * the follow loop; `resize` re-reads the two gaps' `space` into flex.
-	 * Mirrors the svelte `ToolbarTrack` declarative effect + rAF loop, armed
-	 * imperatively here.
+	 * Armed imperatively here; a declarative adapter arms it from a reactive
+	 * effect keyed on the drag mode instead.
 	 */
 	let slideCleanup: (() => void) | undefined
 	let slideToolbar: Toolbar | undefined
@@ -791,8 +882,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * Grab offset within the followed toolbar, captured at mousedown and
 	 * preserved across relocations. A fresh singleton from a restructure
 	 * extraction has no mousedown grab, so it derives one from the
-	 * mousedown point within the dragged button instead (mirrors svelte
-	 * `retargetToolbarSlide` + `recenter`, but exact rather than middle).
+	 * mousedown point within the dragged button instead (exact offset
+	 * rather than a middle recenter).
 	 */
 	let slideGrabOffset: number | undefined
 	/**
@@ -801,7 +892,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * fresh singleton toolbar — the re-arm adds this intra-button offset
 	 * to the button's fresh offset inside its new toolbar, so the pointer
 	 * stays glued to the same point on the icon. Falls back to the
-	 * toolbar middle when unmeasurable (mirrors svelte `recenter`).
+	 * toolbar middle when unmeasurable.
 	 */
 	let slideItemGrab: { readonly x: number; readonly y: number } | undefined
 	/**
@@ -910,8 +1001,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * Grab offset for a restructure extraction: the dragged button's fresh
 	 * offset inside its new toolbar plus the mousedown point within the
 	 * button — so the pointer stays glued to the same point on the icon.
-	 * Falls back to the toolbar middle when the button is unmeasurable
-	 * (mirrors svelte `recenter`). Single copy lives in `slide.ts`
+	 * Falls back to the toolbar middle when the button is unmeasurable.
+	 * Single copy lives in `slide.ts`
 	 * (`extractionGrabOffset`) — this is the thin adapter call-site.
 	 */
 	function recenterGrabOffset(
@@ -1026,15 +1117,43 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * hover stay open; siblings and unrelated drawers close. No-op outside
 	 * edit mode (run mode keeps click/Escape/outside-click close) and when
 	 * `target` is not an element.
+	 *
+	 * Mid-drag (`dragSession` live) the rule narrows: a drawer stays open
+	 * iff the hovered element is INSIDE its popup (a DZ in the drawer) or
+	 * inside its own item wrapper (trigger/guard hover-open). Hovering a
+	 * border DZ outside the drawer closes it; hovering a DZ inside keeps
+	 * it open so tools can be dropped in. At rest (no session) the
+	 * contains-based chain rule below applies unchanged.
 	 */
 	function closeDrawersOutside(target: EventTarget | null, spare?: HTMLElement): void {
 		if (!computeEditing()) return
 		if (!(target instanceof HTMLElement)) return
+		const midDrag = dragSession !== undefined
 		for (const popup of document.querySelectorAll('.palettable-drawer__popup')) {
 			if (!(popup instanceof HTMLElement) || popup.hidden) continue
 			const wrapper = popup.closest('.palettable-drawer')
 			if (!(wrapper instanceof HTMLElement)) continue
 			if (spare !== undefined && wrapper === spare) continue
+			if (midDrag) {
+				// Drop-target rule: the drawer survives iff the hover is
+				// inside its popup (DZ hover) or its own item wrapper
+				// (trigger/guard hover-open). Anything else — border DZ,
+				// sibling drawer, bar background — closes it.
+				if (popup.contains(target)) continue
+				const itemWrapper = wrapper.closest('[data-item-index]')
+				if (itemWrapper instanceof HTMLElement && itemWrapper.contains(target)) continue
+				const close = (wrapper as unknown as { __closeDrawer?: () => void }).__closeDrawer
+				if (typeof close === 'function') {
+					close()
+					continue
+				}
+				popup.hidden = true
+				const trigger = wrapper?.querySelector('.palettable-drawer__trigger')
+				if (trigger instanceof HTMLElement) trigger.setAttribute('aria-expanded', 'false')
+				const chevron = wrapper?.querySelector('.palette-default-drawer-chevron')
+				if (chevron instanceof HTMLElement) chevron.textContent = '▸'
+				continue
+			}
 			if (wrapper.contains(target)) continue
 			// Trigger hover: the guard covers the trigger (`inset: -3px`)
 			// and is a SIBLING of the drawer content (both children of
@@ -1282,9 +1401,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	/**
 	 * Phase 6 chrome mirror: container `.dragging` + `data-dragging` (the
 	 * Phase 1–5 chrome) plus per-toolbar `data-dragged` on the core-decided
-	 * dragged toolbar (`dragSession.draggedToolbar` — vanilla applies it
+	 * dragged toolbar (`dragSession.draggedToolbar` — the adapter applies it
 	 * verbatim via `nodes.get`, never computes it) plus root
-	 * `palette-dragging` (mirrors svelte `paletteRoot`). Re-applied after
+	 * `palette-dragging`. Re-applied after
 	 * every `structure` event (the placed toolbar is a fresh object / new
 	 * container after a commit). A subset drag owns no chrome (nothing
 	 * moves yet); it appears only once the drag slides freely.
@@ -1295,8 +1414,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		container.dataset.dragging = 'true'
 		// `palette-dragging` has no CSS rule (dead mirror, kept cleared in
 		// `clearDragChrome`); `data-dragged` keeps the sliding toolbar's
-		// handles exposed while it moves (mirrors svelte `Toolbar`
-		// `data-dragged`). It changes the
+		// handles exposed while it moves. It changes the
 		// toolbar's border width, so slide/outside measurements must run
 		// against the post-chrome DOM — arm/re-arm order is grab →
 		// `applyDragChrome` → `armSlide`, and `structure` → `applyOp` →
@@ -1328,8 +1446,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 
 	/**
 	 * Open a drag session for a whole toolbar (mousedown on the bar itself,
-	 * not on a tool). All tools drag together as a slide from the start —
-	 * mirrors svelte `paletteToolbarDrag`. Slide-follow arms immediately
+	 * not on a tool). All tools drag together as a slide from the start.
+	 * Slide-follow arms immediately
 	 * for border toolbars (parking rows have no track to slide along).
 	 */
 	function startToolbarDrag(
@@ -1486,12 +1604,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * placed toolbar and push the new frame (the DOM moved, so the old
 	 * frame's `start`/`resting` are stale). A restructure that extracts its
 	 * tools promotes to a whole-toolbar slide, and the fresh toolbar sits
-	 * under the cursor (mirrors the svelte track effect). `armSlide`
+	 * under the cursor. `armSlide`
 	 * re-measures, so it is the same one call whether the toolbar is the
 	 * old or a new object — except for the grab: a fresh extraction has no
 	 * mousedown grab yet (`slideGrabOffset` undefined), so it recenters to
-	 * its middle (the dragged icon — mirrors svelte `retargetToolbarSlide`
-	 * `recenter: dragging.grabOffset === undefined`), while a relocated
+	 * its middle (the dragged icon), while a relocated
 	 * toolbar keeps the mousedown offset. Measuring the grab off the fresh
 	 * toolbar (`pointer − freshLeft`) would freeze a gap-sized offset into
 	 * every later delta — the "far too right / far too left" jump.
@@ -1539,11 +1656,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Legacy session state behind the `ToolbarDrag` shell (Phase 1 only).
-	 * The engine still takes it explicitly; Phase 7 removes this escape
-	 * hatch when mode/origin go session-internal.
-	 *
-	 * @deprecated Phase 7 — escape hatch; do not add new callers.
+	 * Session state behind the `ToolbarDrag` shell.
+	 * The engine still takes it explicitly.
 	 */
 	function sessionState(session: ToolbarDrag): DraggingState {
 		const inner = (session as unknown as { draggingState: DraggingState }).draggingState
@@ -1839,8 +1953,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	const bottomHost = document.createElement('div')
 	// Hosts are layout-transparent: `display: contents` makes the rendered
 	// `.toolbar-border` elements direct flex participants of `.palette-ide`
-	// (top/bottom) and `.palette-ide-middle` (left/right), mirroring the
-	// svelte `Ide` (which renders `ToolbarBorder` with no wrappers). Without
+	// (top/bottom) and `.palette-ide-middle` (left/right) — the border
+	// renderer emits no wrapper element of its own. Without
 	// this the bare hosts are `display: block`, so a vertical border's height
 	// collapses to its content and track gaps (`space`) never distribute —
 	// a single `space: 1` toolbar sticks to the top instead of the bottom.
@@ -1883,7 +1997,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Phase 6 mask affordance (mirrors svelte `Ide` `maskHover`): while
+	 * Mask affordance: while
 	 * editing + dragging, a pointer over the dimmed work zone / overlay
 	 * background (the center, but not over a border and not inside the
 	 * console panel / drawer popup / dialog) paints the inner end gap of
@@ -1893,7 +2007,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * through the session — a mask position maps to nothing, so the
 	 * session would see `null` and clear), applying the core-exported
 	 * emptied veto itself so the *rule* stays in core. The dwell never
-	 * arms here (mirrors svelte `masked` guard).
+	 * arms here.
 	 */
 	function paintMask(active: boolean): void {
 		const live = core.layout.getLayout()
@@ -1930,12 +2044,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Phase 6 panel affordance (mirrors svelte `Console`
-	 * `parkingMaskHover`): while editing + dragging, a pointer over the
+	 * Panel affordance: while editing + dragging, a pointer over the
 	 * console panel background but outside parking rows/gaps (and outside
 	 * popups/dialogs) paints the parking end gap — paint-only and
 	 * consequence-free, like `paintMask` (never through the session, so no
-	 * dwell ever arms here — mirrors the svelte `masked` guard). The veto
+	 * dwell ever arms here). The veto
 	 * rule stays core-owned (`draggingWholeParkingRow`: the two gaps
 	 * touching the dragged whole row stay dark at any stack size).
 	 */
@@ -1993,8 +2106,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		return true
 	}
 
-	// Mask + panel listeners (container-level, like svelte `Ide`
-	// `onIdePointerMove`): the center owns the mask (work zone / overlay
+	// Mask + panel listeners (container-level): the center owns the mask (work zone / overlay
 	// background), the console panel owns the parking end gap. Both gate
 	// on editing + live session — hover alone stays dark. The mask is
 	// paint-only: it never calls `session.over(null)` (that would clear
@@ -2099,8 +2211,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		bar.dataset.container = containerKind
 		nodes.setToolbar(toolbar, bar)
 		// Whole-toolbar grab: mousedown on the bar background (not on a
-		// tool/guard) drags all tools together as a slide from the start —
-		// mirrors svelte `paletteToolbarDrag`. The guard's own `pointerdown`
+		// tool/guard) drags all tools together as a slide from the start.
+		// The guard's own `pointerdown`
 		// fires first and sets `dragging`, so a tool grab never double-starts
 		// here (`startToolbarDrag` bails when a session is live).
 		bar.addEventListener('pointerdown', (event) => {
@@ -2149,7 +2261,25 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const openedDrawer = maybeOpenDrawerAt(event)
 			// Hierarchy close on every drag hover: drawers outside the
 			// hovered ancestor chain close (no mouseleave close in edit).
-			closeDrawersOutside(event.target, openedDrawer ?? undefined)
+			// Use the element UNDER the pointer, not `event.target`: mid-
+			// drag the pointer is often captured to the grab guard, so
+			// `event.target` freezes on the drag origin (outside the
+			// drawer) and would close the very drawer being hovered.
+			// A drawer stays open iff the hovered DZ lives inside it.
+			const doc =
+				(event.currentTarget instanceof HTMLElement
+					? event.currentTarget.ownerDocument
+					: undefined) ?? document
+			const hovered =
+				event.clientX !== undefined && event.clientY !== undefined
+					? typeof doc.elementFromPoint === 'function'
+						? doc.elementFromPoint(event.clientX, event.clientY)
+						: null
+					: null
+			closeDrawersOutside(
+				hovered instanceof HTMLElement ? hovered : event.target,
+				openedDrawer ?? undefined
+			)
 			// During a drag the pointer may be implicitly captured to the
 			// grab guard (touch/pen, and Playwright's synthetic mouse in
 			// e2e/probes) — `event.target` then freezes on the origin and
@@ -2276,8 +2406,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (inspecting === item) wrapper.dataset.inspected = 'true'
 			const content = el('div', 'toolbar-item-content')
 			// Drawer items are exempt from the inert shield: the popup
-			// renders INSIDE the content (inline, not body-portaled like
-			// svelte), and an inert ancestor removes the whole subtree
+			// renders INSIDE the content (inline, not body-portaled), and
+			// an inert ancestor removes the whole subtree
 			// from hit-testing — `elementFromPoint` would pass through
 			// the open popup to the center behind it, so drawer-child
 			// gaps could never highlight. The trigger stays covered by
@@ -2293,11 +2423,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				surface,
 				region,
 				iconResolver,
+				strings: currentStrings(),
+				display: currentDisplay(),
 				onOpenConsole: (mode) => consoleStore.open(mode),
 				onInspect: () => setInspecting(item),
 				isEditing: () => computeEditing(),
 				isDragging: () => dragSession !== undefined,
 				closeUnrelatedDrawers: (target) => closeDrawersOutside(target),
+				onOpenDrawer: (drawerItem) => openDrawerItems.add(drawerItem),
+				onCloseDrawer: (drawerItem) => openDrawerItems.delete(drawerItem),
 				ideRect: _basePath.ideRect ?? headGeometry?.ideRect,
 				triggerRect: _basePath.triggerRect ?? headGeometry?.triggerRect,
 				renderToolbar: (childTrack: Track, childAxis, childRegion) =>
@@ -2337,6 +2471,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		editing: boolean
 	): HTMLElement {
 		const wrap = el('div', 'toolbar-track')
+		// Imperative track direction: a `@container style(--layout)` rule
+		// on the track would read the ANCESTOR container (the border), not
+		// the popup — a container cannot query its own vars. The child axis
+		// is known here, so stamp it directly (inner TOOLBARS keep querying
+		// the popup via CSS — they are not containers).
+		wrap.style.flexDirection = axis === 'vertical' ? 'column' : 'row'
+		wrap.style.alignItems = axis === 'vertical' ? 'stretch' : 'center'
 		wrap.dataset.drawerTrack = 'true'
 		// Drawer hover routes into the drag session (item-gap paint +
 		// commit, same as border bars) and applies hierarchy close: only
@@ -2368,8 +2509,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// Mid-drag: hierarchy close FIRST (drawers outside the
 			// hovered chain close), then DZ paint. The close spares the
 			// hovered chain via `contains` (popup-inner targets sit
-			// inside their wrapper), so paint targets survive it.
-			closeDrawersOutside(event.target)
+			// inside their wrapper), so paint targets survive it. Uses
+			// the element under the pointer (not `event.target`, which
+			// may be capture-retargeted to the drag origin outside the
+			// drawer) — a drawer stays open iff the hovered DZ is inside.
+			const hoveredEl =
+				event.clientX !== undefined && event.clientY !== undefined
+					? typeof wrap.ownerDocument.elementFromPoint === 'function'
+						? wrap.ownerDocument.elementFromPoint(event.clientX, event.clientY)
+						: null
+					: null
+			closeDrawersOutside(hoveredEl instanceof HTMLElement ? hoveredEl : event.target)
 			if (!computeEditing()) return
 			const target = event.target
 			if (!(target instanceof HTMLElement)) return
@@ -2550,6 +2700,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const space = el('div', 'toolbar-stack-space toolbar-drop-zone')
 			space.dataset.paletteId = paletteId
 			space.dataset.stackIndex = String(index)
+			space.dataset.emptyText = currentStrings().emptyDropZone
 			borderEl.append(space)
 		}
 		if (!inverse) stackSpace(0)
@@ -2564,8 +2715,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// restructures (extracts the tools into a fresh singleton at
 			// that gap), a dark gap emits nothing. Paint arrives via events;
 			// a commit still needs the manual re-render until Phase 3b.
-			// Mirrors svelte `ToolbarTrack`: inside a toolbar the toolbar
-			// owns the DZs (memo kept).
+			// Inside a toolbar the toolbar owns the DZs (memo kept).
 			trackEl.addEventListener('pointermove', (event) => {
 				// Rest hierarchy close (no drag): moving over a track gap
 				// elsewhere closes drawers outside the hovered chain.
@@ -2655,10 +2805,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		if (inverse) stackSpace(0)
 		host.append(borderEl)
 		clearGapClasses(borderEl)
+		// A rebuild recreates every drawer wrapper closed — restore the
+		// drawers that were open (identity-tracked) so a commit landing on a
+		// DZ inside a drawer does not close it under the cursor.
+		reopenTrackedDrawers()
 	}
 
 	function renderParking(host: HTMLElement, editing: boolean): void {
 		host.textContent = ''
+		const strings = currentStrings()
 		const live = core.layout.getLayout()
 		const parking = live.parking
 		const stack = el('div', 'palette-parking')
@@ -2702,7 +2857,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			}
 			// Over a row (not a gap): report the row hover so core paints
 			// the two flanking parking gaps (active-row fallback, no dwell
-			// arm — mirrors the svelte `hoverRow` + border `stackFlanks`).
+			// arm).
 			const rowEl = target.closest('[data-parking-row-index]')
 			if (rowEl && stack.contains(rowEl)) {
 				const rowIndex = Number((rowEl as HTMLElement).dataset.parkingRowIndex)
@@ -2747,6 +2902,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const gapEl = el('div', 'toolbar-stack-space toolbar-drop-zone')
 			gapEl.dataset.paletteId = paletteId
 			gapEl.dataset.parkingGapIndex = String(index)
+			gapEl.dataset.emptyText = currentStrings().emptyDropZone
 			stack.append(gapEl)
 		}
 		gap(0)
@@ -2758,8 +2914,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				const remove = document.createElement('button')
 				remove.type = 'button'
 				remove.className = 'palette-parking-remove'
-				remove.setAttribute('aria-label', 'Delete toolbar')
-				remove.title = 'Delete toolbar'
+				remove.setAttribute('aria-label', strings.deleteToolbar)
+				remove.title = strings.deleteToolbar
 				remove.addEventListener('click', (event) => {
 					event.stopPropagation()
 					core.layout.moveToolbar({ container: 'parking', toolbarIndex: index }, undefined)
@@ -2851,8 +3007,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				const button = document.createElement('button')
 				button.type = 'button'
 				button.className = 'palette-parking-remove'
-				button.setAttribute('aria-label', 'Delete toolbar')
-				button.title = 'Delete toolbar'
+				button.setAttribute('aria-label', currentStrings().deleteToolbar)
+				button.title = currentStrings().deleteToolbar
 				button.addEventListener('click', (event) => {
 					event.stopPropagation()
 					const index = Number(row.dataset.parkingRowIndex ?? '-1')
@@ -2981,7 +3137,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const overlay = el('div', 'palette-default-command-overlay')
 		overlay.dataset.testid = 'console-overlay'
 		overlay.setAttribute('role', 'dialog')
-		overlay.setAttribute('aria-label', 'Palette console')
+		overlay.setAttribute('aria-label', currentStrings().consoleAriaLabel)
 		overlay.tabIndex = -1
 		overlay.addEventListener('mousedown', (event) => {
 			if (event.target === event.currentTarget) closeConsole()
@@ -3002,7 +3158,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const close = document.createElement('button')
 		close.type = 'button'
 		close.className = 'palette-default-command-close'
-		close.setAttribute('aria-label', 'Close console')
+		close.setAttribute('aria-label', currentStrings().closeConsole)
 		close.textContent = '×'
 		close.addEventListener('click', closeConsole)
 		panel.append(close)
@@ -3026,7 +3182,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		main.append(box)
 
 		const shell = el('div', 'palette-default-command-shell')
-		shell.title = 'Console command box'
+		shell.title = currentStrings().consoleTitle
 		box.append(shell)
 		const shellIcon = iconSpan('⌘')
 		if (shellIcon) shell.append(shellIcon)
@@ -3035,7 +3191,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const input = document.createElement('input')
 		input.className = 'palette-default-command-input'
 		input.dataset.testid = 'console-input'
-		input.placeholder = isEditing ? 'Add to toolbar…' : 'Command…'
+		input.placeholder = isEditing
+			? currentStrings().addPlaceholder
+			: currentStrings().runPlaceholder
 		input.value = consoleQuery
 		tokens.append(input)
 		if (canEdit && !editOnly) {
@@ -3044,8 +3202,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			toggle.className = 'palette-default-command-mode'
 			toggle.dataset.testid = 'console-mode-toggle'
 			toggle.setAttribute('aria-pressed', isEditing ? 'true' : 'false')
-			toggle.setAttribute('aria-label', isEditing ? 'Done editing' : 'Edit toolbars')
-			toggle.title = isEditing ? 'Done editing' : 'Edit toolbars'
+			toggle.setAttribute(
+				'aria-label',
+				isEditing ? currentStrings().doneEditing : currentStrings().editToolbars
+			)
+			toggle.title = isEditing ? currentStrings().doneEditing : currentStrings().editToolbars
 			toggle.textContent = isEditing ? '✓' : '✎'
 			toggle.addEventListener('click', () => {
 				consoleQuery = ''
@@ -3067,13 +3228,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				// + nothing) — SSR-safe, no `can` / `uses`.
 				const sources = addableEntries(
 					core.points,
-					{ itemControls },
+					{ itemControls, strings: core.strings },
 					{ excludePoints: ['console'] }
 				)
 				const filtered = filterAddSources(sources, consoleQuery)
 				if (filtered.length === 0) {
 					const empty = el('div', 'palette-default-command-empty')
-					empty.textContent = 'No matching commands'
+					empty.textContent = currentStrings().noMatchingCommands
 					results.append(empty)
 					return
 				}
@@ -3111,13 +3272,18 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// Run surface: concrete executable rows with live `can` + `uses`.
 			const all: readonly ActionableEntry[] = actionableEntries(
 				core.points,
-				{ keys: core.keys, values: core.values.asObject(), actionCan: actionCan() },
+				{
+					keys: core.keys,
+					values: core.values.asObject(),
+					actionCan: actionCan(),
+					strings: core.strings,
+				},
 				{ excludePoints: ['console'] }
 			)
 			const entries = filterCommandEntries(all, { free: consoleQuery })
 			if (entries.length === 0) {
 				const empty = el('div', 'palette-default-command-empty')
-				empty.textContent = 'No matching commands'
+				empty.textContent = currentStrings().noMatchingCommands
 				results.append(empty)
 				return
 			}
@@ -3152,7 +3318,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				if (isEditing) {
 					const sources = addableEntries(
 						core.points,
-						{ itemControls },
+						{ itemControls, strings: core.strings },
 						{ excludePoints: ['console'] }
 					)
 					const first = filterAddSources(sources, input.value)[0]
@@ -3166,7 +3332,12 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				} else {
 					const all: readonly ActionableEntry[] = actionableEntries(
 						core.points,
-						{ keys: core.keys, values: core.values.asObject(), actionCan: actionCan() },
+						{
+							keys: core.keys,
+							values: core.values.asObject(),
+							actionCan: actionCan(),
+							strings: core.strings,
+						},
 						{ excludePoints: ['console'] }
 					)
 					const first = filterCommandEntries(all, { free: input.value })[0]
@@ -3202,6 +3373,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	function renderConsoleDetailsInto(bottom: HTMLElement): void {
+		const strings = currentStrings()
 		const snapshot = consoleStore.snapshot
 		const canEdit = options.isEditable()
 		const editOnly = hasCommandBoxTool()
@@ -3219,27 +3391,28 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const inspectingItem = inspecting !== undefined ? liveItemOf(inspecting) : undefined
 		if (inspectingItem) {
 			const title = el('div', 'palette-default-panel-title')
-			title.textContent = 'Inspect'
+			title.textContent = strings.inspectTitle
 			details.append(title)
 			details.append(renderConfigurator(inspectingItem.item, inspecting!))
 		} else {
 			const selected = snapshot.selectedEntryId
-				? addableEntries(core.points, { itemControls }, { excludePoints: ['console'] }).find(
-						(entry) => entry.id === snapshot.selectedEntryId
-					)
+				? addableEntries(
+						core.points,
+						{ itemControls, strings: core.strings },
+						{ excludePoints: ['console'] }
+					).find((entry) => entry.id === snapshot.selectedEntryId)
 				: undefined
 			if (selected) {
 				const title = el('div', 'palette-default-panel-title')
-				title.textContent = 'Add to toolbar'
+				title.textContent = strings.addToToolbarTitle
 				details.append(title)
 				details.append(renderAddPanel(selected))
 			} else {
 				const title = el('div', 'palette-default-panel-title')
-				title.textContent = 'Details'
+				title.textContent = strings.detailsTitle
 				details.append(title)
 				const empty = el('div', 'palette-default-config-empty')
-				empty.textContent =
-					'Click a toolbar item to inspect its presentation, or select a point or control on the left to add it to a toolbar.'
+				empty.textContent = strings.detailsEmpty
 				details.append(empty)
 			}
 		}
@@ -3352,6 +3525,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		) => void = (target, apply) => patchLive(target, apply),
 		options: { readonly deletable?: boolean } = {}
 	): HTMLElement {
+		const strings = currentStrings()
 		const table = el('div', 'palette-default-config-table')
 		const point = pointFor(item)
 		const config = ((item as { config?: Record<string, unknown> }).config ?? {}) as Record<
@@ -3371,7 +3545,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const choices = controlChoicesFor(
 			point,
 			{ axis: surface.axis === 'both' ? 'horizontal' : surface.axis, region: surface.region },
-			VANILLA_CONTROL_REGISTRY,
+			vanillaControlRegistry(currentStrings()),
 			VANILLA_CONTROL_DEFAULTS,
 			(item as { control?: string }).control
 		)
@@ -3399,7 +3573,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					? ((item as { point?: unknown }).point as string)
 					: (currentControl ?? 'Item')
 		row(
-			'Label',
+			strings.labelKey,
 			textInput(labelValue, (next) =>
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3408,7 +3582,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			)
 		)
 		row(
-			'Icon',
+			strings.iconKey,
 			renderIconField !== undefined
 				? renderIconField({
 						value: typeof config.icon === 'string' ? config.icon : '',
@@ -3427,7 +3601,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					)
 		)
 		row(
-			'Hint',
+			strings.hintKey,
 			textInput(typeof config.hint === 'string' ? config.hint : '', (next) =>
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3468,7 +3642,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					}
 				})
 			})
-			row('Control', controlSelect)
+			row(strings.controlKey, controlSelect)
 		}
 		const toneSelect = document.createElement('select')
 		for (const tone of ['neutral', 'accent']) {
@@ -3487,13 +3661,13 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				}
 			})
 		})
-		row('Tone', toneSelect)
+		row(strings.toneKey, toneSelect)
 		if (currentControl === 'drawer') {
 			const openSelect = document.createElement('select')
-			for (const mode of ['hover', 'toggle']) {
+			for (const mode of ['hover', 'toggle'] as const) {
 				const option = document.createElement('option')
 				option.value = mode
-				option.textContent = mode[0]!.toUpperCase() + mode.slice(1)
+				option.textContent = mode === 'hover' ? strings.openHover : strings.openToggle
 				openSelect.append(option)
 			}
 			// Legacy `click` / `press` values normalize to the `toggle`
@@ -3501,7 +3675,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const openValue = config.open === 'hover' ? 'hover' : 'toggle'
 			openSelect.value = openValue as string
 			openSelect.dataset.testid = 'configurator-drawer-open'
-			openSelect.setAttribute('aria-label', 'Open mode')
+			openSelect.setAttribute('aria-label', strings.openModeKey)
 			openSelect.addEventListener('change', () => {
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3511,12 +3685,12 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					record.config = next
 				})
 			})
-			row('Open mode', openSelect)
+			row(strings.openModeKey, openSelect)
 			const closeOnClickInput = document.createElement('input')
 			closeOnClickInput.type = 'checkbox'
 			closeOnClickInput.checked = config.closeOnClick === true
 			closeOnClickInput.dataset.testid = 'configurator-drawer-close-on-click'
-			closeOnClickInput.setAttribute('aria-label', 'Close on click')
+			closeOnClickInput.setAttribute('aria-label', strings.closeOnClickKey)
 			closeOnClickInput.addEventListener('change', () => {
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3526,11 +3700,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					record.config = next
 				})
 			})
-			row('Close on click', closeOnClickInput)
+			row(strings.closeOnClickKey, closeOnClickInput)
 		}
 		if (currentControl === 'status') {
 			row(
-				'Status key',
+				strings.statusKeyKey,
 				textInput(typeof config.statusKey === 'string' ? config.statusKey : '', (next) =>
 					patch(item, (target) => {
 						const record = target as { config?: Record<string, unknown> }
@@ -3547,7 +3721,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			showInput.type = 'checkbox'
 			showInput.checked = config.showValue !== false
 			showInput.dataset.testid = 'configurator-show-value'
-			showInput.setAttribute('aria-label', 'Display number')
+			showInput.setAttribute('aria-label', strings.displayNumberKey)
 			showInput.addEventListener('change', () => {
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3557,14 +3731,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					record.config = next
 				})
 			})
-			row('Display number', showInput)
+			row(strings.displayNumberKey, showInput)
 		}
 		if (currentControl === 'select' || currentControl === 'segmented') {
 			const showInput = document.createElement('input')
 			showInput.type = 'checkbox'
 			showInput.checked = config.showText !== false
 			showInput.dataset.testid = 'configurator-show-text'
-			showInput.setAttribute('aria-label', 'Show text')
+			showInput.setAttribute('aria-label', strings.showTextKey)
 			showInput.addEventListener('change', () => {
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3574,14 +3748,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					record.config = next
 				})
 			})
-			row('Show text', showInput)
+			row(strings.showTextKey, showInput)
 		}
 		if (currentControl === 'select') {
 			const filterInput = document.createElement('input')
 			filterInput.type = 'checkbox'
 			filterInput.checked = config.showFilter === true
 			filterInput.dataset.testid = 'configurator-show-filter'
-			filterInput.setAttribute('aria-label', 'Filter list')
+			filterInput.setAttribute('aria-label', strings.filterListKey)
 			filterInput.addEventListener('change', () => {
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
@@ -3591,7 +3765,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					record.config = next
 				})
 			})
-			row('Filter list', filterInput)
+			row(strings.filterListKey, filterInput)
 		}
 		// The add-flow draft is detached (never in the layout), so there is
 		// nothing to delete — the row is inspect-only (`deletable: false`
@@ -3600,14 +3774,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			const deleteLine = el('div', 'palette-default-config-row')
 			const deleteKey = el('div', 'palette-default-config-key')
 			const deleteStrong = document.createElement('strong')
-			deleteStrong.textContent = 'Delete'
+			deleteStrong.textContent = strings.deleteKey
 			deleteKey.append(deleteStrong)
 			const deleteValue = el('div', 'palette-default-config-value')
 			const deleteButton = document.createElement('button')
 			deleteButton.type = 'button'
 			deleteButton.className = 'palette-default-config-delete'
 			deleteButton.dataset.testid = 'configurator-delete'
-			deleteButton.textContent = 'Delete tool'
+			deleteButton.textContent = strings.deleteTool
 			deleteButton.addEventListener('click', () => {
 				const from = locationOfItem(item)
 				if (from === undefined) return
@@ -3637,10 +3811,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		// the legacy action branch), so there is no variant picker:
 		// selecting the entry opens the configurator + preview directly.
 		// Adding happens only via d&d from the preview below.
-		const selected = paletteDerivedVariants(source, core.points)[0]
+		const selected = paletteDerivedVariants(source, core.points, core.strings)[0]
 		if (selected === undefined) {
 			const empty = el('div', 'palette-default-config-empty')
-			empty.textContent = 'This entry cannot be added to a toolbar.'
+			empty.textContent = currentStrings().cannotAdd
 			stack.append(empty)
 			return stack
 		}
@@ -3652,7 +3826,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 		if (addDraft !== undefined) {
 			const configTitle = el('div', 'palette-default-panel-title')
-			configTitle.textContent = 'Configure'
+			configTitle.textContent = currentStrings().configureTitle
 			stack.append(configTitle)
 			stack.append(
 				renderConfigurator(addDraft, addDraft, (_target, apply) => patchDraft(apply), {
@@ -3699,10 +3873,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * `catalog` session (the draft itself stays detached).
 	 */
 	function renderDraftPreview(draft: ToolbarItem): HTMLElement {
+		const strings = currentStrings()
 		const section = el('div', 'palette-default-add-preview')
 		section.dataset.testid = 'console-add-preview'
 		const title = el('div', 'palette-default-panel-title')
-		title.textContent = 'Preview'
+		title.textContent = strings.previewTitle
 		section.append(title)
 		const seed: Record<string, unknown> =
 			addDraftPointId !== undefined && addDraftValue !== undefined
@@ -3717,6 +3892,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			surface: PREVIEW_SURFACE,
 			region: 'top',
 			iconResolver,
+			strings,
+			display: currentDisplay(),
 			onOpenConsole: (mode) => consoleStore.open(mode),
 			onInspect: undefined,
 			renderToolbar: (childTrack: Track, childAxis, childRegion) =>
@@ -3762,7 +3939,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const pointId = pointIdOf(item)
 		const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
 		if (point === undefined) return
-		const update = () => updateToolNode(previewCore, item, PREVIEW_SURFACE, content, iconResolver)
+		const update = () =>
+			updateToolNode(previewCore, item, PREVIEW_SURFACE, content, iconResolver, currentDisplay())
 		const unsubs: Unsubscribe[] = []
 		if (isValuedPoint(point)) {
 			unsubs.push(previewCore.values.subscribe(point.id, () => update()))
@@ -3797,6 +3975,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 */
 	function syncStructure(): void {
 		if (disposed) return
+		syncCatalogStrings()
 		const editing = computeEditing()
 		lastEditing = editing
 		container.classList.toggle('editing', editing)
@@ -3887,6 +4066,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			trackSpace(slotIndex + 1)
 		})
 		clearGapClasses(trackEl)
+		reopenTrackedDrawers()
 	}
 
 	/**
@@ -3993,6 +4173,34 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		// drawer wrappers closed). Instead re-render each open popup's inner
 		// track in place from its live drawer item.
 		syncOpenDrawerTracks()
+	}
+
+	/**
+	 * Re-open the drawers that were open before a structural rebuild.
+	 *
+	 * A border/track rebuild recreates every drawer wrapper + popup node,
+	 * and a fresh popup starts hidden. Without this pass a commit landing
+	 * while the pointer is over a DZ *inside* an open drawer would close
+	 * that drawer under the cursor — the reported "drawer suddenly closes
+	 * when dragging a tool into it". The live `ToolbarItem` survives
+	 * structural commits, so `openDrawerItems` names exactly the drawers to
+	 * restore; the fresh wrapper is resolved through the node map.
+	 *
+	 * Runs synchronously at the end of the rebuild so the popup is visible
+	 * before the session's post-commit `highlight` events land — those
+	 * resolve their DZ nodes through the same node map, so the drawer's
+	 * gaps light up in the same pass.
+	 */
+	function reopenTrackedDrawers(): void {
+		if (openDrawerItems.size === 0) return
+		for (const item of [...openDrawerItems]) {
+			const wrapper = nodes.get(item)
+			if (!(wrapper instanceof HTMLElement)) continue
+			const drawer = wrapper.querySelector('.palettable-drawer')
+			if (!(drawer instanceof HTMLElement)) continue
+			const open = (drawer as unknown as { __openDrawer?: () => void }).__openDrawer
+			if (typeof open === 'function') open()
+		}
 	}
 
 	/** In-place rebuild of open popup inner tracks from live drawer items. */
@@ -4136,6 +4344,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		switch (op.kind) {
 			case 'replace':
 				nodes.clear()
+				// Whole-layout load: every live item object is replaced, so
+				// the tracked open drawers can never resolve again.
+				openDrawerItems.clear()
 				syncStructure()
 				return
 			case 'move-item': {
@@ -4246,6 +4457,19 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	// the editing flag is unchanged, only the details panel re-renders
 	// (selection/add-flow), never the borders.
 	const opsUnsub = core.subscribeLayoutOps((op) => applyOp(op))
+	// Locale switch: re-render borders + console from the live layout so
+	// every chrome string + catalog row follows the new table. Structural
+	// sync preserves no transient UI state beyond what a layout op would —
+	// the locale point itself is excluded from dirty/reset by convention.
+	let localeUnsub: (() => void) | undefined
+	try {
+		localeUnsub = core.values.subscribe(localePointId, () => {
+			if (disposed) return
+			syncStructure()
+		})
+	} catch {
+		localeUnsub = undefined
+	}
 	const contextUnsub = core.subscribeContext((bagName, changed) => {
 		if (disposed) return
 		// Key change: only the tools whose id moved change, and `bindTool`
@@ -4288,14 +4512,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		dispose() {
 			disposed = true
 			opsUnsub()
+			localeUnsub?.()
 			contextUnsub()
 			consoleUnsub()
 			dropAllBindings()
 			keyWindow.removeEventListener('keydown', onKeyDown)
 			consoleHost.textContent = ''
 			// Hierarchical drawers die with their trigger (no body portal),
-			// so nothing to sweep — the svelte-oracle overlay selector is
-			// kept only for foreign portaled nodes, if any.
+			// so nothing to sweep — the overlay selector below catches only
+			// foreign portaled nodes, if any.
 			for (const overlay of document.querySelectorAll('body > .palettable-drawer__overlay')) {
 				overlay.remove()
 			}

@@ -177,7 +177,7 @@ describe('golden render model', () => {
 	it('resolves drawers recursively with children', () => {
 		const core = new PaletteCore(pointsWithDrawer())
 		const layout: SerializedLayout = {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [
 					[
@@ -219,7 +219,7 @@ describe('golden render model', () => {
 			toolbar = [{ point: 'drawer', control: 'drawer', toolbar: [{ space: 1, toolbar }] }]
 		}
 		const layout: SerializedLayout = {
-			version: 2,
+			version: 1,
 			borders: {
 				top: [[{ space: 1, toolbar }]],
 				right: [],

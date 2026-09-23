@@ -24,10 +24,11 @@ import type { AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isRootContext, isValuedPoint } from './points.js'
 import type { Runnable, RunnableTextualise } from './runnable.js'
 import { describeRunnable, isRunnable } from './runnable.js'
-import { isInlineSpec } from './virtual.js'
 import { PaletteStateStore } from './store.js'
+import { type CatalogStrings, resolveCatalogStrings } from './strings.js'
 import {
 	assertValidVirtual,
+	isInlineSpec,
 	readEnumFrom,
 	resolveEnumSourceValue,
 	resolveVirtualSource,
@@ -39,6 +40,8 @@ export type PaletteCoreOptions = {
 	readonly controls?: ControlRegistry
 	readonly controlDefaults?: ControlDefaults
 	readonly initialLayout?: AnySerializedLayout | PaletteLayout
+	/** Localizable catalog strings (partial — merged over the English default). */
+	readonly strings?: Partial<CatalogStrings>
 	// Note: not completely implemented, still under construction
 	/** End-user-defined virtual points (`enum-from`). */
 	readonly virtuals?: readonly VirtualPoint[]
@@ -97,6 +100,8 @@ export class PaletteCore {
 	readonly keys: KeyBindings
 	readonly controls: ControlRegistry | undefined
 	readonly controlDefaults: ControlDefaults | undefined
+	/** Resolved catalog strings (English default + consumer override). */
+	strings: CatalogStrings
 	/** Overridable end-user textualization (defaults to `describeRunnable`). */
 	readonly textualise: RunnableTextualise
 	private definitions = new Map<string, AnyPoint>()
@@ -128,6 +133,7 @@ export class PaletteCore {
 		this.keys = { ...(options.keys ?? {}) }
 		this.controls = options.controls
 		this.controlDefaults = options.controlDefaults
+		this.strings = resolveCatalogStrings(options.strings)
 		this.textualise = options.textualise ?? describeRunnable
 	}
 
@@ -141,6 +147,15 @@ export class PaletteCore {
 		return (this.virtualPointsCache ??= [...this.virtuals.values()])
 	}
 
+	/**
+	 * Replace the catalog strings table (locale switch). Partial — merged
+	 * over the English default, same as construction. Builders read
+	 * `core.strings` per render, so no definition rebuild is needed.
+	 */
+	setStrings(override?: Partial<CatalogStrings>): void {
+		this.strings = resolveCatalogStrings(override)
+	}
+
 	getDefinition(id: string): AnyPoint | undefined {
 		return this.definitions.get(id)
 	}
@@ -151,8 +166,8 @@ export class PaletteCore {
 
 	/**
 	 * Resolve an editable (valued) point by id for spec runners.
-	 * Headless port of the svelte adapter's `resolveEditableTool` (which
-	 * stays adapter-owned until Phase 7): throws `PaletteError` on unknown
+	 * Extracted from the original reference UI's `resolveEditableTool`:
+	 * throws `PaletteError` on unknown
 	 * ids, action points, and (with `family`) family mismatches.
 	 */
 	resolveEditablePoint(id: string, family?: string): AnyValuedPoint {
@@ -501,8 +516,7 @@ export class PaletteCore {
 	 * passed object afterwards does not affect the binding.
 	 */
 	attach(keystroke: import('./identifiers.js').Keystroke, runnable: Runnable): void {
-		if (!isRunnable(runnable))
-			throw new PaletteError(`attach: invalid runnable for "${keystroke}"`)
+		if (!isRunnable(runnable)) throw new PaletteError(`attach: invalid runnable for "${keystroke}"`)
 		this.keys[keystroke] = { ...runnable } as Runnable
 	}
 
@@ -571,8 +585,7 @@ export class PaletteCore {
 					throw new PaletteError(`Palette point "${runnable.point}" is an action`)
 				const current = this.readValue(def.id)
 				if (current === undefined) return false
-				const delta =
-					runnable.kind === 'inc' ? Math.abs(runnable.delta) : -Math.abs(runnable.delta)
+				const delta = runnable.kind === 'inc' ? Math.abs(runnable.delta) : -Math.abs(runnable.delta)
 				const result = stepCan(def, current, delta)
 				if (result === undefined) throw new PaletteError(`run: unknown step "${def.id}"`)
 				return result
@@ -620,8 +633,7 @@ export class PaletteCore {
 			def.run(...this.resolveBags(def.uses))
 			return
 		}
-		if (!isValuedPoint(def))
-			throw new PaletteError(`run: point "${command.point}" is an action`)
+		if (!isValuedPoint(def)) throw new PaletteError(`run: point "${command.point}" is an action`)
 		if (command.kind === 'set') {
 			this.writeValue(command.point, this.coerceSetValue(def, command.value))
 			return
@@ -708,8 +720,7 @@ function stepCan(def: AnyValuedPoint, current: unknown, delta: number): boolean 
 		const constraints = def.constraints as
 			| { readonly min?: number; readonly max?: number }
 			| undefined
-		if (current === undefined)
-			throw new PaletteError(`can: no value for "${def.id}" (skeleton)`)
+		if (current === undefined) throw new PaletteError(`can: no value for "${def.id}" (skeleton)`)
 		const value = current as number
 		// A press that would overshoot the bound is disabled, mirroring the
 		// stepper UI (`value + delta >/< bound` → disabled). A small epsilon

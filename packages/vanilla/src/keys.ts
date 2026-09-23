@@ -2,9 +2,8 @@
  * `@palettable/vanilla` — `KeyboardEvent` → keystroke normalization + binding registry.
  *
  * Core owns only the headless lookup (`KeyBindings`, `findKeystrokesFor`);
- * this module owns everything that touches `KeyboardEvent` (adapter-side per
- * the mitosis Phase 2 decision). Headless port of the svelte adapter's
- * `keys.ts` normalization (which stays adapter-owned until Phase 12).
+ * this module owns everything that touches `KeyboardEvent` (adapter-side by
+ * design). Normalization extracted from the original reference UI.
  */
 
 import type { KeyBindings, Keystroke, Runnable } from '@palettable/core'

@@ -33,8 +33,8 @@ function setup(editable = false) {
 				version: 1,
 				borders: {
 					top: [
-						{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle' }] },
-						{ space: 1, toolbar: [{ point: 'speed', control: 'slider' }] },
+						[{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle' }] }],
+						[{ space: 1, toolbar: [{ point: 'speed', control: 'slider' }] }],
 					],
 					right: [],
 					bottom: [],
@@ -81,6 +81,44 @@ describe('per-tool value sync', () => {
 		ide.dispose()
 	})
 
+	it('toggle renders icon-only (no label node, never an overlay target)', () => {
+		const { ide, host } = setup()
+		const button = host.querySelector('.toolbar-item-content button')
+		expect(button?.querySelector('.palette-default-choice')).toBe(null)
+		expect(button?.querySelector('.palette-default-icon')).not.toBe(null)
+		ide.dispose()
+	})
+
+	it('button keeps icon + label nodes (vertical overlay gate)', () => {
+		const core = new PaletteCore([{ id: 'save', label: 'Save', type: 'action', run: () => {} }], {
+			initialLayout: {
+				version: 1,
+				borders: {
+					top: [
+						[
+							{
+								space: 1,
+								toolbar: [{ point: 'save', control: 'button', config: { icon: '💾' } }],
+							},
+						],
+					],
+					right: [],
+					bottom: [],
+					left: [],
+				},
+			},
+		})
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const button = host.querySelector('.toolbar-item-content button')
+		expect(button?.querySelector('.palette-default-icon')?.textContent).toBe('💾')
+		expect(button?.querySelector('.palette-default-choice')?.textContent).toBe('Save')
+		ide.dispose()
+	})
+
 	it('slider moves thumb + badge in place (same node)', () => {
 		const { core, ide, host } = setup()
 		const input = host.querySelector('input[type="range"]') as HTMLInputElement | null
@@ -101,10 +139,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'speed', control: 'slider', config: { showValue: false } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'speed', control: 'slider', config: { showValue: false } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -148,10 +188,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'theme', control: 'segmented', config: { showText: false } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'theme', control: 'segmented', config: { showText: false } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -192,7 +234,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -236,7 +278,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -275,7 +317,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -321,7 +363,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'segmented' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'segmented' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -363,7 +405,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -422,10 +464,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'theme', control: 'select', config: { showText: false } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'theme', control: 'select', config: { showText: false } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -471,7 +515,7 @@ describe('per-tool value sync', () => {
 						top: [],
 						right: [],
 						bottom: [],
-						left: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						left: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 					},
 				},
 			}
@@ -519,10 +563,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'theme', control: 'select', config: { icon: '🪐' } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'theme', control: 'select', config: { icon: '🪐' } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -567,7 +613,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -614,7 +660,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -666,7 +712,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'segmented' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'segmented' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -713,10 +759,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'theme', control: 'select', config: { showFilter: true } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'theme', control: 'select', config: { showFilter: true } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -771,7 +819,7 @@ describe('per-tool value sync', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'select' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -817,10 +865,12 @@ describe('per-tool value sync', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [{ point: 'theme', control: 'theme', config: { icon: '🎨' } }],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [{ point: 'theme', control: 'theme', config: { icon: '🎨' } }],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -883,13 +933,15 @@ describe('editing chrome without rebuild', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [
-									{ point: 'lamp', control: 'toggle' },
-									{ point: 'speed', control: 'slider' },
-								],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [
+										{ point: 'lamp', control: 'toggle' },
+										{ point: 'speed', control: 'slider' },
+									],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -1325,7 +1377,7 @@ describe('drawer drag editing', () => {
 			{
 				initialValues: { lamp: false, speed: 1 },
 				initialLayout: {
-					version: 2,
+					version: 1,
 					borders: {
 						top: [
 							[
@@ -1541,7 +1593,7 @@ describe('drawer drag editing', () => {
 			],
 			{
 				initialLayout: {
-					version: 2,
+					version: 1,
 					borders: {
 						top: [
 							[
@@ -1678,7 +1730,7 @@ describe('drawer drag editing', () => {
 			],
 			{
 				initialLayout: {
-					version: 2,
+					version: 1,
 					borders: {
 						top: [
 							[
@@ -1758,7 +1810,7 @@ describe('can flips', () => {
 				initialLayout: {
 					version: 1,
 					borders: {
-						top: [{ space: 1, toolbar: [{ point: 'boost', control: 'button' }] }],
+						top: [[{ space: 1, toolbar: [{ point: 'boost', control: 'button' }] }]],
 						right: [],
 						bottom: [],
 						left: [],
@@ -1809,14 +1861,16 @@ describe('contextual value sync (ship selection pattern)', () => {
 					version: 1,
 					borders: {
 						top: [
-							{
-								space: 1,
-								toolbar: [
-									{ point: 'shipShields', control: 'toggle' },
-									{ point: 'shipPower', control: 'slider' },
-									{ point: 'fireTorpedo', control: 'button' },
-								],
-							},
+							[
+								{
+									space: 1,
+									toolbar: [
+										{ point: 'shipShields', control: 'toggle' },
+										{ point: 'shipPower', control: 'slider' },
+										{ point: 'fireTorpedo', control: 'button' },
+									],
+								},
+							],
 						],
 						right: [],
 						bottom: [],
@@ -1913,8 +1967,8 @@ describe('spec-grammar coverage (vanilla adapter)', () => {
 					version: 1,
 					borders: {
 						top: [
-							{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle' }] },
-							{ space: 1, toolbar: [{ point: 'speed', control: 'stepper' }] },
+							[{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle' }] }],
+							[{ space: 1, toolbar: [{ point: 'speed', control: 'stepper' }] }],
 						],
 						right: [],
 						bottom: [],

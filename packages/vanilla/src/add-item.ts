@@ -2,7 +2,7 @@
  * `@palettable/vanilla` — build a `ToolbarItem` from a console add-flow
  * selection (entry + variant).
  *
- * Mirrors the svelte `paletteToolbarItemFromDerivedVariant`: `item` variants
+ * Resolves an add-list selection to a toolbar item: `item` variants
  * become control-only items; `tool`/`action` variants become spec-bound tools
  * with the default control for that spec; `set` variants become spec-bound
  * tools with the default control for the bare point id. Returns `undefined`
@@ -13,6 +13,7 @@ import {
 	type AddableEntry,
 	type AnyPoint,
 	type DerivedVariant,
+	humanizeId,
 	isActionPoint,
 	isNothingPoint,
 	isValuedPoint,
@@ -54,19 +55,14 @@ function iconOf(point: AnyPoint | undefined, fallback: string | undefined): stri
 	return typeof icon === 'string' ? icon : fallback
 }
 
+/** Shared id → words fallback (single implementation lives in core). */
 function humanize(id: string): string {
-	return id
-		.replace(/[-_]+/g, ' ')
-		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.replace(/^./, (first) => first.toUpperCase())
+	return humanizeId(id)
 }
 
 /**
  * Resolve the spec string for a `set` variant: always the bare `pointId`
- * (mirrors core `paletteDerivedVariants` + svelte
- * `paletteToolbarItemFromDerivedVariant`). The tool binds the point and
+ * (matching core `paletteDerivedVariants`). The tool binds the point and
  * displays the live value — no `=value` preset is carried.
  */
 function setSpec(pointId: string): string {

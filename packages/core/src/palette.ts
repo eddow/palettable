@@ -143,8 +143,7 @@ export function validateInitialValues(
 /**
  * Parse a serialized setter value for a valued point.
  *
- * Headless port of the svelte adapter's `valueReader` (which stays
- * adapter-owned until Phase 7): `boolean` accepts `1`/`true` and
+ * Extracted from the original reference UI's `valueReader`: `boolean` accepts `1`/`true` and
  * `0`/`false` (case-insensitive), `number` uses `Number` (rejects non-finite
  * and blank strings), everything else passes through as a string.
  * Throws `PaletteError` on unparseable values.

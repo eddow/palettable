@@ -15,9 +15,9 @@ never duplicated per instance:
   specific through class hierarchy (`.palette-ide.editing .toolbar:hover::before`),
   never bare names. No `data-palette-id` scoping — one palette is editable at a
   time, so per-instance `<style>` elements are pure overhead.
-- The reference `componentStyle.css` injection (`paletteInstanceStyle` +
-  `#disposeStyle`) was deleted; `Palette.dispose()` is a no-op for API parity.
-- Drawer popup classes use the `palettable-` prefix, not `sursaut-`.
+- No runtime CSS injection exists anywhere — the stylesheets are plain files the
+  app imports once (`PaletteCore` has no style surface at all).
+- Drawer popup classes use the `palettable-` prefix.
 
 ## Sizing variables
 
@@ -42,7 +42,7 @@ Rules:
 ## Axis-aware items
 
 Controls receive the surface axis via `context.surface` (vanilla) /
-`surfaceContextFromScope` (svelte) and stamp `palette-default-layout-${direction}`
+`surfaceContextFromScope` and stamp `palette-default-layout-${direction}`
 on their root. Several controls use it to avoid widening a vertical toolbar:
 
 - **`segmented`** — at rest a vertical segmented shows icons only. The option
@@ -163,7 +163,7 @@ accent instead (the trigger itself is a borderless wrapper there). Neutral
 `head-default.css` base rules are dark: slate gradients on tools/chips/results
 (`#1e293b → #0f172a`), near-black panels/popovers (`#020617`), muted slate text
 (`#94a3b8`). Selected items go blue (`#1d4ed8` + `#60a5fa` border). The demo page
-chrome (`+page.svelte` `<style>`) matches: `main` on `#020617`, hero/panel cards
+chrome matches: `main` on `#020617`, hero/panel cards
 on `rgba(15,23,42,…)`.
 
 ## Demo wiring

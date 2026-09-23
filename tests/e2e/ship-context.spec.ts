@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-// Fleet context demo (vanilla-only: the svelte demo has no `ship` context
-// bag — svelte stays frozen until Phase 12 per plans/mitosis.md). The
+// Fleet context demo. The
 // work-zone hosts selectable ship panels (one-or-none selected); the bottom
 // toolbar hosts the contextual tools (status + shields toggle + reactor
 // slider + gated Fire button) bound to the `ship` bag.

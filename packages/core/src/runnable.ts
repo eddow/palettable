@@ -20,6 +20,7 @@
  *   `PaletteCoreOptions.describeRunnable`.
  */
 import type { AnyPoint } from './points.js'
+import { type CatalogStrings, humanizeId, resolveCatalogStrings } from './strings.js'
 import type { VirtualPoint } from './virtual.js'
 
 /** Executable activity of a runnable. */
@@ -31,10 +32,7 @@ export type RunnableKind = 'action' | 'set' | 'toggle' | 'inc' | 'dec'
  * action description (`"Increment thatValue by X"` style). Receives the
  * runnable + definitions lookup; defaults to `describeRunnable`.
  */
-export type RunnableTextualise = (
-	runnable: Runnable,
-	definitions: RunnableDefinitions
-) => string
+export type RunnableTextualise = (runnable: Runnable, definitions: RunnableDefinitions) => string
 
 /** Structured executable command (concrete — no placeholders). */
 export type Runnable =
@@ -103,31 +101,46 @@ function findPoint(
 	return undefined
 }
 
-function pointLabel(point: AnyPoint | VirtualPoint | undefined, fallback: string): string {
+function pointLabel(
+	point: AnyPoint | VirtualPoint | undefined,
+	fallback: string,
+	strings?: CatalogStrings
+): string {
+	if (point !== undefined) {
+		const override = strings?.pointLabels?.[point.id]
+		if (typeof override === 'string' && override.length > 0) return override
+	}
 	const label = (point as { label?: unknown } | undefined)?.label
 	return typeof label === 'string' && label.length > 0 ? label : fallback
 }
 
 function humanize(value: string): string {
-	const words = value
-		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-		.replace(/[^a-zA-Z0-9]+/g, ' ')
-		.split(/\s+/)
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0)
-	if (words.length === 0) return value
-	return words
-		.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase())
-		.join(' ')
+	return humanizeId(value)
 }
 
-function optionLabelOf(point: AnyPoint | undefined, value: unknown): string {
+function optionLabelOf(
+	point: AnyPoint | undefined,
+	value: unknown,
+	strings?: CatalogStrings
+): string {
 	if (point !== undefined && point.type === 'enum') {
 		const options =
-			(point.constraints as { readonly options?: readonly { value: string; label?: string }[] } | undefined)
-				?.options ?? []
+			(
+				point.constraints as
+					| { readonly options?: readonly { value: string; label?: string }[] }
+					| undefined
+			)?.options ?? []
 		const match = options.find((option) => Object.is(option.value, value))
-		if (match !== undefined) return match.label ?? humanize(String(match.value))
+		if (match !== undefined) {
+			const override =
+				typeof match.value === 'string'
+					? strings?.optionLabels?.[point.id]?.[match.value]
+					: undefined
+			if (typeof override === 'string' && override.length > 0) return override
+			const label = (match as { label?: unknown }).label
+			if (typeof label === 'string' && label.length > 0) return label
+			return humanize(String(match.value))
+		}
 	}
 	return typeof value === 'string' ? humanize(value) : String(value)
 }
@@ -139,24 +152,26 @@ function optionLabelOf(point: AnyPoint | undefined, value: unknown): string {
  */
 export function describeRunnable(
 	runnable: Runnable,
-	definitions: RunnableDefinitions
+	definitions: RunnableDefinitions,
+	stringsOverride: Partial<CatalogStrings> = {}
 ): string {
+	const strings = resolveCatalogStrings(stringsOverride)
 	const point = findPoint(definitions, runnable.point)
-	const label = pointLabel(point, humanize(runnable.point))
+	const label = pointLabel(point, humanize(runnable.point), strings)
 	switch (runnable.kind) {
 		case 'action':
 			return label
 		case 'toggle':
-			return `Toggle ${label}`
+			return strings.toggle(label)
 		case 'set': {
 			if (typeof runnable.value === 'boolean')
-				return `${runnable.value ? 'Enable' : 'Disable'} ${label}`
-			const valueLabel = optionLabelOf(point as AnyPoint | undefined, runnable.value)
-			return `Set ${label} to ${valueLabel}`
+				return runnable.value ? strings.enable(label) : strings.disable(label)
+			const valueLabel = optionLabelOf(point as AnyPoint | undefined, runnable.value, strings)
+			return strings.setTo(label, valueLabel)
 		}
 		case 'inc':
-			return `Increment ${label} by ${runnable.delta}`
+			return strings.incrementBy(label, runnable.delta)
 		case 'dec':
-			return `Decrement ${label} by ${runnable.delta}`
+			return strings.decrementBy(label, runnable.delta)
 	}
 }

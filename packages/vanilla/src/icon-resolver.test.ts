@@ -34,10 +34,12 @@ function setup(
 			version: 1,
 			borders: {
 				top: [
-					{
-						space: 1,
-						toolbar: [{ point: 'lamp', control: 'toggle', config: { icon: layoutIcon } }],
-					},
+					[
+						{
+							space: 1,
+							toolbar: [{ point: 'lamp', control: 'toggle', config: { icon: layoutIcon } }],
+						},
+					],
 				],
 				right: [],
 				bottom: [],
@@ -104,7 +106,7 @@ describe('configurator icon field hook', () => {
 			initialLayout: {
 				version: 1,
 				borders: {
-					top: [{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle', config: {} }] }],
+					top: [[{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle', config: {} }] }]],
 					right: [],
 					bottom: [],
 					left: [],

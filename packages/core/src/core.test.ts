@@ -469,9 +469,7 @@ describe('run', () => {
 				},
 			],
 		})
-		expect(() => core.run({ kind: 'toggle', point: 'sizePreset' })).toThrow(
-			'supports only setters'
-		)
+		expect(() => core.run({ kind: 'toggle', point: 'sizePreset' })).toThrow('supports only setters')
 		expect(() => core.run({ kind: 'inc', point: 'sizePreset', delta: 1 })).toThrow(
 			'supports only setters'
 		)
@@ -594,7 +592,7 @@ describe('subscriptions / dispose', () => {
 			{ point: 'extra' }
 		)
 		expect(listener).toHaveBeenCalledTimes(1)
-		expect(listener.mock.calls[0]?.[0].version).toBe(2)
+		expect(listener.mock.calls[0]?.[0].version).toBe(1)
 	})
 
 	it('dispose drops value and layout listeners', () => {

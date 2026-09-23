@@ -10,7 +10,7 @@ function leftOnlyLayout(space: number) {
 			top: [],
 			right: [],
 			bottom: [],
-			left: [{ space, toolbar: [{ point: 'autoOxygen', control: 'toggle' }] }],
+			left: [[{ space, toolbar: [{ point: 'autoOxygen', control: 'toggle' }] }]],
 		},
 		parking: [],
 	}

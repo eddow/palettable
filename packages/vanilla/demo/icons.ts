@@ -25,6 +25,8 @@ export const DEMO_ICONS: Record<string, string> = {
 	reset: '🔄',
 	terminal: '💻',
 	theme: '🎨',
+	'flag-en': '🇬🇧',
+	'flag-fr': '🇫🇷',
 }
 
 export const DEMO_ICON_CHOICES: readonly string[] = Object.keys(DEMO_ICONS).map(

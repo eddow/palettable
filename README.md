@@ -1,13 +1,13 @@
 # palettable
 
-[![npm version core](https://img.shields.io/npm/v/@palettable/core.svg)](todo) [![npm version svelte](https://img.shields.io/npm/v/@palettable/svelte.svg)](todo) [![npm version vanilla](https://img.shields.io/npm/v/@palettable/vanilla.svg)](todo) [![npm downloads](https://img.shields.io/npm/dm/@palettable/core.svg)](todo) [![CI](https://github.com/eddow/palettable/actions/workflows/ci.yml/badge.svg)](todo) [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://github.com/eddow/palettable/blob/main/LICENSE) [![GitHub stars](https://img.shields.io/github/stars/eddow/palettable.svg)](https://github.com/eddow/palettable) [![Live Demo](https://img.shields.io/badge/Live_Demo-todo-black)](todo)
+[![npm version core](https://img.shields.io/npm/v/@palettable/core.svg)](todo) [![npm version vanilla](https://img.shields.io/npm/v/@palettable/vanilla.svg)](todo) [![npm downloads](https://img.shields.io/npm/dm/@palettable/core.svg)](todo) [![CI](https://github.com/eddow/palettable/actions/workflows/ci.yml/badge.svg)](todo) [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://github.com/eddow/palettable/blob/main/LICENSE) [![GitHub stars](https://img.shields.io/github/stars/eddow/palettable.svg)](https://github.com/eddow/palettable) [![Live Demo](https://img.shields.io/badge/Live_Demo-todo-black)](todo)
 
 Headless palette primitives + heads — editable toolbars for any app.
 
 The palette owns state, a11y semantics, tool resolution, editing, and drag/drop — **not** styling. Adapters own markup and CSS. Define **points** (what is controlled), bind them to toolbars as **tools** (controls), and configure each tool with a **configurator** (config panel) choosing its **control** (front-end).
 
 - Framework-agnostic core (`@palettable/core`): vanilla TS, zero DOM, SSR-safe.
-- Thin adapters render the core: Svelte 5 runes (`@palettable/svelte`, the reference implementation), vanilla DOM (`@palettable/vanilla`), Vue planned.
+- Thin adapters render the core: vanilla DOM (`@palettable/vanilla`), Vue planned.
 - Ships a default head (minimal presentation), a command-box (Ctrl-Shift-P style), a developer console for live editing, drawers, drag/drop reorganisation, persistence, and theming.
 
 ## Vocabulary
@@ -27,9 +27,8 @@ Tool specs: `pointId` (resolve), `pointId=value` (setter runner, e.g. `alertLeve
 | Package | Description |
 | ------- | ----------- |
 | `packages/core` (`@palettable/core`) | Headless primitives: points, store, layout tree, keys, command-box builders, console store, presenters/view-models, SSR render model, `palette.css` + `theme/head-default.css`. Zero DOM. |
-| `packages/svelte` (`@palettable/svelte`) | Svelte 5 runes adapter + default head (`src/lib/head/`) + Stellar Outpost demo. The working reference — stays untouched until vanilla + vue reach parity (see `plans/mitosis.md`). |
-| `packages/vanilla` (`@palettable/vanilla`) | Vanilla-DOM adapter + demo. Owns DOM rendering, pointer math, drag sessions, head components — never core. |
-| `packages/vue` | Planned second reactive adapter (after vanilla parity). |
+| `packages/vanilla` (`@palettable/vanilla`) | Vanilla-DOM adapter + demo + default head. Owns DOM rendering, pointer math, drag sessions, head components — never core. |
+| `packages/vue` | Planned second reactive adapter. |
 
 ## Prerequisites
 
@@ -43,14 +42,13 @@ pnpm install
 
 | Command | What it does |
 | ------- | ------------ |
-| `pnpm dev` / `pnpm dev:svelte` | Svelte demo dev server |
-| `pnpm dev:vanilla` | Vanilla demo dev server (`:4174`) |
-| `pnpm build` | Build core + vanilla + svelte |
+| `pnpm dev` / `pnpm dev:vanilla` | Vanilla demo dev server (`:4174`) |
+| `pnpm build` | Build core + vanilla |
 | `pnpm check` | Typecheck all packages |
 | `pnpm test` | Unit tests all packages (Vitest) |
 | `pnpm test:e2e` | Playwright conformance suite (`tests/e2e/`) |
 | `pnpm lint` / `pnpm lint:fix` | Biome check / fix (tabs, single quotes) |
-| `pnpm preview:svelte` / `pnpm preview:vanilla` | Preview production builds |
+| `pnpm preview:vanilla` | Preview production builds |
 
 Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
 
@@ -70,36 +68,6 @@ core.run('saveGame')
 core.values.set('theme', 'light')
 ```
 
-Svelte + default head (historical sample — `packages/svelette` is frozen):
-
-```ts
-import { headEditors } from '$lib/head/registry'
-import { Palette } from '$lib/palette/edition.svelte'
-
-const palette = new Palette({
-	tools: {
-		theme: { type: 'enum', label: 'Theme', value: 'dark', default: 'dark', values: [{ value: 'light' }, { value: 'dark' }] },
-	},
-	keys: { E: 'theme=dark' },
-	editable: true,
-	editors: headEditors,
-	editorDefaults: { enum: 'select' },
-})
-```
-
-```svelte
-<script>
-	import Ide from '$lib/palette/components/Ide.svelte'
-	import '$lib/palette/styles/palette.css'
-	import '$lib/head/styles/head-default.css'
-	const top = $state([{ space: 0, toolbar: [{ point: 'theme', control: 'select' }] }])
-</script>
-
-<Ide {palette} {top}>
-	<div>center content</div>
-</Ide>
-```
-
 Vanilla adapter:
 
 ```ts
@@ -114,12 +82,11 @@ adapter.mount()
 
 ## Demos
 
-Both demos render the same **Stellar Outpost** space-colony sim — all four borders plus center content, three preset loads (R/W + command box, R/W command-first, R-O + command box), drawers, console (`` ` ``), parking, save/load via `localStorage`.
+The demo renders the **Stellar Outpost** space-colony sim — all four borders plus center content, three preset loads (R/W + command box, R/W command-first, R-O + command box), drawers, console (`` ` ``), parking, save/load via `localStorage`.
 
-- Svelte: `packages/svelte/src/routes/+page.svelte` → preview on `:4173`
-- Vanilla: `packages/vanilla/demo/main.ts` + `index.html` → preview on `:4174`
+- Vanilla: `packages/vanilla/demo/main.ts` + `index.html` → dev on `:4174`
 
-`tests/e2e/` is the shared conformance suite: one Playwright project per demo, all running the same specs. Parity must be exact — specs assert concrete DOM.
+`tests/e2e/` is the adapter conformance suite: Playwright specs assert concrete DOM.
 
 ## Features
 
@@ -149,20 +116,23 @@ Start with `docs/getting-started.md` (setup, demo tour, first palette), then:
 - `docs/theming.md` — stylesheets, light override, demo wiring
 - `docs/testing.md` — unit + e2e inventory, gotchas
 
-Active work lives in `plans/` (`mitosis.md`, `data-owning.md`, …). Per
+Active work lives in `plans/` (`extraction.md`, `clarifications.md`). Per
 `AGENTS.md`: implement from `/plans/`, then migrate permanent decisions into
 `/docs/` (and delete the plan file).
 
 ## Testing
 
 - Core unit (Vitest, node): `pnpm --filter @palettable/core test`
-- Svelte unit (Vitest, jsdom): `pnpm --filter @palettable/svelte test`
 - Vanilla unit: `pnpm --filter @palettable/vanilla test`
 - E2E (Playwright): `pnpm test:e2e` — see `docs/testing.md` for the full inventory.
 
 ## Status
 
-Active migration: split the self-contained Svelte implementation into `core` + `vanilla` + `vue` + thin `svelte` (`plans/mitosis.md`). Core (SSR + context) and the vanilla adapter exist and are green; Svelte stays the untouched oracle until vanilla, then Vue, reach demo parity — only then does Svelte become a thin adapter over core.
+Active stack: framework-agnostic `core` + the vanilla-DOM adapter — the
+reference adapter and demo, plus its drift specs.
+
+Next: the **vue** adapter (Phase 11) and a fresh **svelte** adapter
+(Phase 12) — see `plans/extraction.md`.
 
 ## License
 

@@ -1,5 +1,5 @@
-/* `@palettable/core` layout + edit chrome (moved verbatim from the svelte
- * adapter in Phase 6 — global selectors unchanged, no runtime injection,
+/* `@palettable/core` layout + edit chrome (extracted from the original
+ * reference UI — global selectors unchanged, no runtime injection,
  * no per-instance scoping).
  *
  * ── Edit-mode affordances (ported from the per-instance `componentStyle.css`) ──
@@ -516,7 +516,7 @@
 .palette-ide.editing
 	.palette-parking
 	> .toolbar-stack-space.toolbar-drop-zone:only-child:not(.highlighted)::after {
-	content: 'Empty — drag tools here';
+	content: attr(data-empty-text);
 	display: block;
 	padding: 0.35rem 0.5rem;
 	color: rgba(148, 163, 184, 0.85);
@@ -670,8 +670,8 @@
 	min-height: 0;
 }
 
-/* Legacy body-portal overlay (svelte oracle only — vanilla renders no
- * overlay since the hierarchical popup toggles `hidden` in place). */
+/* Body-portal overlay shell — kept for adapters that portal the popup
+ * instead of toggling it in place. */
 .palettable-drawer__overlay {
 	position: fixed;
 	inset: 0;
@@ -707,7 +707,7 @@
 	 * container here would clip them and force a drawer scrollbar. */
 	overflow: visible;
 	/* Hierarchical: inside `.palette-ide`, so the sizing var inherits.
-	 * Kept as a fallback for body-portaled popups (svelte oracle). */
+	/* Kept as a fallback for body-portaled popups. */
 	--palette-toolbar-perpendicular: 2.5rem;
 }
 
@@ -770,18 +770,24 @@
 
 /* Inner toolbars follow the popup's `--layout` (the child axis, stamped
  * inline by the head). Direct-child scope: deeper tools query their own
- * nearest container. */
+ * nearest container. The TRACK stacks its slots along the child axis too
+ * (a horizontal child track lays its toolbars out left-to-right, a
+ * vertical one top-to-bottom).
+ * NOTE: `@container style(--layout)` on the TRACK would read the ANCESTOR
+ * container (the border), never the popup — a container cannot query its
+ * own vars. So the track direction is set imperatively by the adapter
+ * (`renderDrawerTrack` sets `flexDirection` from the child axis), not by
+ * a container query here. The TOOLBAR rules stay container queries: each
+ * bar queries the popup (its nearest container) correctly. */
+.palettable-drawer__popup > .toolbar-track > .toolbar-track-slot > .toolbar {
+	flex-direction: row;
+	align-items: center;
+}
+
 @container palette style(--layout: vertical) {
 	.palettable-drawer__popup > .toolbar-track > .toolbar-track-slot > .toolbar {
 		flex-direction: column;
 		align-items: stretch;
-	}
-}
-
-@container palette style(--layout: horizontal) {
-	.palettable-drawer__popup > .toolbar-track > .toolbar-track-slot > .toolbar {
-		flex-direction: row;
-		align-items: center;
 	}
 }
 

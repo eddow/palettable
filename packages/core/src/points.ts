@@ -25,7 +25,13 @@ export function isRootContext(name: string): boolean {
 /** Shared metadata for every point. Arrays are readonly — points are definitions. */
 export type PointBase<K extends PointType = PointType> = {
 	readonly id: string
-	readonly label: string
+	/**
+	 * Display label. Optional: when omitted the render-time dictionary
+	 * (`CatalogStrings.pointLabels[id]`) wins, else `humanize(id)` is the
+	 * last-resort fallback. Consumers may rely on dictionaries alone and
+	 * leave this unset.
+	 */
+	readonly label?: string
 	readonly type: K
 	readonly description?: string
 	readonly keywords?: readonly string[]

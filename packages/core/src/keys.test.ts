@@ -29,9 +29,9 @@ describe('findKeystrokesFor', () => {
 	})
 
 	it('does not prefix-match point ids', () => {
-		expect(
-			findKeystrokesFor({ 'Ctrl+A': { kind: 'action', point: 'saveGame' } }, 'save')
-		).toEqual([])
+		expect(findKeystrokesFor({ 'Ctrl+A': { kind: 'action', point: 'saveGame' } }, 'save')).toEqual(
+			[]
+		)
 	})
 })
 

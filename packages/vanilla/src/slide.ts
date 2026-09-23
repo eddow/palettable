@@ -67,7 +67,7 @@ export function toolbarGrabOffset(options: {
  * singleton toolbar — adding this to the button's fresh offset inside its
  * new toolbar keeps the pointer glued to the same point on the icon
  * (the extraction grab). Falls back to the toolbar middle when the button
- * is unmeasurable (mirrors svelte `recenter`).
+ * is unmeasurable.
  */
 export function extractionGrabOffset(options: {
 	toolbarElement: HTMLElement

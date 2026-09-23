@@ -1,14 +1,9 @@
-# Layout and drag (historical svelte reference + live core engine)
+# Layout and drag
 
-> Frozen svelte paths (`src/lib/palette/*`, `DrawerEditor.svelte`) are kept
-> verbatim as the port reference. The live engine is `packages/core/src/layout.ts`
-> + `drag.ts`, the live renderer `packages/vanilla/src/ide.ts`.
-
-Engine: `src/lib/palette/layout.svelte.ts` (pure helpers + Svelte actions).
-Session helper: `src/lib/palette/drag-session.ts` (pointer capture + window
-move/up, blur/cancel cleanup; no preview element). Components:
-`src/lib/palette/components/` (`Ide`, `ToolbarBorder`, `ToolbarTrack`,
-`Toolbar`, `PaletteItem`, `Parking`, `DrawerEditor`, `DrawerPopup`).
+Engine: `packages/core/src/layout.ts` (data types, track math, veto predicates,
+gap-highlight decisions, structural commits) + `packages/core/src/drag.ts` (the
+drag session). Renderer + pointer wiring: `packages/vanilla/src/ide.ts`,
+`drag-session.ts`, `slide.ts`.
 
 ## Borders, tracks, toolbars, parking
 
@@ -40,16 +35,16 @@ remains of the total — never stored, always derived.
   rewrite the `N` stored slots via `applyTrackSpaces`; the trailing gap stays
   implicit, so the total is conserved across every mutation.
 
-- `Ide` takes four optional borders + center slot, publishes `{ palette }` scope.
-- `ToolbarBorder` renders one region (`inverse` reverses track order for
+- The IDE renders four optional borders + a center work-zone.
+- A border renderer draws one region (`inverse` reverses track order for
   right/bottom); direction `horizontal` (top/bottom) or `vertical` (left/right).
-- `ToolbarTrack` renders slots + spacing; `Toolbar` renders one toolbar with
-  item spaces (between items) and a toolbar space at index 0. It takes either
-  a border location (`border`/`track`/`trackIndex`/`region`) or a parking
-  location (`parking`/`parkingIndex`) — never both — and drags, commits,
-  and highlights as that container only.
-- `PaletteItem` binds the resolved control component with its context.
-- `Parking` owns the independent `parking` stack, always rendered (bordered
+- A track renderer draws slots + spacing; a toolbar renderer draws one toolbar
+  with item spaces (between items) and a toolbar space at index 0. A toolbar
+  belongs to either a border location (`border`/`track`/`trackIndex`/`region`)
+  or a parking location (`parking`/`parkingIndex`) — never both — and drags,
+  commits, and highlights as that container only.
+- An item renderer binds the resolved control with its context.
+- Parking owns the independent `parking` stack, always rendered (bordered
   empty strip with a hint when empty), with a delete button per row while
   editing (`removeParkedToolbar`) plus dwell-drop stack gaps mirroring a
   border's stack gaps (flanking gaps on row hover via `parkingFlanks`, single gap on direct
@@ -104,30 +99,24 @@ whole-row scope),
 identity: `canonicalItemTool` / `itemFingerprint` /
 `findOwnershipViolations` (same object in two containers is a bug).
 
-## Svelte actions
+## Adapter drag wiring (reference adapter)
 
-| Action                | Element              | Behaviour                                              |
+| Entry point | Element | Behaviour |
 | --------------------- | -------------------- | ------------------------------------------------------ |
-| `paletteRoot`         | IDE root             | tabindex, editing/dragging classes + data flags, keydown tool resolution, clears `inspecting` when edit ends |
-| `paletteToolbarDrag`  | toolbar (border)     | edit-mode `pointerdown` starts a toolbar drag (`mode: 'slide'`, origin `kind: 'border'`) |
-| `paletteParkingToolbarDrag` | toolbar (parking) | edit-mode `pointerdown` starts a whole-row drag (origin `kind: 'parking'`, no slide-follow) |
-| `paletteItemDrag`     | item guard (border, edit) | `pointerdown` inspects the item, then starts a tool-set drag (`kind: 'border'`) |
-| `paletteParkingItemDrag` | item guard (parking, edit) | `pointerdown` inspects the item, then starts a tool-set drag (`kind: 'parking'`) |
-| `paletteItemShield`   | item content         | blocks interaction while editing                       |
+| IDE root | `createIDE` | tabindex, editing/dragging classes + data flags, keydown tool resolution, clears the inspection when edit ends |
+| toolbar (border) | `pointerdown` handler | edit-mode `pointerdown` starts a toolbar drag (`mode: 'slide'`, origin `kind: 'border'`) |
+| toolbar (parking) | `pointerdown` handler | edit-mode `pointerdown` starts a whole-row drag (origin `kind: 'parking'`, no slide-follow) |
+| item guard (border, edit) | `pointerdown` handler | inspects the item, then starts a tool-set drag (`kind: 'border'`) |
+| item guard (parking, edit) | `pointerdown` handler | inspects the item, then starts a tool-set drag (`kind: 'parking'`) |
+| item content | `inert` flag | blocks interaction while editing |
 
-Actions return `{ destroy() }` (Svelte action contract). `paletteRoot` runs
-`$effect`s inside the action body — legal because actions execute in component
-init context.
-
-Gaps are hit-tested by the components' own `pointermove` handlers, not by
-actions: `ToolbarTrack` reads `[data-track-space-index]` and `Toolbar` reads
-`[data-item-space-index]` / `[data-item-index]`. The former
-`paletteToolbarSpace` / `paletteTrackSpace` / `paletteStackSpace` stubs
-registered nothing and were removed.
+Gaps are hit-tested by the container's own `pointermove` handlers, not by the
+entry points: the track renderer reads `[data-track-space-index]` and the
+toolbar renderer reads `[data-item-space-index]` / `[data-item-index]`.
 
 ## Pointer drag sessions
 
-`startPaletteDragSession({ event, onMove, onStop })`: listens on `window`
+`startDragSession({ event, onMove, onStop })`: listens on `window`
 (`pointermove`/`pointerup`/`pointercancel`, `blur`, `visibilitychange`),
 ignores foreign `pointerId`s, stops when `buttons === 0`. There is no pointer
 capture (it would freeze the drop zones on the drag origin) and no activation
@@ -135,36 +124,37 @@ threshold (a drag is live from `pointerdown`; commits happen on hover, not on
 release). See `docs/movements.md` for the session model, the `phase` field,
 and the commit rules.
 
-`$state` proxy hazards (found via e2e — see `docs/architecture.md` §20):
+Reactive-proxy hazards (found via e2e — see `docs/architecture.md` §20):
 
-- Previewing on the still-plain session object then assigning
-  `palettes.dragging = dragging` breaks shared border/track references — defer
-  preview to activation and re-link through the store's own proxies
-  (`active.track = active.border[0]`, …) before running `onActivate`.
-- Catalogue `onDrop` inserts unconditionally when no preview committed — the old
-  seed-border `===` guard fails under `$state` proxies and silently drops inserts.
+- Previewing on the still-plain session object then handing it to a reactive
+  store breaks shared border/track references — defer preview to activation and
+  re-link through the store's own proxies (`active.track = active.border[0]`, …)
+  before running `onActivate`.
+- The catalogue drop inserts unconditionally when no preview committed — a
+  `===` guard fails under proxies and silently drops inserts.
 - A toolbar inserted into a reactive track is a *proxy* of the array that was
   passed in. Reusing the raw local reference makes later identity lookups
   (`findIndex`, `includes`) miss — read the placed toolbar back out of the
   track instead.
 
+**Rule for new adapters:** keep core-owned layout objects unproxied, or route
+every identity check through core helpers.
+
 ## Catalogue (HTML5) drag
 
-`beginPaletteCatalogInsertDrag(palette, item, pointer?)` starts a session on the
-same `PaletteDragging` path from `dragstart` (payload resolved via
-`paletteToolbarItemFromCatalogPayload`). `notifyPaletteCatalogNativeDragStarted`
-marks `palettes.catalogDrag` so drop zones stay hittable; cleared on window
-`dragend` (capture). MIME: `PALETTE_CATALOG_DRAG_MIME`
-(`application/x-sursaut-palette-catalog`), serialized with
-`serializePaletteCatalogDragPayload` / `parsePaletteCatalogDragPayload`.
+Rows in the console add-list are **click-to-select**, not draggable (catalogue
+drag was stripped during the movement restart). The committed direction is
+click → configure → insert:
+`itemFromAddSelection` (`packages/vanilla/src/add-item.ts`) resolves the
+selection to a tool, then `moveToolbar` (fresh toolbar) or `moveItem` (append)
+commits it.
 
 ## Edit mode and inspector
 
-One palette editable at a time (`palettes.editing`). `paletteRoot` toggles
+One palette is editable at a time. The IDE root toggles
 `editing`/`palette-editing` classes + `data-editing`; global CSS renders the
-hover/active chrome (see `docs/theming.md`). `paletteItemDrag` sets
-`palettes.inspecting = { item, palette, region }` on `pointerdown`; the console
-renders the presentation-only inspector (`renderConfigurator` +
-`resolveConfiguratorContext` output) in its *Details* panel, and the inspected
-item is highlighted (`data-inspected`) on the toolbar. Structural edits
-(move/remove) are out of scope — drag reorder is the structural mechanism.
+hover/active chrome (see `docs/theming.md`). The item guard sets the inspection
+state on `pointerdown`; the console renders the presentation-only inspector
+(`configuratorModel` output) in its *Details* panel, and the inspected item is
+highlighted (`data-inspected`) on the toolbar. Structural edits beyond
+move/remove are out of scope — drag reorder is the structural mechanism.

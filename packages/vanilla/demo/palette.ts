@@ -1,8 +1,7 @@
 /**
  * Vanilla Stellar Outpost demo — point definitions + layouts + configs.
  *
- * Plain-data port of `packages/svelte/src/demo/palette.svelte.ts`: the same
- * colony points (boolean/enum/number/action + `console`), the same three
+ * colony points (boolean/enum/number/action + `console`), the three
  * configurations (`rw-combobox` / `rw-command-first` / `ro-combobox`), and
  * the same toolbar layouts. Core `AnyPoint` descriptors carry no defaults
  * (core holds no defaults — absent key = skeleton); the single consumer
@@ -207,6 +206,19 @@ export function demoPoints(): AnyPoint[] {
 				{ value: 'dark', icon: 'icon:moon', label: 'Dark' },
 				{ value: 'system', icon: 'icon:terminal', label: 'System' },
 			],
+		},
+		{
+			id: 'locale',
+			label: 'Language',
+			type: 'enum',
+			icon: '🌐',
+			keywords: ['language', 'locale', 'english', 'french', 'flag', 'langue'],
+			constraints: {
+				options: [
+					{ value: 'en', icon: 'icon:flag-en', label: 'EN', keywords: ['english', 'anglais'] },
+					{ value: 'fr', icon: 'icon:flag-fr', label: 'FR', keywords: ['french', 'francais'] },
+				],
+			},
 		},
 		{
 			id: 'commandBox',
@@ -425,6 +437,11 @@ const rwComboboxLayout: Borders = {
 				space: 0.9,
 				toolbar: [
 					{
+						point: 'locale',
+						control: 'segmented',
+						config: { icon: '🌐', label: 'Language', hint: 'Demo language flag (enum)' },
+					},
+					{
 						point: 'theme',
 						control: 'theme',
 						config: { icon: '🎨', label: 'Theme', hint: 'Theme cycle (nothing-point)' },
@@ -465,6 +482,15 @@ const rwComboboxLayout: Borders = {
 							label: 'Power focus',
 							hint: 'Head segmented (enum)',
 							showText: false,
+						},
+					},
+					{
+						point: 'saveGame',
+						control: 'button',
+						config: {
+							icon: '💾',
+							label: 'Save',
+							hint: 'Head button (run)',
 						},
 					},
 					{

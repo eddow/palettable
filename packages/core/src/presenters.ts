@@ -1,10 +1,9 @@
 /**
  * `@palettable/core` — presenter view-models + SSR control/axis resolution (Phase 5).
  *
- * Headless port of the svelte adapter's `presenters.svelte.ts` (which stays
- * adapter-owned until Phase 7). Presenters are pure functions deriving
- * everything a dumb head component needs to render — zero markup, zero CSS.
- * Heads stay dumb: no `point.value = …` in `.svelte` (see
+ * Extracted from the original reference UI's presenters. Presenters are pure
+ * functions deriving everything a dumb head renderer needs — zero markup, zero
+ * CSS. Heads stay dumb: never assign to `point.value` from a renderer (see
  * `docs/architecture.md §5`).
  *
  * Deltas from the reference:
@@ -39,8 +38,18 @@ import { isDrawerItem } from './layout.js'
 import type { AnyPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { Runnable } from './runnable.js'
+import type { LocaleBundle } from './strings.js'
 import type { EnumOption } from './type.js'
 import { matchEnumOption } from './virtual.js'
+
+/**
+ * Render-time display dictionaries (optional — every field falls back).
+ * Subset of `LocaleBundle` threaded through presenters so toolbar tools
+ * follow the locale without a definition rebuild. Fallback chain:
+ * `config.label/hint` → dictionary → `point.label` → `humanize(id)`;
+ * options: dictionary → `option.label` → `option.value`.
+ */
+export type DisplayStrings = Pick<LocaleBundle, 'pointLabels' | 'pointHints' | 'optionLabels'>
 
 /** Item `config` payload with head defaults (label/icon/hint/tone).
  *
@@ -89,26 +98,40 @@ export type HeadMeta = {
 }
 
 /** Read the item `config` payload with head defaults. */
-export function headMeta(item: ToolbarItem): HeadMeta {
+export function headMeta(item: ToolbarItem, display?: DisplayStrings, point?: AnyPoint): HeadMeta {
 	const config = ((item as { config?: unknown }).config ?? {}) as HeadItemConfig
-	const point = (item as { point?: unknown }).point
+	const rawPoint = (item as { point?: unknown }).point
+	const pointId = typeof rawPoint === 'string' ? rawPoint : point?.id
+	const dictLabel = pointId !== undefined ? display?.pointLabels?.[pointId] : undefined
+	const dictHint = pointId !== undefined ? display?.pointHints?.[pointId] : undefined
+	const configLabel = typeof config.label === 'string' ? config.label : undefined
+	const configHint = typeof config.hint === 'string' ? config.hint : undefined
+	const pointLabel =
+		typeof point?.label === 'string' && point.label.length > 0 ? point.label : undefined
 	return {
 		icon: typeof config.icon === 'string' ? config.icon : undefined,
 		label:
-			typeof config.label === 'string'
-				? config.label
-				: typeof point === 'string'
-					? point
-					: (((item as { control?: unknown }).control as string | undefined) ?? 'Item'),
-		hint: typeof config.hint === 'string' ? config.hint : undefined,
+			(typeof dictLabel === 'string' && dictLabel.length > 0 ? dictLabel : undefined) ??
+			configLabel ??
+			pointLabel ??
+			pointId ??
+			((item as { control?: unknown }).control as string | undefined) ??
+			'Item',
+		hint:
+			(typeof dictHint === 'string' && dictHint.length > 0 ? dictHint : undefined) ?? configHint,
 		tone: config.tone === 'accent' ? 'accent' : 'neutral',
 		control: (item as { control?: unknown }).control as string | undefined,
 	}
 }
 
 /** Tooltip text: `label · suffix` (suffix is usually the hint or value). */
-export function headTooltip(item: ToolbarItem, suffix?: string): string {
-	const meta = headMeta(item)
+export function headTooltip(
+	item: ToolbarItem,
+	suffix?: string,
+	display?: DisplayStrings,
+	point?: AnyPoint
+): string {
+	const meta = headMeta(item, display, point)
 	return suffix !== undefined ? `${meta.label} · ${suffix}` : meta.label
 }
 
@@ -209,7 +232,7 @@ export function resolveControl(
 		const explicit = eligible.find((cap) => cap.id === currentControl)
 		if (explicit !== undefined) return explicit.id
 		// Explicit control ineligible for this surface → fall through to the
-		// first compact eligible control (mirrors the svelte fallback), else
+		// first compact eligible control (the reference fallback), else
 		// the first eligible control.
 		const compact = eligible.find((cap) => cap.compact)
 		return compact?.id ?? eligible[0]?.id
@@ -266,9 +289,10 @@ export function buttonPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
 	runnable: Runnable,
-	can?: boolean
+	can?: boolean,
+	display?: DisplayStrings
 ): ButtonPresenter {
-	const meta = headMeta(item)
+	const meta = headMeta(item, display, bound.point)
 	const resolved =
 		can ??
 		(bound.point !== undefined && isActionPoint(bound.point)
@@ -277,7 +301,7 @@ export function buttonPresenter(
 	return {
 		label: meta.label,
 		icon: meta.icon,
-		title: headTooltip(item, meta.hint),
+		title: headTooltip(item, meta.hint, display),
 		tone: meta.tone,
 		can: resolved,
 		run: runnable,
@@ -305,15 +329,19 @@ export type TogglePresenter = {
  * Skeleton: `bound.value === undefined` → `pressed: undefined` (no `false`
  * coercion hiding the skeleton — adapters render the unset state).
  */
-export function togglePresenter(item: ToolbarItem, bound: BoundDisplay): TogglePresenter {
-	const meta = headMeta(item)
+export function togglePresenter(
+	item: ToolbarItem,
+	bound: BoundDisplay,
+	display?: DisplayStrings
+): TogglePresenter {
+	const meta = headMeta(item, display, bound.point)
 	const pressed = bound.value === undefined ? undefined : bound.value === true
 	const icon =
 		meta.icon ?? (typeof bound.point?.icon === 'string' ? bound.point.icon : pressed ? '●' : '○')
 	const point = bound.point?.id ?? ''
 	return {
 		icon,
-		title: headTooltip(item, meta.hint),
+		title: headTooltip(item, meta.hint, display, bound.point),
 		tone: meta.tone,
 		pressed,
 		can: valuedCan(bound),
@@ -348,9 +376,10 @@ export type StatusPresenter = {
 export function statusPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
-	surface: SurfaceContext
+	surface: SurfaceContext,
+	display?: DisplayStrings
 ): StatusPresenter {
-	const meta = headMeta(item)
+	const meta = headMeta(item, display, bound.point)
 	const bags = bound.bags ?? []
 	const config = (item as { config?: unknown }).config as { statusKey?: unknown } | undefined
 	const statusKey = typeof config?.statusKey === 'string' ? config.statusKey : undefined
@@ -378,7 +407,7 @@ export function statusPresenter(
 	return {
 		label: meta.label,
 		icon: meta.icon,
-		title: headTooltip(item, meta.hint),
+		title: headTooltip(item, meta.hint, display, bound.point),
 		tone: meta.tone,
 		value: value ?? meta.label,
 		can,
@@ -411,8 +440,12 @@ const THEME_ORDER: readonly ThemeValue[] = ['light', 'dark', 'system']
  * Skeleton: adapter-provided `bound.value` absent → `value: undefined` (adapters render unset).
  * The adapter owns get/set on the document root (standard `<html>` class toggle). `valueIcon`
  * carries the current option's icon (icon-value, no text needed). */
-export function themePresenter(item: ToolbarItem, bound: BoundDisplay): ThemePresenter {
-	const meta = headMeta(item)
+export function themePresenter(
+	item: ToolbarItem,
+	bound: BoundDisplay,
+	display?: DisplayStrings
+): ThemePresenter {
+	const meta = headMeta(item, display, bound.point)
 	const raw = typeof bound.value === 'string' ? bound.value : undefined
 	const value = raw === 'light' || raw === 'dark' || raw === 'system' ? raw : undefined
 	const options =
@@ -425,7 +458,7 @@ export function themePresenter(item: ToolbarItem, bound: BoundDisplay): ThemePre
 	return {
 		label: meta.label,
 		icon: meta.icon,
-		title: headTooltip(item, meta.hint),
+		title: headTooltip(item, meta.hint, display, bound.point),
 		tone: meta.tone,
 		value,
 		valueIcon,
@@ -508,16 +541,37 @@ function choiceIcon(option: EnumOption): string | undefined {
 }
 
 /** Label part of an option under `showText` (`undefined` = icon-only). */
-function choiceLabel(option: EnumOption, showText: boolean): string | undefined {
+function choiceLabel(
+	option: EnumOption,
+	showText: boolean,
+	display?: DisplayStrings,
+	pointId?: string
+): string | undefined {
 	if (!showText) return undefined
-	return option.label ?? option.value
+	return optionLabelText(option, display, pointId)
 }
 
-/** Merged display string for a single-node renderer (segmented tooltips). */
-function choiceText(option: EnumOption, showText: boolean): string {
-	const label = option.label ?? option.value
+/** Dictionary-aware option text: dictionary → `option.label` → `option.value`. */
+function optionLabelText(option: EnumOption, display?: DisplayStrings, pointId?: string): string {
+	const override =
+		pointId !== undefined ? display?.optionLabels?.[pointId]?.[option.value] : undefined
+	if (typeof override === 'string' && override.length > 0) return override
+	const label = (option as { label?: unknown }).label
+	if (typeof label === 'string' && label.length > 0) return label
+	return option.value
+}
+
+/** Merged display string for a single-node renderer (segmented tooltips).
+ * Always icon + text (ignores `showText`): the tooltip is the fallback
+ * readout when the label is hidden, so it must carry the text. */
+function choiceText(
+	option: EnumOption,
+	_showText: boolean,
+	display?: DisplayStrings,
+	pointId?: string
+): string {
+	const label = optionLabelText(option, display, pointId)
 	const icon = choiceIcon(option)
-	if (!showText) return icon ?? label
 	return icon !== undefined ? `${icon} ${label}` : label
 }
 
@@ -565,9 +619,10 @@ export function selectClosedLabel(
 export function selectPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
-	surface: SurfaceContext
+	surface: SurfaceContext,
+	display?: DisplayStrings
 ): SelectPresenter {
-	const meta = headMeta(item)
+	const meta = headMeta(item, display, bound.point)
 	const pointId = bound.point?.id ?? ''
 	const value = typeof bound.value === 'string' ? bound.value : undefined
 	const optionsList =
@@ -584,11 +639,11 @@ export function selectPresenter(
 			? {
 					value: current.value,
 					icon: typeof current.icon === 'string' ? current.icon : undefined,
-					label: current.label ?? current.value,
+					label: optionLabelText(current, display, bound.point?.id),
 				}
 			: undefined
 	return {
-		title: headTooltip(item, meta.hint),
+		title: headTooltip(item, meta.hint, display, bound.point),
 		tone: meta.tone,
 		label: meta.label,
 		toolIcon,
@@ -603,15 +658,15 @@ export function selectPresenter(
 		current: currentEntry,
 		options: optionsList.map((option) => ({
 			value: option.value,
-			text: choiceText(option, showText),
+			text: choiceText(option, showText, display, bound.point?.id),
 			icon: choiceIcon(option),
-			label: choiceLabel(option, showText),
+			label: choiceLabel(option, showText, display, bound.point?.id),
 			can: option.can !== false,
 		})),
 		listOptions: optionsList.map((option) => ({
 			value: option.value,
 			icon: typeof option.icon === 'string' ? option.icon : undefined,
-			label: option.label ?? option.value,
+			label: optionLabelText(option, display, bound.point?.id),
 			can: option.can !== false,
 		})),
 		select: (next: string): Runnable => ({ kind: 'set', point: pointId, value: next }),
@@ -693,9 +748,10 @@ function showValueOf(item: ToolbarItem): boolean {
 export function sliderPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
-	surface: SurfaceContext
+	surface: SurfaceContext,
+	display?: DisplayStrings
 ): SliderPresenter {
-	const meta = headMeta(item)
+	const meta = headMeta(item, display, bound.point)
 	const constraints =
 		bound.point !== undefined && isValuedPoint(bound.point) && bound.point.type === 'number'
 			? ((bound.point.constraints as
@@ -706,7 +762,7 @@ export function sliderPresenter(
 	const direction = surface.axis === 'vertical' ? 'vertical' : 'horizontal'
 	const variant = sliderVariantOf(item)
 	return {
-		title: headTooltip(item, `${meta.label} ${value}`),
+		title: headTooltip(item, `${meta.label} ${value}`, display, bound.point),
 		tone: meta.tone,
 		icon: meta.icon ?? 'A',
 		direction,
@@ -736,8 +792,12 @@ export type ConfiguratorModel = {
 }
 
 /** Pure configurator view-model (label/icon/hint/tone/control; mutation stays adapter-owned). */
-export function configuratorModel(item: ToolbarItem): ConfiguratorModel {
-	const meta = headMeta(item)
+export function configuratorModel(
+	item: ToolbarItem,
+	display?: DisplayStrings,
+	point?: AnyPoint
+): ConfiguratorModel {
+	const meta = headMeta(item, display, point)
 	return {
 		label: meta.label,
 		icon: meta.icon ?? '',

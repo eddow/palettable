@@ -7,8 +7,7 @@
  * at render time, never build-time precompile (Context §2.7); commands on
  * nothing-points with `uses: []`/`undefined` are always present.
  *
- * Headless port of the svelte adapter's `command-box.svelte.ts` builders
- * (which stay adapter-owned until Phase 7). Deltas from the reference:
+ * Extracted from the original reference UI's command-box builders. Deltas:
  * - Input is `readonly AnyPoint[]` + plain-data context (keystrokes,
  *   current values, `can` flags) instead of a live `Palette` instance —
  *   the builders never touch `run()` closures or `$state`.
@@ -28,12 +27,13 @@
  *   core has no components. The builders emit runnables + variant descriptors;
  *   adapters map them to items.
  */
+
+import { entryIdOf } from './catalog.js'
 import type { IconToken } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
 import type { AnyPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import type { Runnable } from './runnable.js'
-import { entryIdOf } from './catalog.js'
 import type { EnumOption } from './type.js'
 
 // Shared text/keyword helpers live in `catalog.ts` (single source of truth
@@ -63,6 +63,7 @@ import {
 	splitCommandWords,
 	uniqueNormalized,
 } from './catalog.js'
+import { type CatalogStrings, resolveCatalogStrings } from './strings.js'
 
 /** Search query accepted by `filterCommandEntries`. */
 export type CommandBoxQuery = {
@@ -118,12 +119,14 @@ export type CommandBoxContext = {
 	readonly actionCan?: Readonly<Record<string, boolean | undefined>>
 	/** Control-only item ids for add-item sources (adapter's `controls.item` keys). */
 	readonly itemControls?: readonly string[]
+	/** Localizable strings table (partial — merged over the English default). */
+	readonly strings?: Partial<CatalogStrings>
 }
 
 /**
  * Legacy executable-command builder — thin adapter over `actionableEntries`
- * (same rows, same ids/labels/metas/keywords/`can`). Kept for the frozen
- * svelte adapter + existing tests; new code uses `actionableEntries`.
+ * (same rows, same ids/labels/metas/keywords/`can`). Kept for back-compat;
+ * new code uses `actionableEntries`.
  * `mode: 'catalog'` keeps the old preset/collapsed rows for catalog display.
  */
 export function paletteCommandEntries(
@@ -133,6 +136,7 @@ export function paletteCommandEntries(
 ): readonly CommandBoxEntry[] {
 	if (options.mode === 'catalog') {
 		const excluded = new Set(options.excludePoints ?? [])
+		const strings = resolveCatalogStrings(context.strings)
 		return addableEntries(points, context, { excludePoints: [...excluded] }).flatMap(
 			(source): readonly CommandBoxEntry[] => {
 				if (source.kind === 'item') {
@@ -146,7 +150,7 @@ export function paletteCommandEntries(
 						{
 							id: entryIdOf(run),
 							label: source.label,
-							meta: 'Run command',
+							meta: strings.runCommand,
 							icon: point.icon,
 							keywords: [...source.keywords],
 							run,
@@ -176,8 +180,15 @@ export function paletteCommandEntries(
 					]
 					return presets.map((preset, index) => ({
 						id: entryIdOf(preset),
-						label: `${source.label} → ${index === 0 ? 'Toggle' : index === 1 ? 'On' : 'Off'} (preset)`,
-						meta: 'Preset — toggle on toolbar',
+						label: strings.presetRow(
+							source.label,
+							index === 0
+								? strings.presetToggle
+								: index === 1
+									? strings.presetOn
+									: strings.presetOff
+						),
+						meta: strings.presetMeta,
 						icon: point.icon,
 						keywords: [...source.keywords],
 						run: preset,
@@ -188,7 +199,7 @@ export function paletteCommandEntries(
 					{
 						id: `${point.id}:catalog-enum`,
 						label: source.label,
-						meta: 'Control — add to toolbar; value is chosen on the bar or in the inspector',
+						meta: strings.controlAddToolbar,
 						icon: point.icon,
 						keywords: [...source.keywords],
 						run,
@@ -215,7 +226,7 @@ export function paletteCommandEntries(
 /**
  * Legacy add-item builder — standard addable list (actions included, so
  * e.g. a Save button can be added). Kept as a named alias for the frozen
- * svelte adapter + existing tests; new code calls `addableEntries` directly.
+ * Kept as the current shape for back-compat; new code calls `addableEntries` directly.
  */
 export function paletteAddItemEntries(
 	points: readonly AnyPoint[],
@@ -252,8 +263,10 @@ export function trimLastToken(value: string): string {
 /** Expand an add-item source into the concrete variants a user can insert. */
 export function paletteDerivedVariants(
 	source: AddableEntry,
-	points: readonly AnyPoint[] = []
+	points: readonly AnyPoint[] = [],
+	stringsOverride: Partial<CatalogStrings> = {}
 ): readonly DerivedVariant[] {
+	const strings = resolveCatalogStrings(stringsOverride)
 	if (source.kind === 'item') {
 		return [
 			{
@@ -261,7 +274,7 @@ export function paletteDerivedVariants(
 				kind: 'item',
 				control: source.control,
 				label: source.label,
-				meta: 'Control-only item',
+				meta: strings.controlOnlyItem,
 				icon: source.icon,
 				keywords: source.keywords,
 			},
@@ -277,7 +290,7 @@ export function paletteDerivedVariants(
 				kind: 'tool',
 				pointId: source.pointId,
 				label,
-				meta: 'Toolbar command',
+				meta: strings.toolbarCommand,
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords),
 				spec: source.pointId,
@@ -292,10 +305,10 @@ export function paletteDerivedVariants(
 				id: `${source.id}:set`,
 				kind: 'set',
 				pointId: source.pointId,
-				label: `${label} (control)`,
-				meta: 'Control — configure in inspector',
+				label: strings.controlParen(label),
+				meta: strings.configureInInspector,
 				icon: source.icon,
-				keywords: collectKeywords(source.pointId, label, 'set', 'value'),
+				keywords: collectKeywords(source.pointId, label, [...strings.setValueKeywords]),
 				spec: source.pointId,
 			},
 		]
@@ -311,7 +324,7 @@ export function paletteDerivedVariants(
 				pointId: source.pointId,
 				control,
 				label,
-				meta: 'Add tool',
+				meta: strings.addTool,
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords),
 				spec: source.pointId,
@@ -324,10 +337,13 @@ export function paletteDerivedVariants(
 				id: `${source.id}:set`,
 				kind: 'set',
 				pointId: source.pointId,
-				label: `${label} (control)`,
-				meta: 'Control — configure on/off in inspector',
+				label: strings.controlParen(label),
+				meta: strings.configureOnOff,
 				icon: source.icon,
-				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'toggle'),
+				keywords: collectKeywords(source.pointId, label, point.keywords, [
+					...strings.setValueKeywords,
+					...strings.toggleKeywords,
+				]),
 				valueType: 'boolean',
 				spec: source.pointId,
 			},
@@ -339,10 +355,12 @@ export function paletteDerivedVariants(
 				id: `${source.id}:set`,
 				kind: 'set',
 				pointId: source.pointId,
-				label: `${label} (control)`,
-				meta: 'Control — choose mode in inspector',
+				label: strings.controlParen(label),
+				meta: strings.chooseMode,
 				icon: source.icon,
-				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
+				keywords: collectKeywords(source.pointId, label, point.keywords, [
+					...strings.setValueKeywords,
+				]),
 				valueType: 'enum',
 				values:
 					(point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
@@ -356,10 +374,12 @@ export function paletteDerivedVariants(
 			id: `${source.id}:set`,
 			kind: 'set',
 			pointId: source.pointId,
-			label: `${label} (control)`,
-			meta: 'Control — numeric field in inspector',
+			label: strings.controlParen(label),
+			meta: strings.numericField,
 			icon: source.icon,
-			keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
+			keywords: collectKeywords(source.pointId, label, point.keywords, [
+				...strings.setValueKeywords,
+			]),
 			valueType: 'number',
 			spec: source.pointId,
 		},
@@ -402,7 +422,7 @@ export function enumValueKeywords<TValue extends string>(value: EnumOption<TValu
 }
 
 // ── Headless query model (vanilla `(entries, query) => results`) ────────────
-// The svelte adapter wraps these in `$derived`; core stays rune-free.
+// An adapter wraps these in its own reactivity; core stays reactive-free.
 
 function entrySearchData(entry: Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords'>): {
 	keywords: string[]
@@ -436,8 +456,7 @@ function entryScore(
 
 /**
  * Filter + rank entries for a query. `can: false` entries are excluded.
- * Pure `(entries, query) => results` — the svelte `resultsValue`
- * `$derived.by` chain without the runes.
+ * Pure `(entries, query) => results`
  * Generic over the searchable shape so unified catalog entries
  * (`catalog.ts`) filter through the same implementation — no second scorer.
  */
@@ -475,7 +494,7 @@ export type CommandBoxKeywordSuggestion = {
 
 /**
  * Suggest keywords completing the last input word from the current results.
- * Pure — the svelte `suggestionsValue` `$derived.by` chain without the runes.
+ * Pure suggestions resolver (the reference's derived chain, rune-free).
  */
 export function suggestCommandKeywords(
 	entries: readonly Pick<CommandBoxEntry, 'keywords'>[],
@@ -501,7 +520,7 @@ export function suggestCommandKeywords(
 
 /**
  * Parse raw input into known keywords and free text.
- * Pure — the svelte `parsedInput` `$derived.by` chain without the runes.
+ * Pure input parser (the reference's derived chain, rune-free).
  */
 export function parseCommandInput(
 	input: string,

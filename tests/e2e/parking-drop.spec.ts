@@ -14,37 +14,44 @@ function layoutWithParkingRow() {
 		version: 1,
 		borders: {
 			top: [
-				{
-					space: 1,
-					toolbar: [
-						{
-							control: 'commandBox',
-							config: { icon: '⌘', label: 'Command', hint: 'Search and run a command' },
-						},
-					],
-				},
+				[
+					{
+						space: 1,
+						toolbar: [
+							{
+								point: 'console',
+								control: 'commandBox',
+								config: { icon: '⌘', label: 'Command', hint: 'Search and run a command' },
+							},
+						],
+					},
+				],
 			],
 			right: [],
 			bottom: [
-				{
-					space: 1,
-					toolbar: [
-						{
-							point: 'console',
-							control: 'button',
-							config: { icon: '💻', label: 'Terminal', hint: 'Head button (run)' },
-						},
-					],
-				},
+				[
+					{
+						space: 1,
+						toolbar: [
+							{
+								point: 'console',
+								control: 'button',
+								config: { icon: '💻', label: 'Terminal', hint: 'Head button (run)' },
+							},
+						],
+					},
+				],
 			],
 			left: [
-				{
-					space: 1,
-					toolbar: [
-						{ point: 'autoOxygen', control: 'toggle' },
-						{ point: 'shieldGenerator', control: 'toggle' },
-					],
-				},
+				[
+					{
+						space: 1,
+						toolbar: [
+							{ point: 'autoOxygen', control: 'toggle' },
+							{ point: 'shieldGenerator', control: 'toggle' },
+						],
+					},
+				],
 			],
 		},
 		parking: [[{ point: 'fastMode', control: 'toggle' }]],

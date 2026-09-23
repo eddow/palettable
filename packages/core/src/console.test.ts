@@ -62,4 +62,15 @@ describe('consolePointDescriptor', () => {
 			icon: '$',
 		})
 	})
+
+	it('follows the locale strings (label + keywords)', () => {
+		const descriptor = consolePointDescriptor({
+			strings: {
+				consoleKeywords: ['console', 'commande'],
+				pointLabels: { console: 'Console FR' },
+			},
+		})
+		expect(descriptor.label).toBe('Console FR')
+		expect(descriptor.keywords).toContain('commande')
+	})
 })

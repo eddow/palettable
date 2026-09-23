@@ -112,6 +112,23 @@ describe('drawer + command-box shells', () => {
 		expect(box.querySelector('[data-testid="command-box-results"]')).not.toBeNull()
 		expect(box.querySelector('[data-testid="command-box-open-configurator"]')).not.toBeNull()
 	})
+
+	it('command-box shell localizes placeholder + edit label via strings', () => {
+		const box = elementFromHtml(
+			commandBoxShellTemplate({
+				hint: 'Search',
+				icon: '⌘',
+				placeholder: 'Commande…',
+				editLabel: 'Modifier les barres',
+			})
+		)
+		expect(
+			box.querySelector('[data-testid="command-box-input"]')?.getAttribute('placeholder')
+		).toBe('Commande…')
+		expect(
+			box.querySelector('[data-testid="command-box-open-configurator"]')?.getAttribute('aria-label')
+		).toBe('Modifier les barres')
+	})
 })
 
 describe('status shells', () => {

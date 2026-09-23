@@ -104,8 +104,7 @@ test('add-box results list addable tools (not draggable)', async ({ page }) => {
 	await expect(rows.first()).toBeVisible()
 	expect(await rows.count()).toBeGreaterThan(0)
 	// Catalogue drag was stripped (movement restart): rows are
-	// click-to-select, not draggable — mirrors the svelte unit assertion
-	// (`console.test.ts`: `getAttribute('draggable')` is null).
+	// click-to-select, not draggable
 	await expect(results.locator('.palette-default-command-result[draggable="true"]')).toHaveCount(0)
 })
 

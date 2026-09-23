@@ -1,14 +1,14 @@
 /**
  * `@palettable/core` — console state machine (Phase 4).
  *
- * Headless port of the svelte adapter's `console.svelte.ts` (which stays
- * adapter-owned until Phase 7 — svelte wraps this in `$state`). Vanilla
- * state + listener set: adapters subscribe and mirror reactively.
+ * Extracted from the original reference UI's console state. Plain state +
+ * listener set: adapters subscribe and mirror reactively.
  *
  * SSR: console is resting-state only (no timers/popups/interactivity on
  * the server).
  */
 import type { Unsubscribe } from './identifiers.js'
+import { type CatalogStrings, defaultCatalogStrings } from './strings.js'
 
 export type ConsoleMode = 'run' | 'edit'
 
@@ -89,22 +89,28 @@ export class ConsoleStore {
 }
 
 /**
- * Build a `console` action-point descriptor (run point, no svelte import).
+ * Build a `console` action-point descriptor (run point, no framework import).
  * The adapter binds `run` to a `ConsoleStore` toggle; `label`/`icon` are
- * overridable.
+ * overridable. Pass the resolved catalog strings (`core.strings`) so the
+ * label + keywords follow the locale; explicit `label` still wins.
  */
-export function consolePointDescriptor(options?: { label?: string; icon?: string }): {
+export function consolePointDescriptor(options?: {
+	label?: string
+	icon?: string
+	strings?: Pick<CatalogStrings, 'consoleKeywords' | 'pointLabels'>
+}): {
 	readonly id: 'console'
 	readonly label: string
 	readonly type: 'action'
 	readonly keywords: readonly string[]
 	readonly icon: string
 } {
+	const dictLabel = options?.strings?.pointLabels?.['console']
 	return {
 		id: 'console',
-		label: options?.label ?? 'Console',
+		label: options?.label ?? dictLabel ?? 'Console',
 		type: 'action',
-		keywords: ['console', 'terminal', 'command', 'cli', 'shell'],
+		keywords: [...(options?.strings?.consoleKeywords ?? defaultCatalogStrings.consoleKeywords)],
 		icon: options?.icon ?? '⌘',
 	}
 }

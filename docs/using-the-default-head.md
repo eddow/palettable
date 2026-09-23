@@ -1,9 +1,7 @@
 # Using the default head
 
-> Historical note: this doc still shows the frozen svelte adapter (`packages/svelette`,
-> DO NOT MAINTAIN) as the reference. The live adapters are `core` + `vanilla`.
-> Vocabulary below is strict: **point** / **tool** / **control** / **configurator**
-> (see `docs/core-concepts.md`). The word **editor** never appears except here.
+Vocabulary below is strict: **point** / **tool** / **control** / **configurator**
+(see `docs/core-concepts.md`). The word **editor** never appears except here.
 
 Vocabulary: **points** are the points-list data definitions (no
 layout — e.g. the fact *alert* can be `green`/`yellow`/`red`); **tools** are
@@ -19,7 +17,7 @@ The default head is the standard minimal presentation for the
 palette: a small set of controls per point family, dumb components bound to
 headless core presenters. Use it as-is, then add custom controls only where you
 need them.
-The demo (`src/lib/demo/`, `src/routes/+page.svelte`) is the reference — it
+The demo (`packages/vanilla/demo/`) is the reference — it
 renders **the default head verbatim for every family except `number`, where two
 demo controls live**: `renderSlider` override (same `slider` key, adding a value badge) and `renderStars` (an **extension** the head
 lacks — a play/rating row). Together they prove both replacement and extension.
@@ -87,7 +85,15 @@ Notes:
   beside them — the toolbar never resizes. `config.showText: false` hides the
   option labels on **both** axes (icon-only buttons, mirroring the slider's
   `showValue: false`). The configurator exposes this as a "Show text"
-  checkbox (`select` + `segmented`, checked by default).
+  checkbox (`select` + `segmented`, checked by default). Segmented option
+  tooltips (`button.title`) always carry icon + text, so the text survives
+  as the tooltip when the label is hidden.
+- `button` (run) follows the same vertical pattern: an icon button shows its
+  label as a hover/focus overlay beside the bar (segmented side — left border
+  opens right, right border opens left), so the toolbar never resizes. An
+  icon-less button keeps its label in flow on both axes (no overlay gate, no
+  reserved popout space — the `showText: false` equivalent). Toggle/theme
+  carry no label node at all, so they never match the overlay gate.
 - The `select` closed box always shows the tool icon (when declared) *and*
   the value icon — icon+value like numerics (☀️ over 1.2): side by side on a
   horizontal toolbar, stacked (tool above value) on a vertical one. Absent
@@ -186,94 +192,134 @@ default is emoji passthrough. Consumers own name resolution via two
   `packages/vanilla/demo/icons.ts` (`DEMO_ICONS`, `demoIconResolver`,
   `renderDemoIconField`) wired in `demo/main.ts` via `createIDE`.
 
-## Minimal setup (historical svelte sample — live API is `core` + `vanilla`)
+## Localizable strings (intl seam)
+
+Hard-coded English is the default everywhere; every table is overridable.
+Core ships `defaultCatalogStrings`, vanilla ships `defaultIdeStrings` —
+locales stay consumer-owned (the demo owns FR in
+`packages/vanilla/demo/i18n.ts`).
+
+- Core (`CatalogStrings`, `packages/core/src/strings.ts`): sentence builders
+  (`toggle/enable/disable/setTo/increase/decrease/incrementBy/...`), add-flow
+  + command/key-edit metas, search keyword families, and render-time
+  `pointLabels`/`pointHints`/`optionLabels` dictionaries (checked before the
+  item config and the definition — no rebuild on switch). `PaletteCoreOptions.strings` (partial,
+  merged over English) seeds `core.strings`; `core.setStrings(partial)`
+  switches live. Nested dictionaries merge per key (`pointLabels`,
+  `pointHints`, per-point `optionLabels`); keyword arrays replace wholesale.
+  Pure builders take `CommandBoxContext.strings` (partial);
+  `describeRunnable` takes an optional strings override. `humanizeId`
+  (shared with `humanizeCommandText`) stays the last-resort fallback. Point `label` is optional on the definition:
+  omit it and rely on the dictionary alone. `consolePointDescriptor` takes an
+  optional `strings` pick so the console label + keywords follow the locale.
+  `bundleCatalogStrings(bundle)` resolves a `LocaleBundle` to its catalog
+  override (top-level dictionaries win, `catalog.*` is a legacy alias).
+- Vanilla (`IdeStrings`, `packages/vanilla/src/strings.ts`): placeholders,
+  empty states (incl. the empty-stack drop-zone hint, rendered via
+  `data-empty-text` → CSS `attr()` so it localizes), console titles/aria
+  labels, details titles, configurator row keys, tone/open-mode options,
+  control display names. `IdeOptions.strings`
+  (static partial) or `IdeOptions.stringsForLocale(locale)` (called per
+  render with the live value of `localePointId`, default `'locale'`).
+  The IDE subscribes to that point and re-renders borders + console on
+  change — reactive switch, no rebuild. The IDE also pushes
+  `bundle.catalog` into `core.strings` per render (`syncCatalogStrings`),
+  so console catalog rows follow the locale with no consumer `setStrings`
+  call; `controlNames` merges per control id.
+- Demo pattern: `locale` valued enum point (`en`/`fr`, segmented control,
+  flag icons via `demoIconResolver`), excluded from defaults/dirty/reset like
+  `theme`; `main.ts` seeds `en`, subscribes to switch `document.documentElement.lang`
+  (catalog follows via the IDE bundle), and passes `stringsForLocale` to
+  `createIDE`. A per-locale `LocaleBundle`
+  (`{ catalog?, pointLabels?, pointHints?, optionLabels? }`, vanilla adds
+  `ide?`) carries all three — dictionaries live top-level (authoritative);
+  presenters take an optional `DisplayStrings`
+  threaded from `HeadContext.display` (fallback chain: dictionary →
+  `config.label/hint` → `point.label` → `humanize(id)`; options: dictionary →
+  `option.label` → `option.value`).
+
+## Minimal setup
 
 ```ts
-// palette.ts
-import { headEditors } from '$lib/head/registry'
-import { Palette } from '$lib/palette/edition.svelte'
-
-export const palette = new Palette({
-	tools: {
-		autoOxygen: { type: 'boolean', label: 'Life Support', value: true, default: true },
-		alertLevel: {
-			type: 'enum', label: 'Threat', value: 'green', default: 'green',
-			values: [{ value: 'green' }, { value: 'red' }]
-		},
-		gameSpeed: {
-			type: 'number', label: 'Sim Speed', value: 1, default: 1, min: 0.5, max: 5, step: 0.5
-		},
-		emergencyProtocol: { label: 'Lockdown', get can() { return true }, run() {} }
+// demo/palette.ts — point definitions
+export const points = [
+	{ id: 'autoOxygen', type: 'boolean', label: 'Life Support' },
+	{
+		id: 'alertLevel', type: 'enum', label: 'Threat',
+		values: [{ value: 'green' }, { value: 'red' }]
 	},
-	keys: { N: 'autoOxygen!', '1': 'alertLevel=green', '+': 'gameSpeed+=0.5', E: 'emergencyProtocol' },
-	editable: true,
-	editors: headEditors as never,
-	editorDefaults: { run: 'button' }
-})
+	{ id: 'gameSpeed', type: 'number', label: 'Sim Speed', min: 0.5, max: 5, step: 0.5 },
+	{ id: 'emergencyProtocol', type: 'action', label: 'Lockdown', run() {} }
+]
+
+export const keys = {
+	N: 'autoOxygen!',
+	'1': 'alertLevel=green',
+	'+': 'gameSpeed+=0.5',
+	E: 'emergencyProtocol'
+}
 ```
 
-```svelte
-<!-- +page.svelte -->
-<script>
-	import Ide from '$lib/palette/components/Ide.svelte'
-	import { palette } from './palette'
-	import '$lib/palette/styles/palette.css'
-	import '$lib/head/styles/head-default.css'
+```ts
+// demo/main.ts — page wiring
+import { PaletteCore } from '@palettable/core'
+import { createIDE } from '@palettable/vanilla'
+import '@palettable/core/styles/palette.css'
+import '@palettable/core/styles/head-default.css'
+import { points, keys } from './palette.js'
 
-	const top = $state([
-		{ space: 0.1, toolbar: [{ editor: 'commandBox' }] },
-		{
-			space: 0.5,
+const core = new PaletteCore(points, {
+	initialValues: { autoOxygen: true, alertLevel: 'green', gameSpeed: 1 }
+})
+
+createIDE(document.querySelector('#app')!, {
+	core,
+	keys,
+	editable: true,
+	borders: {
+		top: [{
+			space: 1,
 			toolbar: [
-				{ tool: 'autoOxygen', editor: 'toggle' },
-				{ tool: 'alertLevel', editor: 'select' },
-				{ tool: 'gameSpeed', editor: 'slider' },
-				{ tool: 'emergencyProtocol', editor: 'button' }
+				{ point: 'autoOxygen', control: 'toggle' },
+				{ point: 'alertLevel', control: 'select' },
+				{ point: 'gameSpeed', control: 'slider' },
+				{ point: 'emergencyProtocol', control: 'button' }
 			]
-		}
-	])
-</script>
-
-<Ide {palette} {top}>
-	<div>center content</div>
-</Ide>
+		}]
+	}
+})
 ```
 
 Notes:
 
-- `keys` accepts a raw map (`{ E: 'emergencyProtocol' }`) — `Palette` normalizes it via
-  `createPaletteKeys`. Specs: `id` (action), `id=value` (pure setter),
+- `keys` accepts a raw map (`{ E: 'emergencyProtocol' }`) — the adapter
+  normalizes it. Specs: `id` (action), `id=value` (pure setter),
   `id!` (boolean toggle), `id+=x` / `id-=x` (number step by explicit amount).
-- `editorDefaults: { run: 'button' }` lets run items omit `editor`.
-- Import **both** stylesheets once: `palette.css` (core layout + edit chrome) and
-  `head-default.css` (head theme). Never inject CSS at runtime.
-- Optional icon factory (maps string names to components; unset falls back to text):
-
-```ts
-import { icons } from '$lib/head/icons.svelte'
-import Star from '$lib/icons/star.svelte'
-
-icons.factory = (name) => (name === 'star' ? Star : undefined)
-```
+- `controlDefaults` lets items omit `control` for a family.
+- Import the stylesheets once from core: `palette.css` (layout + edit chrome)
+  and the theme sheets (`head-default.css`, `head-dark.css`, `head-light.css`).
+  Never inject CSS at runtime.
+- Icons are opaque string tokens; the adapter resolves them with its own icon
+  resolver (`resolveIcon` in the reference adapter, overridable per app — see
+  "Custom icons" above).
 
 ## Extending with custom controls (the demo pattern)
 
 Keep the head as fallback; add extras per family. There are two mechanisms:
 
 ```ts
-import { headEditors } from '$lib/head/registry'
-import { demoEditors } from './editors/registry'
+import * as head from '@palettable/vanilla'
 
-editors: {
-	boolean: { ...headEditors.boolean, ...demoEditors.boolean },
-	enum: { ...headEditors.enum, ...demoEditors.enum },
-	number: { ...headEditors.number, ...demoEditors.number },
-	item: { ...headEditors.item, ...demoEditors.item },
-	run: { ...headEditors.run, ...demoEditors.run }
-} as never,
+const myHead = {
+	boolean: { ...head.headControls.boolean },
+	enum: { ...head.headControls.enum },
+	number: { ...head.headControls.number, slider: renderBadgeSlider, stars: renderStars },
+	item: { ...head.headControls.item },
+	run: { ...head.headControls.run }
+}
 ```
 
-Per-family spread (not a top-level `{ ...headEditors, ...demoEditors }`) matters:
+Per-family spread (not a top-level `{ ...headControls, ...myHead }`) matters:
 a top-level spread would replace whole families and drop the head fallback.
 
 - **Override (same key)** — register a control under a key the head already owns,
@@ -299,9 +345,9 @@ plus `showValue` (sliders), `showText` (select/segmented), `showFilter`
 The console's *Details* panel renders the presentation-only inspector,
 which edits these live, including the control chooser (`controlChoices`).
 
-## Read-only vs editable imports
+## Read-only vs editable
 
-- Read-only (predefined layout, `editable: false`): import from
-  `$lib/palette/core.svelte` — display + run, no mutation surface.
-- Editable: import from `$lib/palette/edition.svelte` (re-exports `core`).
-- `$lib/palette/edition.svelte` re-exports `core`, so a single import suffices.
+- A palette is read-only when its options carry `editable: false` — no edit
+  chrome, no console mode toggle, the layout is not editable.
+- Otherwise the console's mode toggle (or a bound command-box) drives the edit
+  mode, and `core.run(spec)` is the single execution path for every control.

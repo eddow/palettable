@@ -158,13 +158,8 @@ export type PaletteLayout<TPoint extends string = string, TControl extends strin
 // rebuilds the run-time structures with no separate virtuals lookup.
 
 export type SerializedToolbarItem = {
-	/**
-	 * Bound point id (required on v2 writes). Optional only for
-	 * back-compat reads of pre-nothing-point payloads carrying bare
-	 * `{ control: 'status' }` items — hydration migrates those to
-	 * `{ point: control, control }` so every live tool is bound.
-	 */
-	readonly point?: string | import('./virtual.js').VirtualPoint
+	/** Bound point id (required). */
+	readonly point: string | import('./virtual.js').VirtualPoint
 	readonly control?: string
 	readonly config?: Record<string, unknown>
 	readonly toolbar?: readonly {
@@ -179,35 +174,23 @@ export type SerializedTrackSlot = {
 }
 
 /**
- * v1 flat payload (deprecated): region = flat slot list, track boundaries
- * lost on load (each slot rehydrates as its own single-slot track).
- * Read-only back-compat for payloads persisted before v2 (old localStorage
- * saves, e2e fixtures) — never written anymore.
- */
-export type SerializedLayoutV1 = {
-	readonly version: 1
-	readonly borders: Record<PaletteRegion, readonly SerializedTrackSlot[]>
-	readonly parking?: readonly (readonly SerializedToolbarItem[])[]
-}
-
-/**
- * v2 nested payload (current): region = list of tracks, each track = list
+ * Serialized payload: region = list of tracks, each track = list
  * of slots. Track boundaries survive save/load round-trips.
  */
 export type SerializedLayout = {
-	readonly version: 2
+	readonly version: 1
 	readonly borders: Record<PaletteRegion, readonly (readonly SerializedTrackSlot[])[]>
 	readonly parking?: readonly (readonly SerializedToolbarItem[])[]
 }
 
-/** Any persisted payload the tree can load (v2 preferred, v1 back-compat). */
-export type AnySerializedLayout = SerializedLayout | SerializedLayoutV1
+/** Any persisted payload the tree can load. */
+export type AnySerializedLayout = SerializedLayout
 
 /** Build a trivial initial layout: one toolbar per region holding every point id. */
 export function defaultLayoutFromPoints(pointIds: readonly string[]): SerializedLayout {
 	const toolbar = pointIds.map((point) => ({ point }) as SerializedToolbarItem)
 	return {
-		version: 2,
+		version: 1,
 		borders: {
 			top: toolbar.length > 0 ? [[{ space: 1, toolbar }]] : [],
 			right: [],
@@ -221,36 +204,26 @@ export function defaultLayoutFromPoints(pointIds: readonly string[]): Serialized
 /**
  * Validate that an unknown value is a properly structured serialized layout.
  *
- * Accepts both the current v2 nested form (region = track list) and the
- * legacy v1 flat form (region = slot list, back-compat for payloads
- * persisted before v2). Headless port of the svelte adapter's
- * `validatePaletteLayout` (which stays adapter-owned until Phase 7): checks
+ * Accepts the nested form (region = track list). Extracted from the original
+ * reference UI's layout validator: checks
  * the version marker, the four region lists, and per-item shape (`point` as
  * a string reference or an inline virtual definition object, `control`
  * string, `config` plain object, drawer `toolbar` array). Returns `false`
  * for anything else — never throws.
  */
-export function validateSerializedLayout(
-	layout: unknown
-): layout is SerializedLayout | SerializedLayoutV1 {
+export function validateSerializedLayout(layout: unknown): layout is SerializedLayout {
 	if (typeof layout !== 'object' || layout === null) return false
 	const obj = layout as Record<string, unknown>
-	if (obj.version !== 1 && obj.version !== 2) return false
+	if (obj.version !== 1) return false
 	if (typeof obj.borders !== 'object' || obj.borders === null) return false
 	const borders = obj.borders as Record<string, unknown>
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	for (const region of regions) {
 		const border = borders[region]
 		if (!Array.isArray(border)) return false
-		if (obj.version === 2) {
-			for (const track of border) {
-				if (!Array.isArray(track)) return false
-				for (const slot of track) {
-					if (!isSerializedSlot(slot)) return false
-				}
-			}
-		} else {
-			for (const slot of border) {
+		for (const track of border) {
+			if (!Array.isArray(track)) return false
+			for (const slot of track) {
 				if (!isSerializedSlot(slot)) return false
 			}
 		}
@@ -281,12 +254,10 @@ function isSerializedSlot(slot: unknown): boolean {
 function isSerializedItem(item: unknown): boolean {
 	if (typeof item !== 'object' || item === null) return false
 	const itemObj = item as Record<string, unknown>
-	if (itemObj.point !== undefined) {
-		if (typeof itemObj.point === 'string') {
-			// String reference — nothing more to check.
-		} else if (!isInlineSpec(itemObj.point)) {
-			return false
-		}
+	if (typeof itemObj.point === 'string') {
+		// String reference — nothing more to check.
+	} else if (!isInlineSpec(itemObj.point)) {
+		return false
 	}
 	if (itemObj.control !== undefined && typeof itemObj.control !== 'string') return false
 	if (itemObj.config !== undefined) {
@@ -807,32 +778,19 @@ function emptyLayout(): PaletteLayout {
 /**
  * Normalize a serialized layout into a live `PaletteLayout` (deep clone).
  *
- * v2 regions are track lists — hydration preserves track boundaries.
- * v1 regions are flat slot lists (track boundaries were not persisted) —
- * each slot hydrates as its own single-slot track (back-compat, mirrors the
- * Svelte adapter's `hydratePaletteLayout`).
+ * Regions are track lists — hydration preserves track boundaries.
  */
 function fromSerializedLayout(layout: AnySerializedLayout): PaletteLayout {
 	const regions: PaletteRegion[] = ['top', 'right', 'bottom', 'left']
 	const borders = {} as PaletteLayout['borders']
 	for (const region of regions) {
-		if (layout.version === 2) {
-			const tracks = (layout as SerializedLayout).borders[region]
-			borders[region] = tracks.map((track) =>
-				track.map((slot) => ({
-					space: slot.space,
-					toolbar: slot.toolbar.map(hydrateItem),
-				}))
-			)
-		} else {
-			const slots = (layout as SerializedLayoutV1).borders[region]
-			borders[region] = slots.map((slot) => [
-				{
-					space: slot.space,
-					toolbar: slot.toolbar.map(hydrateItem),
-				},
-			])
-		}
+		const tracks = layout.borders[region]
+		borders[region] = tracks.map((track) =>
+			track.map((slot) => ({
+				space: slot.space,
+				toolbar: slot.toolbar.map(hydrateItem),
+			}))
+		)
 	}
 	return {
 		borders,
@@ -845,7 +803,7 @@ function isSerializedLayout(
 	layout: AnySerializedLayout | PaletteLayout
 ): layout is AnySerializedLayout {
 	const version = (layout as { version?: unknown }).version
-	return version === 1 || version === 2
+	return version === 1
 }
 
 /** Normalize either layout form into a live `PaletteLayout` (deep clone). */
@@ -857,7 +815,7 @@ function toPaletteLayout(layout: AnySerializedLayout | PaletteLayout): PaletteLa
 function hydrateItem(item: SerializedToolbarItem): ToolbarItem {
 	if (item.toolbar !== undefined) {
 		return {
-			point: typeof item.point === 'string' ? item.point : (item.point ?? 'drawer'),
+			point: item.point,
 			control: 'drawer',
 			config: item.config === undefined ? undefined : { ...item.config },
 			toolbar: item.toolbar.map((slot) => ({
@@ -866,14 +824,6 @@ function hydrateItem(item: SerializedToolbarItem): ToolbarItem {
 			})),
 		} as DrawerToolbarItem
 	}
-	if (item.point === undefined)
-		// Back-compat: pre-nothing-point payloads carry bare
-		// `{ control: 'status' }` — migrate to `{ point: control, control }`.
-		return {
-			point: item.control ?? 'status',
-			control: item.control ?? 'status',
-			config: item.config === undefined ? undefined : { ...item.config },
-		}
 	// String references hydrate verbatim (immutable); inline virtual
 	// definitions are deep-cloned (JSON-safe definition objects) so the tree
 	// shares no structure with the serialized input.
@@ -920,7 +870,7 @@ function cloneItem(item: ToolbarItem): ToolbarItem {
 }
 
 /**
- * Serialize a live `PaletteLayout` into a JSON-safe v2 `SerializedLayout`
+ * Serialize a live `PaletteLayout` into a JSON-safe `SerializedLayout`
  * (nested track lists — track boundaries are persisted).
  * Exported for the SSR snapshot path (`render.ts`), which accepts either
  * layout form; the tree's own `getSnapshot()` routes through here too.
@@ -937,7 +887,7 @@ export function snapshotLayout(layout: PaletteLayout): SerializedLayout {
 		)
 	}
 	return {
-		version: 2,
+		version: 1,
 		borders,
 		parking: layout.parking.map((toolbar) => toolbar.map(serializeItem)),
 	}
@@ -973,7 +923,7 @@ export function isDrawerItem(item: ToolbarItem | null | undefined): item is Draw
 	)
 }
 
-// ── Pure track-space math (Phase 2 — verbatim from the svelte adapter) ──────
+// ── Pure track-space math (extracted verbatim from the reference UI) ─────────
 // Operates on core `Track` / `Border` / `Parking` data only: no DOM, no runes,
 // no store reads. Adapters commit drag results through these primitives (or
 // through `PaletteLayoutTree` for location-based moves).
@@ -1111,7 +1061,7 @@ export function insertTrackWithToolbar(
 }
 
 // ── Drag session state (explicit param — no module globals) ───────────────
-// Headless port of the svelte adapter's `PaletteDragging` session shape
+// Extracted from the original reference UI's dragging session shape
 // (`types.ts`), minus the palette instance (core never holds adapters).
 // Adapters own the live session, pass it explicitly to every helper below,
 // and refresh `origin` after each commit so subsequent hovers move from the
@@ -1262,8 +1212,6 @@ export function isDraggingWholeToolbar(
  * tools are the *entire* content of their current toolbar (nothing else is
  * left behind), `'restructure'` otherwise.
  *
- * @deprecated Phase 7 — becomes a session internal; do not add new callers.
- *
  * This is the single question the whole drag engine asks: *"is there anything
  * else than `dragging` in my toolbar?"* — no → the toolbar itself moves;
  * yes → the selection is a subset being restructured.
@@ -1279,8 +1227,6 @@ export function resolveDragMode(dragging: DraggingState): DragMode {
  * their own — and a slide can *become* a restructure once a merge puts other
  * items back beside it. Also refreshes the stored `isWholeToolbar` flag so
  * adapters always read the current value. Returns the new mode.
- *
- * @deprecated Phase 7 — becomes a session internal; do not add new callers.
  */
 export function refreshDragMode(dragging: DraggingState): DragMode {
 	dragging.mode = resolveDragMode(dragging)
@@ -1293,13 +1239,6 @@ export function refreshDragMode(dragging: DraggingState): DragMode {
  * drag-start. Adapters must use this (never a literal) so the stored flag
  * and `mode` start in sync; every commit refreshes both via
  * `refreshDragMode`.
- *
- * @deprecated Phase 7 — the session resolves the grab target itself; do not add new callers.
- *
- * NOTE: `startDraggingState` is the legacy entry point (tools + origin
- * only). New code should use `dragStart` below, which takes the grabbed
- * element (tool or toolbar) plus the pointer position and resolves the
- * origin itself.
  */
 export function startDraggingState(options: {
 	tools: ToolbarItem[]
@@ -1324,8 +1263,6 @@ export function startDraggingState(options: {
 
 /**
  * Element the pointer grabbed or hovered: a tool, a toolbar, or a DZ gap.
- *
- * @deprecated Phase 7 — replaced by the session `Hoverable` vocabulary; do not add new uses.
  */
 export type DragElement =
 	| { readonly kind: 'tool'; readonly toolbar: Toolbar; readonly item: ToolbarItem }
@@ -1370,8 +1307,6 @@ export type DragElement =
 
 /**
  * Pointer position: abstract indices (resolved by the adapter's hit test).
- *
- * @deprecated Phase 7 — replaced by `PointerSample` + `SlideFrame`; do not add new uses.
  */
 export type DragPointer = {
 	/** Item index under the pointer (active-item fallback), if any. */
@@ -1380,8 +1315,6 @@ export type DragPointer = {
 
 /**
  * What the core decided on drag-over: highlight paint + optional commit.
- *
- * @deprecated Phase 7 — methods return `void` and raise `DragEvent`s; do not add new readers.
  */
 export type DragOverDecision = {
 	/** Item-space gaps to paint per toolbar (adapter applies as classes). */
@@ -1461,8 +1394,6 @@ function locateDrawerToolbar(
  * Core drag-start: given the grabbed element (tool or toolbar) plus the
  * pointer position, build the session. The core decides whole-toolbar vs
  * subset from the live layout — the adapter never derives it.
- *
- * @deprecated Phase 7 — creation is `layout.createDrag(target)`; do not add new callers.
  */
 export function dragStart(
 	layout: { readonly borders: Borders; readonly parking: Parking },
@@ -1517,8 +1448,6 @@ export function dragStart(
  * core decides the action (restructure into a highlighted DZ, translate the
  * sliding toolbar); the adapter applies the returned paint sets as classes
  * and re-renders on `moved`.
- *
- * @deprecated Phase 7 — the session `over()` raises `DragEvent`s; do not add new callers.
  *
  * Restructuring happens ONLY on a highlighted DZ: hovering a dark gap
  * returns `moved: false` with no paint for that gap.
@@ -2035,8 +1964,6 @@ function isSlidingFlank(dragging: DraggingState, track: Track, gap: number): boo
  * the last gap of the previous toolbar and the first gap of the next
  * toolbar. Returns the `{ toolbar, gap }` pairs the adapter should paint
  * (empty when not a whole-toolbar border drag, or no neighbours exist).
- *
- * @deprecated Phase 7 — the return-value form goes away with `DragOverDecision`; do not add new callers.
  */
 export function wholeToolbarNeighbourEdges(options: {
 	track: Track

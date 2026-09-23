@@ -44,8 +44,7 @@ async function toolOrder(page: import('@playwright/test').Page): Promise<(string
 // Conformance: re-organisation happens ONLY on drag-over of a highlighted
 // DZ. Dragging the first tool and hovering the dark gap beside it (gap 0 /
 // gap 1 touch the dragged tool, so they stay dark) must leave the tool
-// order untouched — no move, no extract, no singleton. Future adapters
-// (vue, thinned svelte) must satisfy this case: paint and commit share one
+// order untouched — no move, no extract, no singleton. Paint and commit share one
 // decision, so a dark gap can never restructure.
 test('hovering a dark gap never re-organises tools', async ({ page }) => {
 	await openConsole(page)

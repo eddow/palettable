@@ -1,374 +1,289 @@
 # Architecture — palettable
-> Historical note: §§1–20 describe the frozen svelte adapter (`packages/svelette`,
-> DO NOT MAINTAIN) and its extraction history. The live stack is `core` +
-> `vanilla` with strict vocabulary **point** / **tool** / **control** /
-> **configurator** (see `docs/core-concepts.md`). Svelte `PaletteEditor*` names
-> below are svelte-only and kept verbatim as the port reference.
+
 Start with `README.md`, then `docs/getting-started.md`. Topic guides:
-`core-concepts.md` (tools, registry, scope), `layout-and-drag.md`,
+`core-concepts.md` (points, tools, registry, scope), `layout-and-drag.md`,
 `command-box.md`, `theming.md`, `testing.md`, `using-the-default-head.md`,
-`creating-a-head.md`, `head-extraction.md` (what was done). This file keeps the decisions,
-runtime mapping, and phase history.
+`creating-a-head.md`. This file keeps the decisions, runtime mapping, and
+phase history.
 
 ## 1. Identity
 
-- **@palettable/svelte** = the Svelte 5 (runes) adapter for `@palettable/core` — a port of `@sursaut/ui/palette` (headless palette subsystem **only**).
-- **Headless** contract is preserved: the palette owns state, a11y semantics, tool resolution,
-  editing, and drag/drop — **not** styling. Adapters (demo controls) own markup and CSS.
-- Read-only reference source lives in `ui/` (symlink). Never edit it; treat it as the spec.
-- **Out of scope:** the rest of `@sursaut/ui` — the `*Model` functions (button/checkbox/select/…),
-  directives, and the `uiComponent` variant factory (styled variants + dot-syntax accessors). The
-  palette has no model layer and no variant layer.
+- **@palettable/core** = the headless layer: points, values store, layout tree,
+  movement commits, command-box builders, console state, presenters, SSR render
+  model, context bags, global CSS.
+- **Adapters** render the core: `@palettable/vanilla` (plain DOM, the reference
+  adapter + demo), `@palettable/vue` and `@palettable/svelte` (created in
+  `plans/extraction.md` Phases 11–12). Each imports `core` only — never the
+  reverse, never each other.
+- **Headless** contract: the palette owns state, a11y semantics, tool
+  resolution, editing, and drag/drop — **not** styling. Adapters own markup and
+  CSS.
+- The original reference UI (a Sursaut-based implementation) has been retired;
+  it is no longer available to consult. What was extracted from it is recorded
+  below — treat **this document + `packages/core`** as the spec.
+- Read-only reference source lives in `ui/` (symlink) where the original
+  upstream is still present. Never edit it.
+- **Out of scope:** the rest of the original reference UI — the `*Model` functions
+  (button/checkbox/select/…), directives, and the `uiComponent` variant factory
+  (styled variants + dot-syntax accessors). The palette has no model layer and
+  no variant layer.
 
-## 2. Toolchain (locked)
+## 2. Toolchain
 
 | Tool | Version |
 |------|---------|
 | Node | 24.x |
-| npm | 11.x |
-| Svelte | `^5.57.0` (runes mode) |
-| SvelteKit | `^2.70.3` |
+| pnpm | 11.x |
 | Vite | `^8.2.2` |
-| `@sveltejs/vite-plugin-svelte` | `^7.3.0` |
-| TypeScript | `^6.0.3` (TS 7 native compiler is **not** supported by `svelte-check`) |
+| TypeScript | `^6.0.3` |
 | Biome | `^2.5.12` |
-| Vitest | `^5.0.0` (+ `@testing-library/svelte`, jsdom) |
+| Vitest | `^5.0.0` (node for `core`, jsdom for adapters) |
 | Playwright | `^1.62.1` |
 
-## 3. Runtime mapping
+Adapters add their own framework deps (`vue`, `svelte` + its vite plugin) —
+they are not root dependencies, since only the adapter being built needs them.
 
-| Sursaut | Svelte 5 |
-|---------|----------|
-| `mutts.reactive(x)` | `$state(x)` |
-| `mutts.effect(fn)` | `$effect(fn)` |
-| `mutts.unwrap(x)` | `x` (proxies are transparent) |
-| `mutts.lift(fn)` | `$derived` / `$derived.by` |
-| `JSX.Element` / `() => JSX.Element` | `Component` (`Snippet` excluded — no runtime discriminator) |
-| `options.iconFactory` | module-level `$state` icon factory |
-| Sursaut `use:directive` | Svelte `use:` action |
-| `latch()` portal | `mount(Component, { target })` from `svelte` |
-| `env` / scope | Svelte context or props |
+## 3. Runtime mapping (original reference → core)
+
+The table below is the mapping the extraction applied. It is kept because it
+explains *why* the core API has its shape: every reactive/component-only
+construct had to become plain data + pure functions, with the reactivity pushed
+into adapters.
+
+| Original reference | Core / adapter split |
+|--------------------|----------------------|
+| `mutts.reactive(x)` | core: plain values + `PaletteStateStore`; adapter: `$state(x)`, `ref()`, … |
+| `mutts.effect(fn)` | adapter-owned (`$effect(fn)`, `watch(...)`) |
+| `mutts.unwrap(x)` | direct reads (core never proxies) |
+| `mutts.lift(fn)` | core: pure derived builders; adapter: `$derived` / `computed` |
+| `JSX.Element` | core: `IconToken = string`; adapter: its own renderer |
+| `options.iconFactory` | adapter-side icon resolution (`resolveIcon`) |
+| directive (`use:`) | adapter-owned (`$effect` in an action, `onMounted`, …) |
+| portal latch | adapter-owned DOM portal (drawer popups into `document.body`) |
+| ambient env / scope | explicit parameters (`scope`, `surface`, `HeadContext`) |
 | `componentStyle.css` | global `styles/palette.css` (no scoping, no injection) |
-| `options` global config | module-level `$state` |
+| global options object | explicit options records per entry point |
 
-## 4. File & naming rules
+## 4. Module layout
 
-- Runes (`$state` / `$derived` / `$effect`) **only** compile in `.svelte.ts` / `.svelte.js`.
-- Pure algorithms → `.ts`; reactive modules → `.svelte.ts`; UI → `.svelte`.
-- One module = one concern, mirroring the reference source map (`types`, `keys`, `palette`,
-  `command-box`, `components/*`, `drawer-editor`, `styles/*`).
-- Public entry points: `src/lib/palette/core.svelte.ts` (read-only display + run),
-  `src/lib/palette/edition.svelte.ts` (mutation surface, re-exports `core`).
+- Core is **plain TypeScript** with no reactive primitives and no DOM
+  (compiler-enforced, see §21). One module = one concern — the module
+  inventory is in §21.
+- Adapters mirror the same concern split in their own idiom: keys /
+  layout rendering / drag session / head renderers / strings.
+- Every adapter keeps the same public shape: a barrel, an IDE entry point that
+  takes a container element, and a set of `render*` functions per control id.
 
-## 5. Controls are components — no model / variant layer (svelte, historical)
+## 5. Controls are components — no model / variant layer
 
-The palette does **not** use `@sursaut/ui`'s `*Model` lazy-getter pattern (`buttonModel`,
-`checkboxModel`, …). That pattern belongs to the general UI library, which is out of scope.
+The palette does **not** use the retired reference UI's `*Model` lazy-getter pattern
+(`buttonModel`, `checkboxModel`, …). That pattern belongs to the general UI
+library, which is out of scope.
 
-- A palette **editor** is a plain Svelte component that receives a `PaletteEditorContext`
-  (`item`, `tool`, `scope`, `flags`, `surface`) and renders itself.
-- No grouped-attribute objects to spread (`model.button`, `model.input`), no self-referential
-  getters.
-- No `uiComponent` variant factory and no styled variants. The palette is headless; any visual
-  styling belongs to the demo/adapter, never the palette core.
-- `PaletteEditorSpec.editor` / `.configure` hold a component (or a function returning one), not a
-  JSX factory.
+- A **control** is rendered by the adapter from a presenter view-model: core
+  resolves a control id to pure render data, the adapter maps that id to its own
+  rendering primitive (a plain-DOM `render*` function, a component, …).
+- No grouped-attribute objects to spread (`model.button`, `model.input`), no
+  self-referential getters.
+- No `uiComponent` variant factory and no styled variants. The palette is
+  headless; any visual styling belongs to the adapter/head, never the core.
+- A registry entry holds a control id plus a configurator id — never a
+  component. Adapters resolve ids to their own renderers.
 
-## 6. Shared runtime state
+## 6. Shared runtime state (adapter-owned)
 
-- A single module-level `$state` object (`palettes`) owns `catalogDrag`, `dragging`, `editing`,
-  `inspecting` — exactly one palette editable at a time.
-- The drawer collapse signal (`paletteDrawerCollapse`) is a `$state({ version: 0 })`; consumers bump
-  `version` to close all open drawers synchronously.
-- Both live in `.svelte.ts` modules so any importer reacts to changes.
+Exactly one palette is *editable* at a time, and exactly one drag is live.
 
-## 7. Control registry (svelte, historical)
+- Core owns the semantics: which palette is being edited, which session is
+  running, which item is being inspected — as plain state + subscribe channels.
+- Each adapter mirrors that state in its own reactivity so its own render pass
+  can react to it (the reference adapter re-renders structurally on an editing
+  flip and reads live session state).
+- The drawer collapse signal is a version counter: consumers bump it to close
+  all open drawers synchronously.
 
-- Registries are keyed **family → variant** (`run`, `boolean`, `number`, `enum`, `item`).
-- A `PaletteEditorSpec.editor` is a Svelte **component** (not a JSX factory). Rendering resolves the
-  spec then mounts it dynamically (`svelte:component` or `mount`).
-- `PaletteEditorContext` carries `item`, `tool`, `scope`, `flags`, and `surface` (axis + region).
-- `surface.axis` derives from region: `top`/`bottom` → `horizontal`, `left`/`right` → `vertical`.
+## 7. Control registry
+
+- Registries are keyed **family → control** (`run`, `boolean`, `number`, `enum`,
+  `nothing`).
+- Resolution is `resolveControl()`: explicit item `control` → family default →
+  first eligible → compact fallback for an ineligible explicit → `undefined`
+  (§21, Phase 5 status).
+- A control id is an opaque string to core; the presenter turns
+  (definition, value, config, surface) into render data and the adapter decides
+  what to draw.
+- The render context carries `point`, `value`, `control`, `scope`, `flags`, and
+  `surface` (axis + region).
+- `surface.axis` derives from region: `top`/`bottom` → `horizontal`,
+  `left`/`right` → `vertical`.
 
 ## 8. Icons
 
-Sursaut's `@sursaut/ui` is **not** hardcoded to a glyph library: the palette only carries an icon
+The reference UI was **not** hardcoded to a glyph library: the palette only carries an icon
 value and never renders it itself. Rendering is delegated to a pluggable `options.iconFactory`;
 the `pure-glyf` package (a separate optional Vite-plugin + adapter, `registerGlyfIconFactory()`)
 is merely *one* such factory.
 
-@palettable/svelte mirrors that split, in a Svelte-idiomatic way:
+The extraction keeps that split:
 
-- **Palette core stays icon-agnostic.** `PaletteIcon = string | Component` flows through
-  tools / entries / toolbar items to the control, which is the *only* thing that renders it.
-  (`Snippet` is excluded: `Component` and `Snippet` are both callables with no runtime
-  discriminator, so the `Icon` helper could never render a `Snippet` member. Callers with
-  inline markup wrap it in a component or render it directly with `{@render}`.)
-- **One small `Icon.svelte` helper** (demo/adapter layer, not core) resolves the two cases:
-  - `Component` → `<svelte:component this={...} />`
-  - `string` → a registered string resolver, else `<span data-icon="name">name</span>`
-- **String-name resolution** is a consumer concern, provided as a module-level `$state` factory
-  (the Svelte equivalent of `options.iconFactory`), e.g. `icons.factory = (name) => <i class={name} />`.
+- **Palette core stays icon-agnostic.** `IconToken = string` flows through
+  points / entries / toolbar items to the control. Core never imports an icon
+  factory and never renders anything.
+- **String-name resolution is an adapter concern.** `packages/vanilla/src/head.ts`
+  exposes `resolveIcon(...)`; an adapter may also accept richer icon values
+  (components, nodes) in its own types — core only ever sees the token.
 
-We do **not** port `pure-glyf`; the demo can use `Component` directly, emoji strings, or
-register a factory that maps names to CSS classes.
+We do **not** port `pure-glyf`; a demo can use emoji strings or register a
+factory that maps names to CSS classes.
 
 ## 9. Portal pattern (drawer)
 
-Drawers render a popup perpendicular to their parent axis into `document.body` via
-`mount()`. The popup root receives a new scope carrying `palette` and `region` so nested
-`Toolbar`s resolve tools and nested drawers invert their axis correctly.
+A drawer renders a popup perpendicular to its parent axis, portaled into
+`document.body` (the adapter owns the portal). The popup re-inherits the
+context it needs — root location + region — so nested toolbars resolve their
+points and nested drawers invert their child axis correctly. `core` supplies the
+geometry decisions (`drawerChildAxis` / `drawerChildRegion`, §21 Phase 5) and the
+placements; the adapter only moves nodes.
 
 ## 10. Serialization
 
-- `serializePaletteLayout` / `validatePaletteLayout` are pure (`.ts`).
-- `hydratePaletteLayout` rebuilds deeply reactive structures with `$state` (`.svelte.ts`).
+- `snapshotLayout` / `validateSerializedLayout` / `fromSerializedLayout` are pure
+  (`core/src/layout.ts`).
+- A **serialized** region carries a *nested* track list (`version: 1` is the
+  discriminator); hydrate rebuilds the live form where each serialized slot
+  becomes its own single-slot track. Never share one normalizer between the two
+  forms — that double-wraps and `getLayout()` throws.
+- Adapters own the reactive rebuild: they read the plain hydrated structure and
+  wrap it in their own reactivity at the call site, during init (never from a
+  late handler).
 
 ## 11. Styling — global CSS, never scoped or injected
 
-- CSS is **always global** unless true component scoping is required. Palette styles live in
-  `src/lib/palette/styles/` (`palette.css` headless layout + edit-mode affordances);
-  the default visual theme lives in the head (`src/lib/head/styles/head-default.css`).
-  Both are imported once by the app — never injected at runtime, never duplicated per instance.
+- CSS is **always global** unless true component scoping is required. Palette
+  styles live in `packages/core/styles/`:
+  - `palette.css` — layout + edit chrome + drawer shell (core-owned selectors).
+  - `head-default.css` — the default visual theme (dark base + light override),
+    plus `head-dark.css` / `head-light.css` token sheets.
+  All are imported once by the host app (the reference demo imports all four in
+  `packages/vanilla/demo/main.ts`) — never injected at runtime, never duplicated
+  per instance.
 - Selectors stay specific through class hierarchy (`.palette-ide.editing .toolbar:hover::before`),
   never bare names (`.active {`). No `data-palette-id` scoping: only one palette is editable at
-  a time (`palettes.editing`), so per-instance `<style>` elements are pure overhead.
-- The reference `componentStyle.css` injection (`paletteInstanceStyle` + `#disposeStyle`) was
-  deleted. `Palette.dispose()` is a no-op kept for API parity.
-- Edit-mode hover states are live, not just unblocked: `paletteRoot` toggles
-  `editing`/`palette-editing` classes + `data-editing` from `palette.editing`, and the
+  a time, so per-instance `<style>` elements are pure overhead.
+- No runtime style injection exists anywhere: the CSS is plain files the app
+  imports once.
+- Edit-mode hover states are live, not just unblocked: entering edit mode toggles
+  `editing`/`palette-editing` classes + `data-editing` on the IDE root, and the
   ported `.palette-ide.editing .toolbar…` / `.toolbar-item-guard…` rules render the
-  hover/active chrome. Verified in the Phase 9 demo (edit toggle → hover a toolbar).
-- Drawer popup classes use the `palettable-` prefix (`.palettable-drawer__popup`), not
-  `sursaut-`.
+  hover/active chrome.
+- Drawer popup classes use the `palettable-` prefix (`.palettable-drawer__popup`).
 
 ## 12. Palette runtime (Phase 3 — implemented, review fixes applied)
 
-- `src/lib/palette/palette.svelte.ts` ports `ui/src/palette/palette.ts` verbatim except for the
-  Sursaut runtime swaps below; `src/lib/palette/core.svelte.ts` / `edition.svelte.ts` are the barrel entry points.
-- `mutts.reactive(x)` → `$state(x)`; `mutts.unwrap` → direct reads. Svelte `$state` never
-  proxies class instances, so palette identity is plain `===` (`palettes.editing === this`).
-- `mutts.effect` in `setter()` is omitted: module scope has no effect context, the `WeakMap`
-  restore entry is GC-hygienic on its own. Verified divergence: with two setters on one tool
-  (`fontSize|11`, `fontSize|12`), the second `run()` overwrites the first's stored restore
-  value without sursaut's effect cleanup, so re-running the second setter restores the stale
-  value instead of `default`. Single-setter behaviour is identical. (The `fontSize`
-  example is the historical unit-test fixture name; the demo now uses colony tools.)
-- `renderEditor` / `renderConfigurator` **return** the editor/configurator component (the adapter
-  renders it with a `context` prop built by `resolveEditorContext`) instead of invoking a JSX
-  factory. `Palette.Toolbar` / `Palette.Ide` factories are omitted here — layout components land
-  in `components/` (Phase 5).
-- `resolveConfiguratorScope` computes sursaut's `augmentedScope` (`scope` + `editorChoices`)
-  for **both** configurator paths: the `configurator` fallback receives it as its `scope`
-  argument, and adapters rendering a registry `spec.configure` component bind it as
-  `context.scope` (via `resolveConfiguratorContext`). `surfaceContextFromScope` centralizes
-  region→axis derivation; `setPaletteScope` / `getPaletteScope` carry the scope record through
-  Svelte context (drawer portals propagate `palette` + `region` through it).
-- `$state` is only legal as a variable initializer, so `hydratePaletteLayout` builds a plain
-  layout first and wraps it once (`const borders: PaletteBorders = $state(plain)`); nesting
-  becomes reactive via deep `$state` proxying. Call it during component/module init, not from
-  late event handlers or async callbacks. The native `dragend` listener stays a boolean-guarded
-  `window.addEventListener` (capture): `svelte` exposes no `effectRoot`, and module scope has
-  no effect context; the handler delegates to `clearPaletteCatalogDragOnNativeDragEnd` (tested).
-- Tests: `tests/palette/palette.test.ts` (17) + `tests/palette/serialization.test.ts` (15) +
-  `tests/palette/command-box.test.ts` (25) port `palette.spec.tsx` + `serialization.spec.ts` +
-  `command-box.spec.ts`; JSX-factory assertions become component-identity assertions,
-  `mutts.reactive` fixtures become plain objects, and the `configure`-call-count assertion is
-  dropped (spec components are returned, not invoked). Added: configurator-scope injection,
-  surface-axis derivation, `dragend` clearing, multi-setter divergence, and hydrated
-  reactivity (`HydratedBordersProbe.svelte`).
+The permanent surface is documented in §21 ("Phase 3 status" and the module
+inventory). What matters architecturally:
+
+- `PaletteCore` owns the registry, the values store, the layout tree, virtual
+  resolution and command execution. It deliberately **does not** re-implement
+  get/set/subscribe — the store is exposed as `core.values`.
+- `run()` is synchronous; `PaletteError`s are thrown, not rejected. An action
+  point's `run()` may return a promise — core does not await it.
+- Palette identity is plain `===` (no proxying anywhere in core), so
+  "which palette is editing" is an identity comparison.
+- `resolveEditablePoint` rejects unknown ids, action points and family
+  mismatches; `readSetterValue` is the single coercion path.
+- Adapters must build their reactive mirror during init, never from a late
+  handler or after `await` — the same constraint applies to command-box models
+  and layout hydration.
 
 ## 13. Command box (Phase 4 — implemented)
 
-- `src/lib/palette/command-box.svelte.ts` ports `ui/src/palette/command-box.ts` verbatim except
-  for the Svelte runtime swaps: `mutts.reactive` → `$state`, `mutts.lift` → `$derived.by`,
-  `string | JSX.Element | (() => JSX.Element)` icons → `PaletteIcon`.
-- `paletteCommandBoxModel` must be created during component/module init (same `$state`
-  init-time constraint as `hydratePaletteLayout`). `entries` may be a static array or a reader
-  function re-read inside `$derived`; a component-owned `$state` source refreshes `results`
-  (asserted via `CommandBoxEntriesProbe.svelte`).
-- `$derived` values are exposed through getter properties on the returned model object, never
-  as shorthand properties — shorthand captures the initial value and breaks reactivity
-  (`state_referenced_locally`).
-- `commandRunner` throws `PaletteError` (not plain `Error`) for non-runnable specs, matching
-  the palette error taxonomy (deliberate divergence from the reference, which throws `Error`).
-- Tests: `tests/palette/command-box.test.ts` (26) ports `command-box.spec.ts`; `h()` fixtures
-  become stub components, `mutts.reactive` becomes a probe-owned `$state`. Added:
-  non-runnable spec throws `PaletteError`.
+- Builders live in `packages/core/src/command-box.ts`, pure over descriptors +
+  a plain-data context; entries carry `run` **spec strings** adapters execute
+  via `PaletteCore.run`, never closures.
+- The query model is plain functions (`(entries, query) => results`), so an
+  adapter can wrap them in its own reactivity or call them imperatively.
+- `commandRunner` throws `PaletteError` (not plain `Error`) for non-runnable
+  specs, matching the palette error taxonomy.
+- The console state machine lives in `packages/core/src/console.ts`
+  (`ConsoleStore` + `consolePointDescriptor`); the modal markup is adapter-side.
 
-## 15. Layout components (Phase 5 — implemented)
+## 15. Layout rendering (Phase 5 — implemented)
 
-- `src/lib/palette/layout.svelte.ts` ports `ui/src/palette/components.tsx` headless logic:
-  track spacing (`actualTrackSpaceAt`/`insertToolbar`/`removeToolbar`/`resizeToolbar`),
-  toolbar moves (track/stack commit primitives), hit-testing
-  (`resolveTrackSpaceTarget`/`resolveToolbarSpaceTarget`/`resolveStackSpaceTarget`),
-  toolbar preview (`previewToolbarItems`/`finalizeToolbarPreview`), catalogue insert
-  (`beginPaletteCatalogInsertDrag` + native `dragover`/`dragend` window listeners), and
-  Svelte actions (`paletteRoot`, `paletteTrackSpace`, `paletteStackSpace`,
-  `paletteToolbarSpace`, `paletteToolbarDrag`, `paletteItemDrag`, `paletteItemShield`).
-- `src/lib/palette/drag-session.ts` ports `startLocalDragSession` trimmed to pointer
-  capture + window move/up listeners (no preview element; the 4px activation threshold
-  lives in the caller, matching the reference).
-- Runtime swaps: `mutts.reactive` → plain arrays (the `$state` `palettes` store proxies the
-  session on assignment); `mutts.unwrap` → direct reads; `mutts.effect` in `paletteRoot` →
-  `$effect` inside the action body (actions run in component init context — verified with a
-  throwaway probe before implementing); `startLocalDragSession` → `startPaletteDragSession`.
-- Dropped with rationale: `arranged()` scope classes (no `orientation-*`/`density-*`
-  selectors exist in the ported CSS; direction flows through `palette-horizontal` /
-  `palette-vertical` + `stack-*`); `use:toolbarsContainer` (no definition anywhere in the
-  reference source or its dependencies — layout is fully described by CSS classes).
-- `Palette` interface gains `resolveConfiguratorScope` / `resolveEditorContext` (already
-  implemented on the class in Phase 3; the interface was missing them and `Toolbar` needs
-  them for the `<PaletteItem>` bind step).
-- Components (`components/`): `Ide.svelte` (four optional borders + center slot, `$derived`
-  scope record published via `setPaletteScope`), `Toolbar.svelte` (toolbar + item spaces, edit-guard
-  overlay, click-to-inspect; border or parking location, never both), `ToolbarTrack.svelte`
-  (slots + spacing), `ToolbarBorder.svelte`
-  (region border, `inverse` reverses track order), `Parking.svelte` (owns the independent
-  `parking` stack, delete-button per row), `PaletteItem.svelte` (binds
-  `resolveEditorContext` output to `<Editor context={...} />`).
-- Components take `palette` (runtime class) + `scope` as props instead of Sursaut's ambient
-  scope/second-arg; `Toolbar` computes `dragTarget`/`spaceTarget` via functions (not `$derived`
-  shorthand) so space registration always sees current props.
-- Actions return `ReturnType<Action>` (`{ destroy() }`), not bare cleanups — Svelte's action
-  contract requires the object shape.
-- Tests: `tests/palette/components.test.ts` (13) ports `components.spec.ts` via
-  `PaletteRootProbe`/`PaletteItemDragProbe`/`IdeProbe`/`ParkingProbe` + `ParkingEditorStub`
-  (`rootEnv` directives become `use:` actions; `$state` proxies force `toStrictEqual` over
-  `toBe` for `inspecting.item` and the catalogue seed border); `tests/palette/item-movement.test.ts`
-  (13) is a verbatim port of `item-movement.spec.ts` locking the Phase 3
-  `resolveItemPlacementTarget` contract.
+Core owns the **decisions and commits**; adapters own the **geometry and DOM**:
 
-## 16. Demo editors & configurators (Phase 6 — implemented)
+- Core (`packages/core/src/layout.ts`): track spacing math, toolbar moves,
+  the veto predicates, the gap-highlight decisions, and the structural commits
+  (`commitDraggedToTrackSpace` / `ItemSpace` / `StackSpace` / `Parking…`,
+  `insertTrackWithToolbar`, `moveToolbarToTrack` / `Stack`). All take an
+  explicit drag-state parameter — no module-level reactive reads.
+- The drag **session** (`packages/core/src/drag.ts`): `Hoverable` in,
+  `DragEvent` out (`highlight` diffs + `slide` / `clearSlide` / `resize` +
+  `structure` ops), owning the paint baseline, the dwell timer, the slide frame
+  and the catalog creation.
+- Adapters own hit-testing inputs (pointer coordinates, rects), the pointer
+  session wiring (`startDragSession`), rAF slide transforms (`slide.ts`), the
+  node registry, and re-rendering on `structure` events.
+- Adapters re-render surgically per op (`diffBorder` / `diffTrack` /
+  `applyOp`) rather than rebuilding the tree; a full-branch `replace` op is the
+  whole-load escape hatch.
+- Adapters must build their reactive mirror during init, never from a late
+  handler.
+- Actions/effect-style entry points return the adapter's own cleanup contract.
 
-- `src/lib/demo/editors/` holds two plain Svelte editor components (no model layer,
-  no variant factory): `SliderEditor` (same-key `number.slider` override adding a
-  value badge) and `StarsEditor` (`number.stars` extension, a play/rating row of
-  "▶"/"▷" triangles). Each takes `context: PaletteEditorContext` and mutates the
-  `$state` tool via `sliderPresenter` (`view.set`).
-- Shared helpers live in `editors/meta.ts` (`toolbarMeta` / `tooltip` / `layoutFromSurface` /
-  `regionFromScope` / `menuChevron` / enum-subset filtering + display). Helpers accept the
-  generic `PaletteToolbarItem<string, string, unknown>` (`AnyItem`) so demo components stay
-  assignable at the `Toolbar` render boundary without per-schema generics.
-- Split/menu editors (`SplitButton`, `SplitRadio`) use local `$state` open flags + plain
-  `{#if open}` menus (no `*Model` popover helpers); `Stars` renders `maximum` buttons with
-  `role="radio"`; `Slider` binds `min`/`max`/`step` from the number tool; `CommandBox` builds
-  its own `paletteCommandBoxModel` from `context.scope.palette` at init (editors receive only
-  `context`, so the box cannot be injected as a prop; seeding is deliberate and
-  `state_referenced_locally` is suppressed).
-- Configurators (`BaseConfigurator` label/icon/hint/editor/tone) read
-  `context.scope.editorChoices` injected by `resolveConfiguratorScope`;
-  `registry.ts` wires `spec(editor, configure, footprint)` per family → variant,
-  mirroring the reference `demoEditors` registry.
-- Demo palette (`src/lib/demo/palette.svelte.ts`): `$state` colony state + `Palette`
-  with key bindings, `editorDefaults` for all families, and
-  `initialIdeConfig: PaletteBorders` covering every tool family in every region
-  (top command-box-combobox/lockdown/toggles/threat; left sim-speed/atmosphere/
-  power + nested drawer; right tax/solar/stars; bottom console/save/reset/
-  hyper-tick). `src/routes/+page.svelte` renders `Ide` with `$state` borders;
-  the console (head `Console.svelte`) hosts the presentation-only inspector
-  (`renderConfigurator` + `resolveConfiguratorContext` → `<Configurator context>`).
-- Defensive failure mode confirmed: `Toolbar.svelte` try/catch renders nothing on unknown
-  tools/missing editors — desired, keeps broken items inert in edit mode instead of crashing
-  the bar.
-- Gates: `check` 0/0, `lint` clean, `test` 92 pass, `build` ok.
+## 16. Head controls & configurators
 
-## 17. Drawer editor (Phase 7 — implemented)
+- The shipped head renders one control per point family, bound to core
+  presenters: `renderButton` / `renderToggle` / `renderSelect` /
+  `renderSegmented` / `renderSlider` / `renderStepper` / `renderStars` /
+  `renderStatus` / `renderCommandBox` / `renderDrawer` /
+  `renderTheme` in `packages/vanilla/src/head.ts`.
+- A demo can **replace** a control (same control id, richer rendering) and
+  **extend** the head with a new control id — the reference demo does both for
+  the `number` family.
+- Configurators read the control choices injected into their scope by core
+  (`controlChoicesFor`), so the panel offers exactly the controls that are
+  eligible for the item's family.
+- Unknown tools render nothing (defensive): a broken item stays inert in edit
+  mode instead of crashing the toolbar.
 
-- `src/lib/palette/drawer-editor.svelte.ts` ports `ui/src/palette/drawer-editor.tsx`:
-  `paletteDrawerCollapse` is module-level `$state({ version: 0 })` (same pattern as
-  `palettes`); `createPaletteDrawerEditor({ portalContainer })` returns a spec whose
-  `editor` is the shared `DrawerEditor` component (`flags: { footprint: 'horizontal' }`).
-  Dropped with rationale: per-instance `triggerClass` / `overlayClass` / `popupClass` /
-  `popupExtraClass` (CSS is global — `palettable-drawer__*` in `styles/palette.css`),
-  `renderIcon: JSX.Element` / `renderTrigger` (icons are `PaletteIcon`, trigger is fixed
-  icon + label + chevron), `triggerStyle` (no parent-toolbar square-size override to fight).
-- `components/DrawerEditor.svelte` (trigger) + `components/DrawerPopup.svelte` (portal root)
-  replace `latch(host, jsx, env)`: the trigger holds local `$state` `open` + `popupPos`,
-  the portal `$effect` reads `open`/`item` up-front (so close re-runs teardown), then
-  `mount(DrawerPopup, { target: host })` into `document.body` (or the factory
-  `portalContainer`); teardown removes listeners + `unmount(app)` + `host.remove()`.
-  `DrawerPopup` publishes `palette` + child `region` via `setPaletteScope` and binds the
-  same scope to the child `Toolbar` — nested drawers resolve tools and invert their own
-  axis without prop-drilling.
-- Perpendicular-direction contract (verbatim): child direction inverts the parent axis,
-  child region follows (`vertical` → `'left'`, `horizontal` → `'top'`).
-  `open` (`hover` | `toggle`) and `placement` (`start` | `center` | `end`) come
-  from the item `config`, defaulting to `toggle` / `center`.
-- Collapse signal: drawers track a plain non-reactive `seenVersion` (seeds on first
-  run, closes on later bumps — no `untrack` idiom). `syncPopup()` only assigns
-  `popupPos` when the rect actually changed — unconditional writes re-trigger the portal
-  effect forever (`effect_update_depth_exceeded`); the whole read sits in try/catch so a
-  detached trigger can never break the effect.
-- Portal hygiene: the missing-palette guard runs before `appendChild` (no leaked host
-  `<div>`); the portal receives the shared `$state` `popupPos` object so resize/scroll
-  re-renders in place instead of remounting (nested state preserved). `open: 'hover'`
-  uses a 120ms leave-grace: trigger-leave schedules a close that popup-enter cancels,
-  so the pointer can travel to the body-portaled popup. Scope flows via props today
-  (explicit, serializable); `setPaletteScope`/`getPaletteScope` stay as the documented
-  portal-propagation path (`Ide` + `DrawerPopup` publish it).
-- `Toolbar.svelte` editor-only fix: `resolveItem` no longer bails on `tool === undefined`,
-  so `drawer` / `commandBox` items resolve through the `item` registry (tool-backed items
-  still render nothing on unknown tools — desired). `Palette` interface gains the missing
-  `resolveConfiguratorContext` (already on the class; `DrawerPopup`'s `Toolbar` needs it
-  for the `<PaletteItem>` bind). Demo registry wires `item.drawer`; demo layout adds a
-  left nested drawer (atmosphere select + sim-speed stepper).
-- Tests: `tests/palette/drawer.test.ts` (6) — factory shape, open-on-click + Escape close,
-  collapse-signal close, axis inversion both ways, popup scope publishing, hover travel
-  stays open. Gates: `check` 0/0, `lint` clean, `test` 113 pass, `build` ok.
+## 17. Drawer (Phase 7 — implemented)
+
+- Core owns the geometry and cabinet rules: child axis inverts the parent axis
+  (`drawerChildAxis` / `drawerChildRegion`), `open` (`hover` | `toggle`) and
+  `placement` come from the item `config`, and a **close-on-click** chain closes
+  the clicked tool's drawer plus its `hover` ancestors
+  (`drawerCloseChainIndices`).
+- The adapter owns the portal: the popup mounts into `document.body`, re-inherits
+  the root location + region so nested toolbars resolve their points and nested
+  drawers invert correctly, and `Escape` closes it.
+- A collapse signal (a version counter) closes all open drawers synchronously.
+- A drawer's content is **one child `Track`** — several toolbars along the
+  perpendicular axis with track spaces between them — so drawer toolbars are
+  full drag participants; see `docs/layout-and-drag.md`.
 
 ## 18. Demo page (Stellar Outpost — current)
 
-- `src/lib/demo/palette.svelte.ts` is a **Stellar Outpost** space-colony sim:
-  `$state` colony state (`autoOxygen`, `shieldGenerator`, `fastMode`,
-  `colonyTheme`, `alertLevel`, `powerPriority`, `gameSpeed`, `taxRate`,
-  `solarEfficiency`, `satisfaction`) + `missionElapsed` (the mission clock,
-  rendered by the work-zone chip only) +
-  system `theme` + `lastAction`, with run tools `emergencyProtocol` (disabled at
-  green), `saveGame` (localStorage), `resetSimulation` (dirty-gated), `console`
-  (quake-style toggle — the core `consoleTool`, with demo label/icon override).
-  Keys: `` ` `` console, `N`/`S`/`E` toggles + lockdown, `Ctrl+S` save,
-  `+`/`-` sim speed, `1/2/3` threat presets.
-- `initialIdeConfig` avoids duplicate tool/editor pairs across borders: top
-  (command-box launcher, lockdown, life-support, shields, threat
-  segmented), left (sim-speed slider, atmosphere select, power segmented +
-  nested drawer), right (tax slider, solar stepper, satisfaction stars),
-  bottom (console, save, reset, hyper-tick, nothing-point status readout). `editorDefaults`
-  covers the point families (`run`/`boolean`/`enum`/`number`).
-- `src/routes/+page.svelte` renders `Ide` with `$state` borders + a save/load
-  layout button group. The work-zone shows every colony variable as pills + a
-  colony-status panel + an `mm:ss` elapsed-since-launch chip (the work-zone chip
-  reads `demoState.missionElapsed` directly); the open console
-  dims + disables it (`.demo-center.is-dimmed`, quake-style modal).
-- Console (`src/lib/palette/console.svelte.ts` headless state + `src/lib/head/Console.svelte`
-  modal, opened by the core `console` run tool): core owns `consoleState`
-  (`open` + `mode: 'run' | 'edit'`), `openConsole`/`closeConsole`/`toggleConsole`,
-  `consoleTool` — the **run-mode** surface lives in `core.svelte` (read-only palettes can open
-  a command console); the add-to-toolbar UI state (`resetConsoleAddState`, `popupAddList`)
-  stays in `edition.svelte`. The head owns the modal markup/CSS/placement (viewport-centred
-  fixed box, `max-inline-size: 48rem`, non-blocking backdrop so borders stay interactive in
-  edit mode).
-  The console **auto-detects** whether a `commandBox` (combobox) is displayed in any border: if
-  so it opens in **edit mode** (running already happens inline in the combobox, so the modal is
-  for edition only — no edit button); if not it opens **command-first** (run box) and, when the
-  palette is R/W (`editable !== false`), offers a **square edit-icon button**
-  (`console-mode-toggle`, an `aria-pressed` toggle, `✎`/`✓`) on the left of the command box to
-  enter/leave edit mode. A read-only palette gets no edit button and stays in run mode. Adding/removing
-  the `commandBox` item changes behaviour live. Edit mode shows a **single** list: the add-box
-  results (`console-results`, `Add to toolbar…` — the only draggable surface) and, once an add
-  entry is selected, the *Details* panel (`console-details-panel`) with its variants. Run mode
-  shows only the run-box results (`Command…`). Edit mode mirrors `consoleState.mode` onto
-  `palettes.editing` (so the `inert` shield + drag guard engage on the underlying toolbars);
-  closing the console always clears the mirror (plus `palettes.inspecting`), so toolbars never
-  stay inert after an edit-mode close.
-- The toolbar `commandBox` item is a real **commands-combo-box** (`commandBoxPresenter`): a text
-  input + results popup that runs commands inline (Ctrl-Shift-P style). It is a **run** surface,
-  independent of the console. When the palette is R/W, the combobox shell also carries a **square
-  edit-icon button** (`command-box-open-editor`, `✎` — a plain button, not a toggle) that opens
-  the console in **edit mode**. Selecting a toolbar item (`pointerdown` → `palettes.inspecting`)
-  highlights it (`data-inspected`) and renders a **presentation-only** configurator in the
-  console's single *Details* panel (`console-details-panel`) — the same place shows the add
-  variants when an add entry is selected (inspect and add are never used together).
+The demo lives in `packages/vanilla/demo/` (setup demo):
+`palette.ts` (points, keys, three configurations + live layouts, ship roster),
+`main.ts` (page, `PaletteCore` + `createIDE`, persistence), `i18n.ts` (FR
+bundle), `icons.ts`.
+
+- `palette.ts` defines the **Stellar Outpost** space-colony sim: colony values
+  (`autoOxygen`, `shieldGenerator`, `fastMode`, `colonyTheme`, `alertLevel`,
+  `powerPriority`, `gameSpeed`, `taxRate`, `solarEfficiency`, `satisfaction`) +
+  the mission clock + system `theme`/`locale` + `lastAction`, with run tools
+  (`emergencyProtocol` — disabled at green, `saveGame`, `resetSimulation`,
+  `console`). Keys: `` ` `` console, `N`/`S`/`E`, `Ctrl+S`, `+`/`-`, `1/2/3`.
+- The initial layout avoids duplicate point/control pairs across borders and adds
+  a nested drawer on the left and the **fleet** tools on the bottom border (bound
+  to the host-owned `ship` bag).
+- The work-zone shows every colony variable as pills + a status panel + an
+  `mm:ss` chip; the open console dims it (quake-style modal), and in edit mode
+  toolbar item content is `inert`.
+- `main.ts` persists the layout through `localStorage` (validated with
+  `validateSerializedLayout`) and binds a value proxy so the page follows live
+  values.
 - While `palette.editing`, `paletteRoot` suppresses tool key bindings (early
   `if (palette.editing) return`) so keys are free to be re-bound (press-to-rebind), mirroring
   the pointer side where `paletteItemShield` sets `element.inert` on item content.
@@ -386,35 +301,37 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   Drag origins carry `kind: 'border' | 'parking'` so a top-bar drag can never
   light up a parking row as dragged (position is part of instance identity;
   the session exposes the live origin toolbar, never a container scan).
-- Persistence: `+page.svelte` seeds `structuredClone(demoLayoutFor('rw-combobox').*)` `$state`
-  at init (server + client first render identical, no hydration mismatch; also avoids mutating
-  the shared module objects) plus an empty `$state` parking stack, and splices a validated
-  stored snapshot in `onMount`
-  (`hydratePaletteLayout` can't run post-init — its `$state` is init-only — so each
-  stored flat slot is re-nested as its own single-slot track, the same shape
-  `hydratePaletteLayout` produces, and spliced into the deep proxies; parking rows
-  splice into their own stack). `serialize`/`hydrate` round-trip parking alongside
-  borders. The demo ships three
-  **configurations** (`demoConfigs` in `src/lib/demo/palette.svelte.ts`): `rw-combobox`,
-  `rw-command-first`, `ro-combobox` — each loaded by a plain preset command button
-  (no toggle state); `demoLayoutFor(id)` flips
-  the reactive `demoEditable` flag (`get editable()` reads it). A "Save layout" /
-  "Load layout" button group round-trips through localStorage.
-- **Edit-mode inert:** `paletteItemShield` is a Svelte 5 action with an `update()` that sets
-  `element.inert` on the item content wrapper — a run button/toggle/combobox becomes inert
-  (unfocusable, unclickable) while `palette.editing`, leaving only the `paletteItemDrag` guard
-  to own pointer events (select-for-edition / move).
-- Inspector structural actions: `describeItemConfiguration` on the live toolbar/index
-  (resolved by item identity across all four borders) drives move-backward/move-forward
+- Persistence (reference demo): `main.ts` seeds a clone of the chosen layout at
+  init (first render identical everywhere, no hydration mismatch; also avoids
+  mutating the shared module objects), then splices a validated stored snapshot
+  into the live structure once mounted — each stored flat slot is re-nested as
+  its own single-slot track, the shape hydration produces. Parking rows splice
+  into their own stack. `snapshotLayout`/`fromSerializedLayout` round-trip
+  parking alongside borders. The demo ships three **configurations**
+  (`demoConfigs` in `packages/vanilla/demo/palette.ts`): `rw-combobox`,
+  `rw-command-first`, `ro-combobox` — each loaded by a plain preset command
+  button (no toggle state); `demoLayoutFor(id)` flips the reactive
+  `demoEditable` flag. A "Save layout" / "Load layout" button group round-trips
+  through localStorage.
+- **Edit-mode inert:** item content becomes `inert` (unfocusable, unclickable)
+  while editing, leaving only the drag guard to own pointer events
+  (select-for-edition / move).
+- Inspector structural actions: resolving the item's live configuration
+  (by item identity across all four borders) drives move-backward/move-forward
   (splice within the toolbar) + remove buttons and the `bindings.shortcut` display
   (`findByTool`).
 - Init-time constraint respected: all `paletteCommandBoxModel` instances are created during
   component init; stored-layout restore splices plain data in `onMount`, never in handlers.
 - Gates: `check` 0/0, `lint` clean, `test` 117 pass, `build` ok.
 
-## 19. E2E coverage (Phase 10 — both demos green)
+## 19. E2E coverage (Phase 10 — conformance suite)
 
-- `e2e/palette.spec.ts` (5): command-box combobox runs commands inline +
+One Playwright project per adapter demo, each on its own port; all run the same
+`tests/e2e/*.spec.ts` — that shared suite **is** the adapter conformance
+contract. The reference demo is at `:4174`, with a `vanilla-smoke` project for
+the vanilla-only spec.
+
+- `e2e/palette.spec.ts` (7): command-box combobox runs commands inline +
   `.palette-ide.editing` chrome, drawer open with axis inversion (left drawer →
   `is-horizontal` popup) + Escape close, presentation-only inspector via
   `pointerdown` on the edit-mode `.toolbar-item-guard` (highlighted item +
@@ -429,21 +346,19 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   `inert` while editing), no mode button when a `commandBox` tool is displayed,
   add flow (Life Support entry → variant card → value select in the single
   details panel), add-box rows are click-to-select (not draggable — catalogue
-  drag was stripped for the movement restart, locked by the svelte unit test
-  `console.test.ts` `getAttribute('draggable')` → null), add-box click selects
-  an entry (add panel + details show the entry).
+  drag was stripped for the movement restart, locked by `console.spec.ts`).
 - `e2e/drag-invariants.spec.ts` (1): movement stripped — locks the static
   edit-mode layout (5 top tools, no empty toolbars/tracks).
 - `e2e/drag-highlight.spec.ts` (1): dragging a tool highlights a free
   item-space DZ (left border — the centered console panel covers the top
   toolbar's right-hand tools; hovers a tool, never a zero-size gap; steps
   the pointer; JS-clicks the Terminal button since edit guards cover it).
-- `e2e/smoke.spec.ts` (1) + `e2e/vanilla.spec.ts` (1, vanilla-only smoke):
+- `e2e/smoke.spec.ts` (1) + `e2e/vanilla.spec.ts` (vanilla-only smoke):
   heading + IDE chrome + combobox + work-zone on first paint.
-- Both demos run the **same** shared suite (`svelte` on `:4173`,
-  `vanilla` on `:4174`, plus a `vanilla-smoke` project for the vanilla-only
-  spec): 35 passed (17 svelte + 17 vanilla + 1 smoke).
-- E2E lessons: `paletteItemDrag` inspects on `pointerdown`, so tests dispatch
+- Conformance: the suite has since grown well past the Phase 10 gate (adaptive
+  axis specs, dwell, parking, drawer drag, whole-toolbar slide, ship context) —
+  see `docs/testing.md` for the current inventory.
+- E2E lessons: the item drag inspects on `pointerdown`, so tests dispatch
   `pointerdown`/`pointerup` on the guard instead of `click({ force: true })`; keyboard
   shortcut tests must focus `.palette-ide` (tabindex=0) before pressing. Trusted
   Playwright `mouse`/`pointerdown` events carry `isPrimary: false` / `buttons: 0` on
@@ -454,55 +369,59 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   `new DragEvent(..., { dataTransfer })` rejects non-native transfers — catalogue
   tests fire plain `Event`s with a shadowed `dataTransfer` stub instead.
 - Drag-engine fixes found via e2e (see §20): deferred item preview to activation +
-  `$state` proxy re-link + unconditional catalogue seed insert.
+  proxy re-link + unconditional catalogue seed insert.
 - Flake note: toolbar command-box e2e failed once under 11-worker `fullyParallel`
   (result `toBeVisible` timeout; green in 2 full + 3 isolated reruns) — mitigated by
   waiting for `.palette-default-command-popover` before asserting the result (the
   140ms `inline-size` transition delays popover visibility vs. actionability).
 - Gates: `check` 0/0, `lint` clean, `test` 113 pass, `test:e2e` 12 pass, `build` ok.
 
-## 20. Drag-engine `$state` proxy hazards (Phase 10 — found via e2e)
+## 20. Drag-engine proxy hazards (found via e2e — reactive-adapter lesson)
+
+Recorded because every reactive adapter will hit the same class of bug: if the
+adapter **proxies** live layout objects, identity comparisons inside a drag
+session silently break. Core compares objects by `===`, so a proxied border is
+never the plain border.
 
 - `createItemDragging` detaches the item on `pointerdown` but defers the re-insertion
-  preview to drag activation (`onActivate` in `paletteItemDrag`): previewing on the
-  still-plain session object stores the live source toolbar in the preview, and the
-  subsequent `palettes.dragging = dragging` `$state` assignment breaks the shared
-  ephemeral border/track references — the next move's preview no-ops
-  (`border.indexOf(track)` misses) while the removal stands, so the item vanishes.
-  A plain click (no activation) restores the item at its origin via `onClick`.
-- Activation re-links the ephemeral shell through the store's own proxies
+  preview to drag activation: previewing on the still-plain session object stores the
+  live source toolbar in the preview, and the subsequent proxying of the session
+  breaks the shared ephemeral border/track references — the next move's preview
+  no-ops (`border.indexOf(track)` misses) while the removal stands, so the item
+  vanishes. A plain click (no activation) restores the item at its origin.
+- Activation must re-link the ephemeral shell through the store's own proxies
   (`active.track = active.border[0]`, `active.toolbar = track[0].toolbar`) before
-  running `onActivate`: without this, `indexOf` still misses even for the deferred
-  preview (proxied border vs. plain track).
-- Catalogue `onDrop` inserts the session item unconditionally when no preview was
-  committed: the old seed-border `===` guard fails under `$state` proxies even when
-  the session never moved, silently dropping the insert. Double-insert is impossible
-  (`delete palettes.dragging` makes a second drop fall through to the spent MIME
-  path).
+  running the activation callback: without this, `indexOf` still misses even for
+  the deferred preview (proxied border vs. plain track).
+- The catalogue drop inserts the session item unconditionally when no preview was
+  committed: the old seed-border `===` guard fails under proxies even when the
+  session never moved, silently dropping the insert. Double-insert is impossible
+  (a spent session makes a second drop fall through to the MIME path).
+
+**Lesson for new adapters:** keep core-owned layout objects unproxied, or route
+all identity checks through core helpers rather than through proxied references.
 
 ## 14. Tooling conventions
 
-- Lint/format: `pnpm lint` / `pnpm lint:fix` (Biome — tabs, single quotes, `asNeeded`
-  semicolons, width 100; Svelte via `html.experimentalFullSupportEnabled`).
-- Type-check: `pnpm check` (`svelte-kit sync && svelte-check`).
-- Unit: `pnpm test` (Vitest, jsdom, `resolve.conditions: ['browser']` for Svelte client build).
-- E2E: `pnpm test:e2e` (Playwright, builds + previews on port 4173).
+- Lint/format: `pnpm lint` / `pnpm lint:fix` (Biome — tabs, single quotes,
+  `asNeeded` semicolons, width 100).
+- Type-check: `pnpm check` (per-package `tsc --noEmit`, via `pnpm --recursive`).
+- Unit: `pnpm test` (Vitest — `core` runs in `node`, adapters in `jsdom`).
+- E2E: `pnpm test:e2e` (Playwright dev server on `:4174`).
 - Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
 
 ### Gotchas (recorded)
 
-- Run `svelte-kit sync` before Vitest — the generated `.svelte-kit/tsconfig.json` is required by
-  the resolver (`tsconfig not found`).
-- Vitest must set `resolve.conditions: ['browser']`, else Svelte resolves to its server build and
-  `mount()` throws `lifecycle_function_unavailable`.
 - Biome 2.x has no `files.ignores`; exclusions are `!`-prefixed entries in `files.includes`.
+- A `vite` dev server started **before** a `core` change serves stale code and
+  produces phantom e2e failures — restart it before measuring.
 
 ## 21. `@palettable/core` — headless package
 
-`packages/core` is the framework-agnostic headless layer. `packages/vanilla` and
-`packages/svelte` are the two DOM adapters; both import core, never the reverse.
-See `plans/mitosis.md` for the remaining migration work (Phases 2–7) and the
-per-module disposition.
+`packages/core` is the framework-agnostic headless layer. Every adapter
+(`packages/vanilla` today; `packages/vue` and `packages/svelte` in
+`plans/extraction.md` Phases 11–12) imports core, never the reverse and never
+each other. Core stays DOM-free and demo-free.
 
 ### DOM-free rule — **decided: strictly DOM-free, compiler-enforced**
 
@@ -523,7 +442,7 @@ but a build guarantee:
   `clearHostTimeout`.
 - Consequence for Phase 2: `drag-session.ts` (`HTMLElement`, pointer events) does
   **not** move into core. Drag sessions live in the adapters (`packages/vanilla`,
-  `packages/svelte`); core exposes only structural commits
+  `packages/vanilla`); core exposes only structural commits
   (`PaletteLayoutTree.moveItem` / `moveToolbar` / `insertItem` / `removeItem`).
 
 ### Core contracts
@@ -546,12 +465,11 @@ but a build guarantee:
   resolved via `PaletteCore.resolveTargetVirtual`), but its lifetime is the
   spec — no registry entry, no id-collision check.
 - **Layout is pure data.** `PaletteLayoutTree` holds borders / tracks / toolbars /
-  items and emits a fresh v2 `SerializedLayout` snapshot per mutation via
+  items and emits a fresh `SerializedLayout` snapshot per mutation via
   `subscribe`. Two structurally different forms exist and must not be conflated:
   a **serialized** region is a *nested* track list (track boundaries are
-  persisted), a **live** region is a list of *tracks*. `version: 2` is the
-  current marker (`version: 1` = legacy flat slot list, read-only back-compat:
-  each slot hydrates as its own single-slot track); a live layout carries no
+  persisted), a **live** region is a list of *tracks*. `version: 1` is the
+  marker; a live layout carries no
   `version` marker, so the marker discriminates serialized from live. Cloning
   preserves track boundaries. Preset/demo layouts are live `Borders` — pass
   them directly, never via `.flat()`/serialized (that drops boundaries).
@@ -615,7 +533,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `draggingEmptiesTrackIndex`, `draggingWholeParkingRow`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `commitDraggedToDrawer`), and the pure gap-highlight decisions (`borderStackHighlight`, `itemSpaceHighlight`, `trackSpaceHighlight`, `parkingFlanks` / `stackFlanks` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
 | `drag.ts` | drag session (`GrabTarget` / `Hoverable` / `DropZone` / `PointerSample` / `SlideFrame` / `ToolbarDrag` + `createToolbarDrag`): `Hoverable` in, `DragEvent` out (`highlight` diffs + `slide` / `clearSlide` / `resize` + `structure` ops, emission order structure → highlight → slide); owns the paint baseline, the dwell timer (`configuration.stackDzHoverMs`), the slide frame + pending split, and the catalog `catalogPending` creation — delegates decisions + commits to the `layout.ts` engine via the injected `DragEngine` (no module cycle); `isWholeToolbar` / `mode` stay session-internal |
-| `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
+| `controls.ts` | `PointFamily`, `ControlCapability`, `ControlChoice`, `familyOfPoint`, `controlChoicesFor` |
 | `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
 | `virtual.ts` | `enum-from` derived points (option key ↔ source value, `Object.is` matching) |
 | `errors.ts` | `PaletteError` + `PaletteWriteError` (thrown by locked-bag `set`/`setTree`; adapters catch for UI feedback) |
@@ -623,13 +541,13 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` one-shot SSR/hydration fill, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunStep` (bounds-checked step `can`, strict on skeleton), sync `run` (strict setter/toggle/step on skeleton; number steps clamped to min/max), context registry (`setContext`/`removeContext` replace-never-append via forward map, root name throws, `getBag`/`resolveBags` accept `ROOT_CONTEXT`/`'root'` alias, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners). No `resetAll` (consumer `setMany` round-trip). |
 | `palette.ts` | `ServerPointDescriptor` (action/valued/nothing — no `run`, no functional `can`) + `to/fromServerDescriptor` (action rebuild by name via `runners`; nothing-points round-trip), `validateInitialValues` (rejects actions + nothing-points), `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
 | `command-box.ts` | `paletteCommandEntries` (toggle + step `can` bounds-aware from values context, lenient without) / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
-| `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
-| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config; skeleton-propagating: `toggle.pressed`, `select.value`, `slider.value` are `undefined` when absent — no `false`/`0`/`''` coercion), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from display helper (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
+| `console.ts` | `ConsoleStore` (open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; adapters wrap it in their own reactivity) |
+| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config; skeleton-propagating: `toggle.pressed`, `select.value`, `slider.value` are `undefined` when absent — no `false`/`0`/`''` coercion), `resolveControl` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from display helper (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
 | `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`umd`). Drawer children resolve to `ResolvedDrawerSlot[]` (one track, recursive, depth-bounded as `children`) |
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`ROOT_CONTEXT` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
 | `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
-| `styles/palette.css` | layout + edit chrome (Phase 6, verbatim from svelte; global selectors unchanged) |
-| `theme/head-default.css` | dark base + light override (Phase 6, verbatim from svelte; stay in sync per `docs/theming.md`) |
+| `styles/palette.css` | layout + edit chrome (Phase 6, extracted verbatim; global selectors unchanged) |
+| `theme/head-default.css` (`head-dark.css`, `head-light.css`) | dark base + light override (Phase 6, extracted verbatim; stay in sync per `docs/theming.md`) |
 
 ### Phase 7 status (SSR render model — landed 2026-09-14)
 
@@ -639,7 +557,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 - `resolveRenderTree()` — pure, synchronous, allocation-explicit resolver:
   definitions + virtuals + layout + values → `ResolvedPalette` (canonical
   point id, descriptor without `run`/`can` closures, value / enum-from key,
-  single editor variant id + capabilities, keystrokes,
+  single control id + capabilities, keystrokes,
   drawer children recursive depth-bounded by `RENDER_MAX_DEPTH = 8`).
   Guarantees: no subscriptions, no timers, no `run()`, no `set()`, no DOM;
   same input → `JSON.stringify`-identical output (golden test).
@@ -659,7 +577,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
   hydration round-trip (server → serialize → client → identical output),
   action isolation (throwing `run` never called, descriptor has no `run`),
   config-pinning, import-graph, codecs.
-- Virtuals resolve against an `enum` family-point stand-in so `resolveEditorVariant` agrees server/client.
+- Virtuals resolve against an `enum` family-point stand-in so `resolveControl` agrees server/client.
 
 ### Phase 8 status (context — landed 2026-09-14)
 
@@ -699,8 +617,8 @@ adapter work, step 9 is this doc):
 
 ### Phase 9 status (optimization — landed 2026-09-14)
 
-Internal cleanup, no API-surface changes, no new modules, `packages/svelte/src`
-untouched. Net: −2 files (`context-display-types.ts` folded,
+Internal cleanup, no API-surface changes, no new modules, no adapter edits.
+Net: −2 files (`context-display-types.ts` folded,
 `liveToSnapshot`/`liveItemToSerialized` deleted), −2 dead methods
 (`store.getOr`/`update`), −1 dead field (`snapshotPalette.points?`), −1 dead
 map (`bagForwards`):
@@ -716,7 +634,7 @@ map (`bagForwards`):
   `trackGapMinGrow` floor (`Math.max(slot.space, gapFloor)`) instead of
   `void config` — the pinning test asserts the floor applies and ignores
   later singleton mutations. `trackGapSplit` stays adapter-side
-  (`insertToolbar` param, svelte `ToolbarTrack`/`layout.svelte.ts` readers).
+  (`insertToolbar` param, adapter track renderers).
 - Allocations: `points` / `virtualPoints` getters cache (invalidated on
   `defineVirtual` / `removeVirtual`); test updated to cached-identity +
   invalidation. Listener `[...set]` snapshot iteration kept deliberately —
@@ -730,32 +648,32 @@ map (`bagForwards`):
   `removeContext` / `dispose` rely on `clearListeners()` (the forward was
   stored but never invoked as a subscription).
 
-### Phase 10 status (vanilla demo parity — landed 2026-09-14)
+### Phase 10 status (reference demo + first conformance gate — landed 2026-09-14)
 
-First parity gate: the vanilla demo is the **same** Stellar Outpost demo as
-the svelte one, and both run the **same** `tests/e2e/` suite
-(`playwright.config.ts`: `svelte` on `:4173`, `vanilla` on `:4174`, plus a
-`vanilla-smoke` project for the vanilla-only spec). `packages/svelte/src`
-untouched. Net: +4 files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`,
-`demo/palette.ts`), demo rewritten (`demo/main.ts`), 2 stale drag specs
-retired, 33 e2e green (16 + 16 + 1 smoke):
+First conformance gate: the reference demo renders the Stellar Outpost demo and
+satisfies `tests/e2e/` — the suite every adapter must pass. One Playwright
+project per adapter demo, each on its own port (the reference demo is at
+`:4174`, plus a `vanilla-smoke` project for the vanilla-only spec). Net: +4
+files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`, `demo/palette.ts`), demo
+page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
 
-- `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (mitosis
-  Phase 2 split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases;
+- `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (the Phase 2
+  split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases;
   Plus-key aware — lone `'+'` / trailing `'+'` (`'Shift++'`) name the Plus
   key, not a separator, and `'Shift+='` folds to `'+'`), `keystrokeFromEvent`
   (Shift consumed producing a symbol: `Shift+=` / numpad `+` both resolve to
   `'+'`; Shift-letter stays distinct), `createVanillaKeys` (normalized map +
   `findByTool` + `resolve`), `isEditableTarget`. Covered in `keys.test.ts`
   (5 tests).
-- `vanilla/src/head.ts` — plain-DOM head editors mirroring the svelte head +
-  demo overrides: `renderButton/Toggle/Select/Segmented/Slider(showValue
-  badge)/Stepper/Stars(radiogroup)/Status/CommandBox/Drawer` + `renderHeadItem`
-  dispatch + `surfaceForRegion`. Drawer: icon-only trigger (label never
-  rendered as text — accessible name + tooltip only), chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}` +
-  `data-placement=center` + role dialog, body-portaled overlay, Escape closes
+- `vanilla/src/head.ts` — the plain-DOM head: `renderButton/Toggle/Select/
+  Segmented/Slider(showValue badge)/Stepper/Stars(radiogroup)/Status/
+  CommandBox/Drawer/Theme` + `renderHeadItem` dispatch + `surfaceForRegion`.
+  Drawer: icon-only trigger (label never rendered as text — accessible name +
+  tooltip only), chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}`
+  + `data-placement=center` + role dialog, body-portaled overlay, Escape closes
   + focus trigger. CommandBox: `command-box-combobox/input/results` testids,
-  ✎ open-editor button → console edit mode, Enter runs first filtered entry.
+  ✎ open-configurator button → console edit mode, Enter runs first filtered
+  entry.
 - `vanilla/src/ide.ts` — `createIDE(container, options)` per the Phase 10
   interface note: adds `palette-ide` + tabindex + `data-palette-id`, wraps
   existing children (work-zone) in `palette-ide-middle > palette-ide-center`,
@@ -773,8 +691,8 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   container) so shortcuts fire even when focus is outside the IDE (body, demo
   chrome); typing still wins via `isEditableTarget`, consumed events via
   `defaultPrevented`, teardown on `dispose()`. Subscribes values/layout/console.
-- `vanilla/demo/palette.ts` — plain-data port of the svelte demo: same 15
-  points (incl. `console` toggle point), same `demoKeys`, same 3 configs
+- `vanilla/demo/palette.ts` — the demo's point definitions: the 15 colony
+  points (incl. a `console` run point), `demoKeys`, the 3 configs
   (`rw-combobox` / `rw-command-first` / `ro-combobox`) + layouts, `demoState`
   + `resetColony`/`isColonyDirty`.
 - `vanilla/demo/main.ts` — parity page: demo-bar (heading, 3 mode buttons,
@@ -783,16 +701,15 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   hint), `core.values` → `demoState` sync + theme + mm:ss clock, `localStorage`
   persistence (`palettable-demo-layout-v1` + `validateSerializedLayout`).
 - E2E: the 2 catalogue-drag specs were stale (movement stripped for restart —
-  it is specced in `docs/movements.md`; svelte unit `console.test.ts` asserts
-  rows are click-to-select, zero `draggable=` in `src`). Replaced with
-  click-to-select assertions; both demos green on the same suite. This unlocks
-  Phase 11, not Phase 12.
+  it is specced in `docs/movements.md`; rows are click-to-select, zero
+  `draggable=` in `src`). Replaced with click-to-select assertions; the suite is
+  green. This unlocks Phase 11, not Phase 12.
 - Drag sessions landed (2026-09-15): `vanilla/src/drag-session.ts`
   (`startDragSession` — window move/up, blur/cancel/hidden cleanup, no pointer
   capture so hover targets stay live) + `slide.ts` (`toolbarSlideBounds` /
   `clampSlideDelta` / `toolbarGrabOffset` — adapter-owned, needs
   `getBoundingClientRect`; single-copy rule with the release `resizeToolbar`
-  commit) + `add-item.ts` (`itemFromAddSelection` via `resolveEditorVariant`).
+  commit) + `add-item.ts` (`itemFromAddSelection` via `resolveControl`).
   `ide.ts` wires `pointerdown` → `startSession` (tool vs whole-toolbar grab),
   `pointermove` → `GapDwell` → `commitDraggedTo*` + `syncGapClasses`, rAF loop
   (`latestPointer` + `Set<callback>` drained/cleared per frame →
@@ -800,23 +717,21 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   drag-end `dragDirty` → one `onLayoutChange`. `applyOp` routes ops through
   `diffBorder`/`diffTrack` (per-node create/move/remove + flex in place) and
   repositions open drawers; `patchLive` updates tools in place (full rebuild
-  only on editor-type swap); add-panel insert + delete-refresh wired.
+  only on control-type swap); add-panel insert + delete-refresh wired.
   `syncEditing` re-renders structurally on an editing flip (drag listeners
   bind at render time — the chrome-only `applyEditing` pass adds inspect-only
   guards, so the `diffBorder` path is skipped when the rendered `editing`
   flag disagrees, via `data-editing` on the border element). Item-space hover
   over a tool (not a gap) paints the nearest free flanking gaps
-  (active-item fallback, mirroring the svelte oracle). `startSession` /
-  `endDragSession` mirror the `.dragging` class + `data-dragging` (the
-  `paletteRoot` mirror in svelte).
-  Gates: core `check`/`build`/`test` (242/15) green, vanilla `check`/`test`
-  (22/6) green, `biome check` clean, `test:e2e` 35 passed (incl. the
-  `drag-highlight` tool-drag DZ spec on both demos).
+  (active-item fallback). `startSession` / `endDragSession` mirror the
+  `.dragging` class + `data-dragging`.
+  Gates: core `check`/`build`/`test` green, vanilla `check`/`test` green,
+  `biome check` clean, `test:e2e` green (incl. the `drag-highlight` tool-drag
+  DZ spec).
 
 ### Phase 2 status (landed 2026-09-14)
-`configuration.ts` and the pure track-space math in
-`layout.svelte.ts` now live in core (`configuration.ts`,
-`layout.ts` additions). Notes:
+`configuration.ts` and the pure track-space math now live in core
+(`configuration.ts`, `layout.ts` additions). Notes:
 
 - The hover dwell lives in the drag session (`drag.ts`, timers via the
   `globals.ts` escape hatch so the DOM-free rule stays compiler-enforced):
@@ -824,7 +739,7 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
   `null` hover / `end()`, one-shot latch, retarget, reset — covered by
   `drag.test.ts` session-dwell tests (node, fake timers).
 - `findOwnershipViolations` stays a **core export** (not a test helper):
-  adapters and e2e parity checks reuse the single-ownership invariant at
+  adapters and conformance checks reuse the single-ownership invariant at
   runtime, so one implementation in core beats a copy in each test dir.
 - `insertTrackWithToolbar` was **not** moved: it is a one-line `splice`
   the movement engine (Phase 5) will rebuild against an explicit drag-state
@@ -832,15 +747,12 @@ retired, 33 e2e green (16 + 16 + 1 smoke):
 - `regionDirection` was **not** moved: it maps a region to an adapter
   orientation string (`horizontal` / `vertical`), which is a rendering concern.
   Core's equivalent is `SurfaceContext.axis` (already in `layout.ts`).
-- `removePaletteItem` was **not** moved: it couples item removal to a
-  border/track prune in svelte `PaletteBorder` / `PaletteTrack` terms. The
-  core equivalent is `PaletteLayoutTree.removeItem` (location-based, prunes
-  emptied toolbars/tracks the same way).
+- `removePaletteItem` was **not** moved: it coupled item removal to a
+  border/track prune in the reference adapter's own terms. The core equivalent
+  is `PaletteLayoutTree.removeItem` (location-based, prunes emptied
+  toolbars/tracks the same way).
 - `isEditableTarget` was **not** moved: it touches `HTMLElement` /
   `HTMLInputElement` and stays adapter-owned per the DOM-free rule.
-- Svelte keeps its own copies until Phase 7 (additive-first rule) — the core
-  versions are proven by `phase2.test.ts` (21 node tests) while the svelte
-  reference tests stay green untouched.
 
 ### Packaging
 
@@ -895,7 +807,7 @@ Ownership is no longer split between `core.values` and consumer state:
   probe). Strict paths throw on absent: `run` setter / toggle / step.
   New `require(id)` helper for those.
 - **Skeleton**: `resolveRenderTree({ points, values: {} })` renders every tool
-  (descriptor + editor + keystrokes, `value: undefined`). Presenters propagate
+  (descriptor + control + keystrokes, `value: undefined`). Presenters propagate
   `undefined` (`toggle.pressed`, `select.value`, `slider.value`) instead of
   coercing (`false` / `0` / `''`); vanilla head/IDE render the unset state
   (`aria-pressed="mixed"`, empty select, `min`-parked slider).
@@ -928,7 +840,7 @@ rules, in one place:
   only); the session derives a precise `move-toolbar` op per commit
   (`drag.ts:commitOp`, `from` = pre-mutation origin, `to` = placed toolbar,
   `pruned` = emptied toolbar/track/row victims).
-- **Values never touch the layout.** Each tool editor subscribes per-id
+- **Values never touch the layout.** Each control renderer subscribes per-id
   (`core.values.subscribe(id, …)`) and patches its own node in place
   (`updateToolNode` re-runs the presenter and writes only the changed
   attributes). There is deliberately **no** global

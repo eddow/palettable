@@ -26,8 +26,7 @@ async function openConsole(page: import('@playwright/test').Page) {
 // Dragging a tool onto a track gap must reorganize: pointerdown on an
 // edit-mode guard, hover a neighbouring track's gap, and the dragged tool
 // lands in a fresh singleton toolbar at that gap (commit-on-hover, no
-// highlight — the new toolbar itself is the visual feedback, mirroring the
-// svelte `ToolbarTrack` contract).
+// highlight — the new toolbar itself is the visual feedback).
 //
 // The console panel is centered over the page and covers the top toolbar's
 // right-hand tools, so the test uses the *left* border: guard 0 → the last

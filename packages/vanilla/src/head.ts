@@ -8,8 +8,10 @@
  * Status/commandBox/drawer/theme tools bind nothing-points (1:1 — one tool,
  * one nothing-point whose `uses` names its context); display state comes
  * from the resolved bags, never from `core.values`.
- * Mirrors the svelte default head + the demo
- * overrides (value badge, rating row).
+ *
+ * The shipped default head: one plain-DOM renderer per control id. A demo can
+ * replace a control (same id, richer rendering) or extend the head with a new
+ * id (see `docs/using-the-default-head.md`).
  */
 
 import {
@@ -21,6 +23,9 @@ import {
 	buttonPresenter,
 	canonicalItemPoint,
 	configuration,
+	type DisplayStrings,
+	drawerChildAxis,
+	drawerChildRegion,
 	drawerChildRegionFor,
 	drawerCloseOnClickOf,
 	drawerOpenOf,
@@ -42,7 +47,7 @@ import {
 	togglePresenter,
 	type ValuesBag,
 } from '@palettable/core'
-
+import { type IdeStrings, resolveIdeStrings } from './strings.js'
 import {
 	buttonShellTemplate,
 	commandBoxShellTemplate,
@@ -87,6 +92,13 @@ export type HeadContext = {
 	readonly item: ToolbarItem
 	readonly surface: SurfaceContext
 	readonly region?: PaletteRegion
+	/** Localizable chrome strings (partial — merged over the English default). */
+	readonly strings?: Partial<IdeStrings>
+	/**
+	 * Render-time display dictionaries (optional — every field falls back).
+	 * Chain: item-config field → dictionary → definition field → `humanize(id)`.
+	 */
+	readonly display?: DisplayStrings
 	/** Optional string-glyph resolver: maps an `IconToken` to its rendered
 	 * glyph. `undefined` return (or absent resolver) keeps the token as-is,
 	 * so emoji passthrough is the default. Consumer-owned (e.g. the demo
@@ -94,13 +106,16 @@ export type HeadContext = {
 	readonly iconResolver?: IconResolver
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
-	/** Track an open drawer popup so the adapter can reposition it on layout change. */
+	/** Track an open drawer popup so the adapter can reposition it on layout change.
+	 * The live drawer `ToolbarItem` is the identity: a structural rebuild
+	 * recreates the wrapper/popup nodes, so the adapter re-opens by item. */
 	readonly onOpenDrawer?: (
+		item: ToolbarItem,
 		trigger: HTMLElement,
 		popup: HTMLElement,
 		surfaceAxis: 'horizontal' | 'vertical'
 	) => void
-	readonly onCloseDrawer?: (trigger: HTMLElement) => void
+	readonly onCloseDrawer?: (item: ToolbarItem, trigger: HTMLElement) => void
 	readonly renderToolbar?: (
 		toolbar: Track,
 		axis: 'horizontal' | 'vertical',
@@ -246,10 +261,13 @@ export function drawerCloseChainIndices(chain: readonly DrawerChainEntry[]): rea
 	return chain.slice(0, end + 1).map((_, index) => index)
 }
 
-/** Render a `button` (action) item. */
+/** Render a `button` (action) item. Icon-less buttons keep their label in
+ * flow (no overlay gate, no reserved popout space — `showText: false`
+ * equivalent); icon buttons get the vertical hover overlay via CSS. */
 export function renderButton(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const pointId = pointIdOf(item) ?? ''
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
@@ -257,7 +275,8 @@ export function renderButton(context: HeadContext): HTMLElement {
 		item,
 		{ point, value: undefined, bags },
 		{ kind: 'action', point: pointId },
-		can
+		can,
+		display
 	)
 	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone }),
@@ -281,12 +300,18 @@ export function renderButton(context: HeadContext): HTMLElement {
 export function renderToggle(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = togglePresenter(item, { point, value, bags })
-	const [button, icon] = sel(
+	const view = togglePresenter(item, { point, value, bags }, display)
+	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone, compact: true, pressed: view.pressed }),
-		'.palette-default-icon'
+		'.palette-default-icon',
+		'.palette-default-choice'
 	)
+	// Toggle carries no visible text (icon-only on every axis): drop the
+	// shelled label node so it reserves no gap space and never matches the
+	// vertical button-label overlay `:has(> .palette-default-choice)` gate.
+	label.remove()
 	const btn = button as HTMLButtonElement
 	btn.disabled = !view.can
 	btn.title = view.title
@@ -296,7 +321,7 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	// replay forever, never unticking). Fresh read → run.
 	btn.addEventListener('click', () => {
 		const fresh = boundOf(core, pointIdOf(item))
-		const live = togglePresenter(item, fresh)
+		const live = togglePresenter(item, fresh, display)
 		if (!live.can) return
 		core.run(live.toggle)
 		notifyDrawerItemActivate(btn)
@@ -317,8 +342,9 @@ export function renderToggle(context: HeadContext): HTMLElement {
 export function renderSelect(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = selectPresenter(item, { point, value, bags }, surface)
+	const view = selectPresenter(item, { point, value, bags }, surface, display)
 	const closedLabel = selectClosedLabel(view)
 	const [box, trigger, _chip, toolIcon, valueIcon, label] = sel(
 		selectShellTemplate({
@@ -372,8 +398,13 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	// query clears on close and survives `updateToolNode` syncs while open
 	// (syncs never touch the filter row).
 	if (view.showFilter) {
+		const strings = resolveIdeStrings(context.strings)
 		const [filterWrap, input, empty] = sel(
-			selectFilterShellTemplate({}),
+			selectFilterShellTemplate({
+				placeholder: strings.filterPlaceholder,
+				ariaLabel: strings.filterAriaLabel,
+				emptyText: strings.noMatches,
+			}),
 			'.palette-default-select-filter-input',
 			'.palette-default-command-empty'
 		)
@@ -487,8 +518,9 @@ export function renderSelect(context: HeadContext): HTMLElement {
 export function renderSegmented(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = selectPresenter(item, { point, value, bags }, surface)
+	const view = selectPresenter(item, { point, value, bags }, surface, display)
 	const [group] = sel(
 		segmentedShellTemplate({
 			tone: view.tone,
@@ -541,8 +573,9 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 export function renderSlider(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value, bags }, surface)
+	const view = sliderPresenter(item, { point, value, bags }, surface, display)
 	const [label, icon, input] = sel(
 		sliderShellTemplate({
 			variant: view.variant,
@@ -579,8 +612,9 @@ export function renderSlider(context: HeadContext): HTMLElement {
 export function renderStepper(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value, bags }, surface)
+	const view = sliderPresenter(item, { point, value, bags }, surface, display)
 	const [group, minus, icon, readout, plus] = sel(
 		stepperShellTemplate({ tone: view.tone }),
 		'button:first-of-type',
@@ -598,7 +632,8 @@ export function renderStepper(context: HeadContext): HTMLElement {
 			const live = sliderPresenter(
 				item,
 				{ point, value: liveValue(core, point), bags: core.resolveBags(point?.uses) },
-				surface
+				surface,
+				display
 			)
 			if (live.value === undefined) return
 			core.writeValue(
@@ -630,8 +665,9 @@ export function renderStepper(context: HeadContext): HTMLElement {
 export function renderStars(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = sliderPresenter(item, { point, value, bags }, surface)
+	const view = sliderPresenter(item, { point, value, bags }, surface, display)
 	const [group, icon] = sel(
 		starsShellTemplate({ tone: view.tone, max: view.max }),
 		':scope > .palette-default-icon'
@@ -685,9 +721,10 @@ function nextCycleValue(cycle: Runnable): 'light' | 'dark' | 'system' {
 export function renderTheme(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const value = readThemeSetting()
-	const view = themePresenter(item, { point, value, bags })
+	const view = themePresenter(item, { point, value, bags }, display)
 	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone, compact: true }),
 		'.palette-default-icon',
@@ -713,10 +750,10 @@ export function renderTheme(context: HeadContext): HTMLElement {
 		// refresh the icon in place (theme has no core value subscription —
 		// the document root is the source of truth).
 		const fresh = boundOf(core, pointIdOf(item))
-		const next = themePresenter(item, { ...fresh, value: readThemeSetting() })
+		const next = themePresenter(item, { ...fresh, value: readThemeSetting() }, display)
 		const applied = nextCycleValue(next.cycle)
 		applyThemeSetting(document.documentElement, applied)
-		const synced = themePresenter(item, { ...fresh, value: applied })
+		const synced = themePresenter(item, { ...fresh, value: applied }, display)
 		fillIcon(icon, resolveIcon(synced.valueIcon, resolver))
 		btn.title = synced.title
 	})
@@ -730,8 +767,9 @@ export function renderTheme(context: HeadContext): HTMLElement {
 export function renderStatus(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
 	const resolver = context.iconResolver
+	const display = context.display
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
-	const view = statusPresenter(item, { point, value, bags }, surface)
+	const view = statusPresenter(item, { point, value, bags }, surface, display)
 	const [span, icon] = sel(
 		statusShellTemplate({
 			tone: view.tone,
@@ -783,12 +821,23 @@ export function syncStatusValue(span: HTMLElement, value: string): void {
 export function renderCommandBox(context: HeadContext): HTMLElement {
 	const { core, item } = context
 	const resolver = context.iconResolver
+	const strings = resolveIdeStrings(context.strings)
+	const display = context.display
+	const pointId = pointIdOf(item)
+	const dictHint = pointId !== undefined ? display?.pointHints?.[pointId] : undefined
 	const meta = (item as { config?: Record<string, unknown> }).config ?? {}
+	const hint =
+		typeof dictHint === 'string' && dictHint.length > 0
+			? dictHint
+			: typeof meta.hint === 'string'
+				? meta.hint
+				: strings.searchHint
 	const shellIcon = typeof meta.icon === 'string' ? (resolveIcon(meta.icon, resolver) ?? '⌘') : '⌘'
 	const [box, input, popover, results, openButton, text] = sel(
 		commandBoxShellTemplate({
-			hint: typeof meta.hint === 'string' ? meta.hint : 'Search and run a command',
+			hint,
 			icon: shellIcon,
+			strings,
 		}),
 		'.palette-default-command-input',
 		'.palette-default-command-popover',
@@ -829,11 +878,12 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 		const all = actionableEntries(core.points, {
 			keys: core.keys,
 			values: core.values.asObject(),
+			strings: core.strings,
 		})
 		const entries = filterCommandEntries(all, { free: query })
 		results.textContent = ''
 		if (entries.length === 0) {
-			results.append(elementFromHtml(commandEmptyTemplate('No matching commands')))
+			results.append(elementFromHtml(commandEmptyTemplate(strings.noMatchingCommands)))
 			return
 		}
 		for (const entry of entries.slice(0, 8)) {
@@ -869,6 +919,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 			const all: readonly ActionableEntry[] = actionableEntries(core.points, {
 				keys: core.keys,
 				values: core.values.asObject(),
+				strings: core.strings,
 			})
 			const first = filterCommandEntries(all, { free: input.value })[0]
 			if (first) core.run(first.run)
@@ -891,7 +942,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
  * `--region` (center-seeked at open time: left→right, right→left,
  * top→down, bottom→up). The popup stamps its own `--layout` (child axis)
  * + `--region` (content half for inner tools).
- * Trigger behavior follows `config.open` (svelte `DrawerEditor` parity):
+ * Trigger behavior follows `config.open`:
  * `toggle` toggles on primary-button pointerdown (default) plus a keyboard
  * `click` fallback (`event.detail === 0` — pointerdown never fires for
  * Enter/Space), `hover` opens on mouseenter and schedules close on
@@ -907,13 +958,28 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 export function renderDrawer(context: HeadContext): HTMLElement {
 	const { item, surface } = context
 	const resolver = context.iconResolver
+	const strings = resolveIdeStrings(context.strings)
+	const display = context.display
 	const openMode = drawerOpenOf(item)
 	const config = ((item as { config?: Record<string, unknown> }).config ?? {}) as Record<
 		string,
 		unknown
 	>
-	const label = typeof config.label === 'string' ? config.label : ''
-	const hint = typeof config.hint === 'string' ? config.hint : undefined
+	const pointId = pointIdOf(item)
+	const dictLabel = pointId !== undefined ? display?.pointLabels?.[pointId] : undefined
+	const dictHint = pointId !== undefined ? display?.pointHints?.[pointId] : undefined
+	const label =
+		typeof dictLabel === 'string' && dictLabel.length > 0
+			? dictLabel
+			: typeof config.label === 'string'
+				? config.label
+				: ''
+	const hint =
+		typeof dictHint === 'string' && dictHint.length > 0
+			? dictHint
+			: typeof config.hint === 'string'
+				? config.hint
+				: undefined
 	const tone = config.tone === 'accent' ? 'accent' : 'neutral'
 	// Static trigger shell (templates.ts): icon + chevron + a11y attrs.
 	// The label is never rendered as visible text (icon-only trigger on
@@ -927,13 +993,14 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 			tone,
 			icon: typeof config.icon === 'string' ? resolveIcon(config.icon, resolver) : undefined,
 			open: openMode,
+			fallback: strings.moreFallback,
 		})
 	)
 	if (!(trigger instanceof HTMLButtonElement)) throw new Error('drawer trigger shell missing node')
 	const chevron = trigger.querySelector('.palette-default-drawer-chevron')
 
-	const childAxis = surface.axis === 'vertical' ? 'horizontal' : 'vertical'
-	const childRegion: PaletteRegion = childAxis === 'vertical' ? 'left' : 'top'
+	const childAxis = drawerChildAxis(surface.axis === 'vertical' ? 'vertical' : 'horizontal')
+	const childRegion: PaletteRegion = drawerChildRegion(childAxis)
 	// The wrapper is purely structural (positioning anchor + flex item):
 	// it stamps NO region and NO axis. Region/axis on the wrapper would
 	// accumulate down the tree (classes don't override) and leak stale
@@ -965,7 +1032,7 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		popup.style.setProperty('--region', childRegion)
 		trigger.setAttribute('aria-expanded', 'false')
 		if (chevron) chevron.textContent = '▸'
-		context.onCloseDrawer?.(trigger)
+		context.onCloseDrawer?.(item, trigger)
 	}
 	const openPopup = () => {
 		// Depth = nesting level (1 = top-level drawer, 2 = nested, …):
@@ -1022,7 +1089,7 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 			popup.style.setProperty(
 				'--region',
 				drawerChildRegionFor(
-					surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+					surface.axis === 'horizontal' ? 'horizontal' : 'vertical',
 					surface.axis === 'horizontal' ? triggerCenterX : triggerCenterY,
 					surface.axis === 'horizontal' ? ideCenterX : ideCenterY
 				)
@@ -1034,7 +1101,7 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		trigger.setAttribute('aria-expanded', 'true')
 		if (chevron) chevron.textContent = '▾'
 		if (surface.axis !== 'both') {
-			context.onOpenDrawer?.(trigger, popup, surface.axis)
+			context.onOpenDrawer?.(item, trigger, popup, surface.axis)
 		}
 	}
 	trigger.addEventListener('click', (event) => {
@@ -1273,6 +1340,7 @@ export type PreviewCore = {
 	subscribeDefinitions(listener: (pointId: string) => void): () => void
 	run(runnable: Runnable): void
 	readonly keys: import('@palettable/core').KeyBindings
+	readonly strings: import('@palettable/core').CatalogStrings
 }
 
 /**
@@ -1353,6 +1421,7 @@ export function createPreviewCore(
 			applyPreviewSpec(live, values.get, setLocal, runnable)
 		},
 		keys: { ...(live.keys ?? {}) },
+		strings: live.strings,
 	}
 	return { core, setLocal }
 }

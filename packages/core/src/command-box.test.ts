@@ -59,9 +59,7 @@ describe('paletteCommandEntries', () => {
 			'Set Theme to Light'
 		)
 		expect(entries.find((entry) => entry.id === 'theme:set:"light"')?.meta).toBe('T')
-		expect(entries.find((entry) => entry.id === 'fontSize:inc:1')?.label).toBe(
-			'Increase Font Size'
-		)
+		expect(entries.find((entry) => entry.id === 'fontSize:inc:1')?.label).toBe('Increase Font Size')
 		expect(entries.find((entry) => entry.id === 'notifications:toggle')?.label).toBe(
 			'Toggle Notifications'
 		)

@@ -13,15 +13,9 @@ export default defineConfig({
 	use: {
 		trace: 'on-first-retry',
 	},
-	// One project per demo, both running the same specs (mitosis parity
-	// target). The vanilla demo is at parity now, so both projects run the
-	// shared suite; the vanilla smoke spec is vanilla-only.
+	// Vanilla demo on :4174, plus a `vanilla-smoke` project for the
+	// vanilla-only spec.
 	projects: [
-		{
-			name: 'svelte',
-			use: { baseURL: 'http://localhost:4173' },
-			testIgnore: [/vanilla\.spec\.ts/, /ship-context\.spec\.ts/],
-		},
 		{
 			name: 'vanilla',
 			use: { baseURL: 'http://localhost:4174' },
@@ -34,11 +28,6 @@ export default defineConfig({
 		},
 	],
 	webServer: [
-		{
-			command: 'pnpm build:svelte && pnpm preview:svelte',
-			url: 'http://localhost:4173',
-			reuseExistingServer: !process.env.CI,
-		},
 		{
 			// Vanilla has no `vite build` demo bundle (its `build` is the
 			// rollup library), so e2e serves the vite dev server (:4174).
