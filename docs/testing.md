@@ -8,20 +8,20 @@ Run: `pnpm --filter @palettable/core test`. Config:
 
 | File | Covers |
 | ---- | ------ |
-| `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/action forms) + `PointTarget` (`isInlineSpec`, `canonicalSpecId`) |
-| `src/keys.test.ts` | `findKeystrokesFor` (spec-prefix match) + `findKeystrokesForTarget` (inline targets by own id) + `PaletteError` name |
+| `src/specs.test.ts` | `parsePointSpec` / `canonicalPointId` (setter/toggle/step forms) + `PointTarget` (`isInlineSpec`, `canonicalSpecId`) |
+| `src/keys.test.ts` | `findKeystrokesFor` (canonical-id match) + `findKeystrokesForTarget` (inline targets by own id) + `PaletteError` name |
 | `src/points.test.ts` | `isActionPoint` / `isValuedPoint` guards + null-safety |
 | `src/store.test.ts` | `PaletteStateStore` hydration, `Object.is` no-op, notify/unsubscribe, throwing-listener isolation, `setTree` batching |
 | `src/palette.test.ts` | `initialValues` / `setMany` validation + batching, `ServerPointDescriptor` round-trip + action rebuild by name (+ nothing-point round-trip), `readSetterValue` (strict coercion: blank/∞ boolean-token → throw), `resolveEditablePoint` / `readActionCan` (functional), `uses` contract, `PaletteWriteError` |
-| `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, `computeStashTransition`, source resolution |
+| `src/virtual.test.ts` | `assertValidVirtual`, enum option matching, source resolution |
 | `src/layout.test.ts` | `defaultLayoutFromPoints`, `validateSerializedLayout` (version/regions/items/inline tools), tree construction/clone, `moveItem`/`moveToolbar` (incl. the `from?`/`to?` op convention + prune cascade), `insertItem`/`removeItem`, subscribe/`subscribeOps`/`clearListeners`, the `DraggingState` veto predicates + drag modes, the track/stack/parking/item-space commits, the pure gap-highlight decisions, the core drag engine (`dragStart` origin resolution + whole-toolbar flag, `dragOver` paint/commit per element kind incl. dark-gap no-move + editing-off dark), inline-virtual snapshot round-trip |
 | `src/controls.test.ts` | `familyOfPoint`, `controlChoicesFor` (axis filter, defaults, nothing-point items) |
-| `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/actions/virtuals/stash), `canRunAction` (bounds-checked, step-aware) + `run` clamping at min/max, `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
-| `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog incl. bounds-aware inc/dec `can`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
+| `src/core.test.ts` | `PaletteCore` registry, `values` store (raw, virtual-unaware), sync `run` (setters/toggles/steps/virtuals), `canRunStep` (bounds-checked) + `run` clamping at min/max, `resolveTargetVirtual` (registered + inline), `subscribeLayout`, `resetAll`, `dispose` |
+| `src/command-box.test.ts` | builders (`paletteCommandEntries` run/catalog incl. toggle + bounds-aware step `can`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteEnumSubsetValues`), query model (`tokenizeQuery`/`trimLastToken`/`filterCommandEntries`/`suggestCommandKeywords`/`parseCommandInput`/availability) |
 | `src/console.test.ts` | `ConsoleStore` open/close/toggle + add-state + listeners, `consolePointDescriptor` |
-| `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveControl` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from/stash display helpers |
+| `src/presenters.test.ts` | `axisForRegion`/drawer rules, `resolveControl` fallback chain, button/toggle/status/select/slider view-models, configurator pure parts, enum-from display helper |
 | `src/phase2.test.ts` | track-space math, `canonicalItemTool` (incl. inline ids) / `itemFingerprint`, ownership, `configuration` |
-| `src/render.test.ts` | Node-only import (no timers), golden render model (byte-identical + JSON round-trip), values/descriptors/controls/keystrokes, virtuals (enum-from key/setter/stash pressed), drawers (recursion + depth bound), version/unknown-point rejection, hydration round-trip, action isolation, config-pinning, import-graph + determinism, value codecs |
+| `src/render.test.ts` | Node-only import (no timers), golden render model (byte-identical + JSON round-trip), values/descriptors/controls/keystrokes, virtuals (enum-from key/setter), drawers (recursion + depth bound), version/unknown-point rejection, hydration round-trip, action isolation, config-pinning, import-graph + determinism, value codecs |
 | `src/context.test.ts` | `ValuesBag` (frozen get, `setTree` batching, per-key notify, lock → `PaletteWriteError`, `asObject`), `NothingPoint` guards + `initialValues`/`setMany` rejection, core registry (`setContext` replace / `removeContext` / root `getBag('')` / `resolveBags` / `subscribeContext` / `evaluateCan` / `subscribeCan` flips-only / `dispose`), `dualSourceValue` + param-array accessors, `buttonPresenter` functional `can` |
 
 Gotchas:

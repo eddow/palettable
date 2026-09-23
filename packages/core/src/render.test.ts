@@ -60,7 +60,6 @@ const registry: ControlRegistry = {
 }
 
 const virtuals = [
-	{ id: 'pause', label: 'Pause', source: 'fontSize', kind: 'stash', stashedValue: 0 },
 	{
 		id: 'preset',
 		label: 'Preset',
@@ -121,7 +120,7 @@ describe('golden render model', () => {
 			virtuals: core.virtualPoints,
 			layout: core.layout.getSnapshot(),
 			values: core.values.asObject(),
-			keys: { 'Ctrl+S': 'save' },
+			keys: { 'Ctrl+S': { kind: 'action', point: 'save' } as const },
 			controls: registry,
 		}
 		const first = resolveRenderTree(input)
@@ -142,7 +141,7 @@ describe('golden render model', () => {
 			virtuals: core.virtualPoints,
 			layout: defaultLayoutFromPoints(['theme', 'flag', 'save']),
 			values: core.values.asObject(),
-			keys: { 'Ctrl+S': 'save' },
+			keys: { 'Ctrl+S': { kind: 'action', point: 'save' } as const },
 			controls: registry,
 		})
 		const items = tree.borders.top.slots[0]?.toolbar.items ?? []
@@ -157,7 +156,7 @@ describe('golden render model', () => {
 		expect(items[2]?.keystrokes).toEqual(['Ctrl+S'])
 	})
 
-	it('resolves virtuals: enum-from key, setter key, stash pressed-state', () => {
+	it('resolves virtuals: enum-from key', () => {
 		const core = new PaletteCore(points(), {
 			initialValues: { fontSize: 10 },
 			virtuals: [...virtuals],
@@ -165,7 +164,7 @@ describe('golden render model', () => {
 		const tree = resolveRenderTree({
 			points: core.points,
 			virtuals: core.virtualPoints,
-			layout: defaultLayoutFromPoints(['preset', 'preset=fast', 'pause']),
+			layout: defaultLayoutFromPoints(['preset']),
 			values: core.values.asObject(),
 			controls: registry,
 		})
@@ -173,9 +172,6 @@ describe('golden render model', () => {
 		expect(items[0]?.pointId).toBe('preset')
 		expect(items[0]?.value).toBe('fast')
 		expect(items[0]?.control).toBe('select')
-		expect(items[1]?.value).toBe('fast')
-		expect(items[2]?.pointId).toBe('pause')
-		expect(items[2]?.value).toBe(false)
 	})
 
 	it('resolves drawers recursively with children', () => {
@@ -286,7 +282,7 @@ describe('hydration round-trip', () => {
 			values: server.values.asObject(),
 			virtuals: server.virtualPoints,
 		})
-		// Stash aside slots stay excluded from the snapshot by decision.
+		// Virtuals travel in the snapshot (no aside slots exist anymore).
 		expect(Object.keys(snapshot)).toEqual(['layout', 'values', 'virtuals', 'configuration'])
 		const wire = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot
 		const client = new PaletteCore(points(), {

@@ -603,7 +603,7 @@ class CoreToolbarDrag implements ToolbarDrag {
 			return
 		}
 		const decision = this.engine.dragOver(this.session, live, element, pointer, true)
-		const zones = this.decisionDropZones(decision)
+		let zones = this.decisionDropZones(decision)
 		// Every hover resolving inside a border track *additionally*
 		// paints that track's two flanking stack gaps (emptied veto applies).
 		this.addTrackFlanks(hover, zones)
@@ -611,12 +611,29 @@ class CoreToolbarDrag implements ToolbarDrag {
 		// paint them in the same pass. A commit resets the paint baseline with
 		// no `off` emissions: the adapter rebuilds the affected subtree, so the
 		// fresh DOM carries no paint and the diff below re-emits `on`.
+		//
+		// The pre-commit `zones` name gap indices read against the pre-prune
+		// layout (same-toolbar moves shift by `removedBefore`, extractions
+		// shift later slots by ±1, pruned tracks/rows drop the hover target
+		// entirely) — re-emitting them paints a dark or neighbouring gap.
+		// So after a commit the paint is re-derived from the dragged tool's
+		// live position (a `tool` hover is paint-only, never a second
+		// commit): the fresh toolbar sits under the cursor, and the engine
+		// paints the free gaps around it.
+		let paintHover: Hoverable = hover
 		if (decision.moved) {
 			this.emit({ type: 'structure', op: this.commitOp(originBefore, originToolbar, originTrack) })
 			this.afterStructure()
+			const repainted = this.repaintAfterCommit()
+			if (repainted !== undefined) {
+				zones = repainted.zones
+				paintHover = repainted.hover
+			} else {
+				zones = new Map()
+			}
 		}
-		this.paintZones(zones, hover)
-		this.armDwell(hover)
+		this.paintZones(zones, paintHover)
+		this.armDwell(paintHover)
 		this.updateSlide(sample)
 	}
 
@@ -803,9 +820,13 @@ class CoreToolbarDrag implements ToolbarDrag {
 				if (!isSlide && !live.parking.includes(originToolbar)) {
 					pruned.push({ kind: 'row', toolbar: originToolbar, from: originBefore })
 				}
+			} else {
+				// Drawer: detect pruned origin toolbar (emptied non-last
+				// bars prune; the last persists empty, so no track victims).
+				if (!isSlide && toolbarLocationOf(originToolbar, live) === undefined) {
+					pruned.push({ kind: 'toolbar', toolbar: originToolbar, from: originBefore })
+				}
 			}
-			// Drawer origins never prune (empty drawer toolbars persist), so
-			// no victim detection for `container: 'drawer'`.
 		}
 
 		// `from` is the pre-mutation origin location (where the dragged tools
@@ -1046,6 +1067,40 @@ class CoreToolbarDrag implements ToolbarDrag {
 			this.afterStructure()
 			this.repaintAfterDwell(target)
 		}
+	}
+
+	/**
+	 * Re-paint after an `over()` commit: re-derive the zones from the
+	 * dragged tool's live position against the post-commit layout and
+	 * diff them on, so the UI is never one event behind. The fresh
+	 * toolbar sits under the cursor, so the repaint hovers it as a
+	 * `tool` — paint-only (the engine's `tool` branch never commits),
+	 * painting the free gaps around the dragged tool (or the neighbour
+	 * edges inside the slide zone). Mirrors `repaintAfterDwell` below.
+	 *
+	 * Returns `undefined` when the repaint cannot resolve (the placed
+	 * toolbar no longer holds the dragged tool) — the caller then paints
+	 * nothing rather than a stale pre-commit gap.
+	 */
+	private repaintAfterCommit(): { zones: Map<string, DropZone>; hover: Hoverable } | undefined {
+		if (this.ended) return undefined
+		const live = this.layout.getLayout()
+		const toolbar = this.session.origin.toolbar
+		const item = this.session.tools[0]
+		if (item === undefined || !toolbar.includes(item)) return undefined
+		const hover: Hoverable = { kind: 'tool', toolbar, item }
+		const element = toDragElement(hover, live)
+		if (element === undefined) return undefined
+		const decision = this.engine.dragOver(
+			this.session,
+			live,
+			element,
+			{ activeItem: toolbar.indexOf(item) },
+			true
+		)
+		const zones = this.decisionDropZones(decision)
+		this.addTrackFlanks(hover, zones)
+		return { zones, hover }
 	}
 
 	/**

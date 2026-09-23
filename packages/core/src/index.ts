@@ -21,8 +21,7 @@
  * - **point** = a data definition: either runnable (an action) or valued (a
  *   value with a restorable default). Points carry no layout.
  * - **virtual point** = an end-user-defined derived point over a source point:
- *   `enum-from` (present any value as an enum / enum subset) or `stash`
- *   (push-aside / pop-back toggle action).
+ *   `enum-from` (present any value as an enum / enum subset).
  * - **tool** = a toolbar-bound control (`ToolbarItem`: a point spec + a
  *   control id + an opaque config payload). Buttons, toggles, selects,
  *   sliders, steppers are tools.
@@ -38,6 +37,7 @@
  *   parent — enforced by adapters, opaque to the core).
  */
 
+export * from './catalog.js'
 export * from './command-box.js'
 export * from './configuration.js'
 export * from './console.js'
@@ -55,7 +55,7 @@ export * from './palette.js'
 export * from './points.js'
 export * from './presenters.js'
 export * from './render.js'
-export * from './specs.js'
+export * from './runnable.js'
 export * from './store.js'
 export * from './type.js'
 export * from './virtual.js'

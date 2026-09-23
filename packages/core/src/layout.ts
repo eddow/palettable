@@ -16,7 +16,7 @@ import { createToolbarDrag, type DragEngine, type GrabTarget, type ToolbarDrag }
 import { PaletteError } from './errors.js'
 import { cloneValue, scheduleMicrotask } from './globals.js'
 import type { IconToken, Unsubscribe } from './identifiers.js'
-import { canonicalSpecId, isInlineSpec, type PointTarget } from './specs.js'
+import { isInlineSpec, type VirtualPoint } from './virtual.js'
 
 /** Listener invoked with a fresh layout snapshot after each structural mutation. */
 export type LayoutListener = (snapshot: SerializedLayout) => void
@@ -73,13 +73,12 @@ export type SurfaceContext = {
 /** Toolbar item bound to a point (a tool). `control` is a control id, `config` opaque. */
 export type ToolToolbarItem<TPoint extends string = string, TControl extends string = string> = {
 	/**
-	 * Binding to the point: a string reference (`id`, `id=value`, `id:action`)
-	 * or an inline virtual definition (`StashDefinition` / `EnumFromDefinition`).
-	 * Inline definitions behave like the same definition registered under
-	 * their `id`, with lifetime scoped to this item. Nothing-points bind by
-	 * plain id (setter/action suffixes and inline virtuals never apply).
+	 * Binding to the point: a plain point id, or an inline virtual
+	 * definition (`EnumFromDefinition`). Inline definitions behave like
+	 * the same definition registered under their `id`, with lifetime
+	 * scoped to this item.
 	 */
-	readonly point: PointTarget<TPoint>
+	readonly point: TPoint | VirtualPoint
 	control?: TControl
 	config?: Record<string, unknown>
 }
@@ -94,7 +93,7 @@ export type DrawerToolbarItem<
 	TPoint extends string = string,
 	TConfig extends Record<string, unknown> = Record<string, unknown>,
 > = {
-	readonly point: PointTarget<TPoint>
+	readonly point: TPoint | VirtualPoint
 	readonly control: 'drawer'
 	readonly toolbar: Track<TPoint>
 	config?: {
@@ -102,7 +101,9 @@ export type DrawerToolbarItem<
 		readonly label?: string
 		readonly hint?: string
 		readonly tone?: string
-		readonly open?: 'click' | 'hover' | 'press'
+		readonly open?: 'hover' | 'toggle'
+		/** Opt-in: command / toggle / segmented activation inside closes ancestors. */
+		readonly closeOnClick?: boolean
 	} & TConfig
 }
 
@@ -151,11 +152,10 @@ export type PaletteLayout<TPoint extends string = string, TControl extends strin
 
 // ── Serialized layout (JSON-safe persistence) ───────────────────────────────
 // `point` mirrors `ToolToolbarItem.point`: a string reference, or an inline
-// virtual definition (`StashDefinition` / `EnumFromDefinition`) carried
-// directly in the serialized item. Inline definitions are full JSON-safe
-// definition objects (`id` + `source` + options / `stashedValue`), so a
-// serialized configuration + points-list rebuilds the run-time structures
-// with no separate virtuals lookup.
+// virtual definition (`EnumFromDefinition`) carried directly in the
+// serialized item. Inline definitions are full JSON-safe definition objects
+// (`id` + `source` + options), so a serialized configuration + points-list
+// rebuilds the run-time structures with no separate virtuals lookup.
 
 export type SerializedToolbarItem = {
 	/**
@@ -680,6 +680,9 @@ export class PaletteLayoutTree {
 			const child = drawerItem !== undefined ? drawerChildTrack(drawerItem) : undefined
 			const [slot] = child?.splice(location.slotIndex, 1) ?? []
 			if (slot === undefined) return undefined
+			// Never leave a drawer with zero bars (no drop target):
+			// keep one empty toolbar behind the moved-away bar.
+			if (child!.length === 0) child!.push({ space: 1, toolbar: [] })
 			return { toolbar: slot.toolbar, pruned: [] }
 		}
 		const border = this.layout.borders[location.region]
@@ -719,9 +722,18 @@ export class PaletteLayoutTree {
 	}
 
 	private pruneEmptyToolbar(location: ToolbarLocation): LayoutPruneVictim[] {
-		// Drawer toolbars persist when emptied: the drawer keeps a single
-		// empty toolbar (one large DZ) instead of disappearing.
-		if (location.container === 'drawer') return []
+		// Drawer child tracks prune like border tracks — except the last
+		// toolbar persists empty (the drawer keeps one empty bar as its
+		// drop target instead of bricking with zero bars).
+		if (location.container === 'drawer') {
+			const drawerItem = location.path[location.path.length - 1]
+			const child = drawerItem !== undefined ? drawerChildTrack(drawerItem) : undefined
+			const victim = child?.[location.slotIndex]?.toolbar
+			if (victim === undefined || victim.length > 0) return []
+			if (child!.length <= 1) return []
+			removeToolbar(child!, victim)
+			return [{ kind: 'toolbar', toolbar: victim, from: location }]
+		}
 		if (location.container === 'parking') {
 			const victim = this.layout.parking[location.toolbarIndex]
 			if (victim !== undefined && victim.length === 0) {
@@ -943,8 +955,8 @@ function serializeItem(item: ToolbarItem): SerializedToolbarItem {
 			})),
 		}
 	// String references serialize as-is; inline virtual definitions serialize
-	// as their full definition object (JSON-safe: `id` + `source` + options /
-	// `stashedValue`), so no separate virtuals lookup is needed on rebuild.
+	// as their full definition object (JSON-safe: `id` + `source` + options),
+	// so no separate virtuals lookup is needed on rebuild.
 	const point =
 		typeof (item as ToolToolbarItem).point === 'string'
 			? (item as ToolToolbarItem).point
@@ -2059,9 +2071,14 @@ function pruneDragOrigin(dragging: DraggingState): void {
 		if (index >= 0) originToolbar.splice(index, 1)
 	}
 	if (originToolbar.length > 0) return
-	// Drawer toolbars persist when emptied (single empty toolbar + one
-	// large DZ) — never pruned, so no slot/track removal here.
-	if (origin.kind === 'drawer') return
+	// Drawer child tracks prune like border tracks — except the last
+	// toolbar persists empty (drop target). The child track itself is
+	// never removed (it is the drawer's content).
+	if (origin.kind === 'drawer') {
+		if (origin.track.length <= 1) return
+		removeToolbar(origin.track, originToolbar)
+		return
+	}
 	if (origin.kind === 'border') {
 		removeToolbar(origin.track, originToolbar)
 		removeEmptyTrack(origin.border, origin.track)
@@ -2083,14 +2100,15 @@ function takeDraggedTools(
 			removeParkedToolbar(dragging.origin.parking, dragging.origin.toolbar)
 		} else {
 			// Drawer slide: relocate the toolbar object itself out of its
-			// child track (no prune victims — the drawer keeps no empty
-			// slot behind a moved-away toolbar).
+			// child track (no prune victims). Never leave zero bars:
+			// keep one empty toolbar behind as the drop target.
 			const track = dragging.origin.track
 			const slot = track.findIndex((entry) => entry.toolbar === dragging.origin.toolbar)
 			if (slot >= 0) {
 				track.splice(slot, 1)
 				prunedSlot = slot
 			}
+			if (track.length === 0) track.push({ space: 1, toolbar: [] })
 		}
 		return { destination: dragging.origin.toolbar, prunedSlot }
 	}
@@ -2356,22 +2374,14 @@ export function commitDraggedToDrawer(
 }
 
 /**
- * Canonical point id for a toolbar item: the string spec's point id
- * (setter `=`/`|` and action `:` suffixes stripped, so `alertLevel`,
- * `alertLevel=red`, and `alertLevel|red` fingerprint as the same point),
- * or the inline definition's own `id`. Every tool is bound, so a missing
- * spec is a malformed item and throws `PaletteError`.
+ * Point id for a toolbar item: the plain point id, or the inline
+ * definition's own `id`. Every tool is bound, so a missing point is
+ * a malformed item and throws `PaletteError`.
  */
 export function canonicalItemPoint(item: ToolbarItem): string {
 	const spec = (item as { point?: unknown }).point
-	if (typeof spec === 'string') {
-		const setter = spec.search(/[=|]/)
-		const colon = spec.indexOf(':')
-		const cut =
-			setter >= 0 && (colon < 0 || setter < colon) ? setter : colon >= 0 ? colon : spec.length
-		return spec.slice(0, cut)
-	}
-	if (spec !== null && typeof spec === 'object') return canonicalSpecId(spec as never) ?? ''
+	if (typeof spec === 'string') return spec
+	if (isInlineSpec(spec)) return (spec as VirtualPoint).id
 	throw new PaletteError('canonicalItemPoint: toolbar item has no bound point')
 }
 

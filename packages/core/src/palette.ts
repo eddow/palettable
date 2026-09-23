@@ -9,18 +9,15 @@
  * action points serialize **by name** — the descriptor carries the action
  * point's `id` (+ `label`/`can`/metadata, no `run`); the client rebinds `run`
  * via the `runners: Record<actionId, run>` argument of
- * `fromServerDescriptor`. Derived actions have **two** serializable forms:
- * a `stash`/`enum-from` virtual registered under its `id` (name-addressable
- * via `runStash(id)` / `run(virtualId)`, rebuilt from serialized config
- * (`KeyBindings` + virtuals list) + the points-list), or an **inline**
- * definition carried directly in the spec (`PointTarget` — already landed
- * in `specs.ts` / `layout.ts` / `keys.ts` / `core.ts`). No closure crosses
- * the wire in either form.
+ * `fromServerDescriptor`. Derived values have **two** serializable forms:
+ * an `enum-from` virtual registered under its `id` (name-addressable via
+ * a runnable whose `point` is the virtual id, rebuilt from serialized
+ * config (`KeyBindings` + virtuals list) + the points-list), or an **inline**
+ * definition carried directly on the toolbar item (`layout.ts` /
+ * `core.ts`). No closure crosses the wire in either form.
  *
  * Custom `TypeConstraints` entries participating in SSR must be
  * `JSON.stringify`-stable (or provide a per-type `ValueCodec`).
- * Stash aside slots stay excluded from the snapshot **by documented decision**
- * (rendering a stash button needs only current-vs-stashed pressed state).
  */
 import { PaletteError } from './errors.js'
 import type { ActionPoint, AnyPoint, AnyValuedPoint, NothingPoint } from './points.js'

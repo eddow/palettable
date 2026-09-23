@@ -1,9 +1,6 @@
 ## TODOs
 
-- isolate demo data for it to be usable by all demos
-- check what lacks to vanilla/core compared to svelette
-- drawer: check "open on press" meaning (I thought, press + button-up on what to launch)
-
-## unresolvables?
-
-### Disable contextual variables when no context given
+- intl
+- we still declare/use `@deprecated` stuff
+- check with mitosis.md if we're ready to vue
+- run button text (if exists): should popout (like sliders) when hovered iif vertical. Note: if non-existant, just make sure no room/popout is made for text (equivalent of `showText=false`)

@@ -16,11 +16,6 @@ export type ConsoleState = {
 	readonly open: boolean
 	readonly mode: ConsoleMode
 	readonly selectedEntryId: string | undefined
-	readonly selectedVariantId: string | undefined
-	readonly booleanValue: string
-	readonly setValue: string
-	readonly enumValues: string
-	readonly enumKeywords: string
 }
 
 export type ConsoleListener = (state: ConsoleState) => void
@@ -29,28 +24,10 @@ const initialConsoleState: ConsoleState = {
 	open: false,
 	mode: 'run',
 	selectedEntryId: undefined,
-	selectedVariantId: undefined,
-	booleanValue: 'true',
-	setValue: '',
-	enumValues: '',
-	enumKeywords: '',
 }
 
-const defaultAddState: Pick<
-	ConsoleState,
-	| 'selectedEntryId'
-	| 'selectedVariantId'
-	| 'booleanValue'
-	| 'setValue'
-	| 'enumValues'
-	| 'enumKeywords'
-> = {
+const defaultAddState: Pick<ConsoleState, 'selectedEntryId'> = {
 	selectedEntryId: undefined,
-	selectedVariantId: undefined,
-	booleanValue: 'true',
-	setValue: '',
-	enumValues: '',
-	enumKeywords: '',
 }
 
 /** Vanilla console state machine + listener set (no runes, no DOM). */
@@ -81,26 +58,14 @@ export class ConsoleStore {
 		else this.open('run')
 	}
 
-	/** Reset the add-to-toolbar UI state (selection + inline value inputs). */
+	/** Reset the add-to-toolbar UI state (selection). */
 	resetAddState(): void {
 		this.state = { ...this.state, ...defaultAddState }
 		this.emit()
 	}
 
-	/** Patch add-to-toolbar UI state (selection + inline value inputs). */
-	patch(
-		patch: Partial<
-			Pick<
-				ConsoleState,
-				| 'selectedEntryId'
-				| 'selectedVariantId'
-				| 'booleanValue'
-				| 'setValue'
-				| 'enumValues'
-				| 'enumKeywords'
-			>
-		>
-	): void {
+	/** Patch add-to-toolbar UI state (selection). */
+	patch(patch: Partial<Pick<ConsoleState, 'selectedEntryId'>>): void {
 		this.state = { ...this.state, ...patch }
 		this.emit()
 	}
@@ -132,7 +97,6 @@ export function consolePointDescriptor(options?: { label?: string; icon?: string
 	readonly id: 'console'
 	readonly label: string
 	readonly type: 'action'
-	readonly categories: readonly string[]
 	readonly keywords: readonly string[]
 	readonly icon: string
 } {
@@ -140,7 +104,6 @@ export function consolePointDescriptor(options?: { label?: string; icon?: string
 		id: 'console',
 		label: options?.label ?? 'Console',
 		type: 'action',
-		categories: ['system'],
 		keywords: ['console', 'terminal', 'command', 'cli', 'shell'],
 		icon: options?.icon ?? '⌘',
 	}

@@ -12,7 +12,7 @@
  * the value-proxy lens (bound in `main.ts`) or receive bags via `uses`.
  */
 
-import type { AnyPoint, Border, Borders, Parking } from '@palettable/core'
+import type { AnyPoint, Border, Borders, KeyBindings, Parking } from '@palettable/core'
 
 export type DemoMode = 'rw-combobox' | 'rw-command-first' | 'ro-combobox'
 
@@ -148,7 +148,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Automated Life Support',
 			type: 'boolean',
 			icon: '💨',
-			categories: ['systems', 'automation'],
 			keywords: ['oxygen', 'air', 'breathing', 'recycling', 'auto'],
 		},
 		{
@@ -156,7 +155,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Outpost Atmosphere',
 			type: 'enum',
 			icon: '🪐',
-			categories: ['appearance'],
 			keywords: ['theme', 'style', 'mars', 'void', 'skin', 'color'],
 			constraints: {
 				options: [
@@ -172,7 +170,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Power Grid Focus',
 			type: 'enum',
 			icon: '🔌',
-			categories: ['economy', 'power'],
 			keywords: ['power', 'energy', 'grid', 'priority', 'research', 'defense', 'economy'],
 			constraints: {
 				options: [
@@ -188,7 +185,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Threat Level',
 			type: 'enum',
 			icon: '⚠️',
-			categories: ['security'],
 			keywords: ['alert', 'threat', 'status', 'defcon', 'green', 'yellow', 'red', 'black'],
 			constraints: {
 				options: [
@@ -203,14 +199,13 @@ export function demoPoints(): AnyPoint[] {
 			id: 'theme',
 			label: 'Theme',
 			type: 'nothing',
-			icon: '🎨',
-			categories: ['appearance'],
+			icon: 'icon:theme',
 			keywords: ['color', 'theme', 'dark', 'light', 'system'],
 			controls: ['theme'],
 			options: [
-				{ value: 'light', icon: '☀️', label: 'Light' },
-				{ value: 'dark', icon: '🌙', label: 'Dark' },
-				{ value: 'system', icon: '💻', label: 'System' },
+				{ value: 'light', icon: 'icon:sun', label: 'Light' },
+				{ value: 'dark', icon: 'icon:moon', label: 'Dark' },
+				{ value: 'system', icon: 'icon:terminal', label: 'System' },
 			],
 		},
 		{
@@ -218,7 +213,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Command',
 			type: 'nothing',
 			icon: '⌘',
-			categories: ['system'],
 			keywords: ['command', 'search', 'run', 'palette'],
 			controls: ['commandBox'],
 		},
@@ -227,7 +221,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'More',
 			type: 'nothing',
 			icon: '🗂',
-			categories: ['system'],
 			keywords: ['drawer', 'more', 'nested'],
 			controls: ['drawer'],
 		},
@@ -236,7 +229,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Mission time',
 			type: 'nothing',
 			icon: '⏱️',
-			categories: ['colony'],
 			keywords: ['mission', 'time', 'status', 'clock'],
 			controls: ['status'],
 			uses: ['mission'],
@@ -246,7 +238,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Colony Tax Rate',
 			type: 'number',
 			icon: '🪙',
-			categories: ['economy'],
 			keywords: ['tax', 'credits', 'economy', 'money', 'revenue'],
 			constraints: { min: 0, max: 50, step: 5 },
 		},
@@ -255,7 +246,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Simulation Speed',
 			type: 'number',
 			icon: '⏱️',
-			categories: ['simulation'],
 			keywords: ['speed', 'time', 'rate', 'clock', 'multiplier'],
 			constraints: { min: 0.5, max: 5, step: 0.5 },
 		},
@@ -264,7 +254,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Solar Array Multiplier',
 			type: 'number',
 			icon: '☀️',
-			categories: ['power'],
 			keywords: ['solar', 'energy', 'efficiency', 'multiplier', 'panels'],
 			constraints: { min: 0.8, max: 3, step: 0.1 },
 		},
@@ -273,7 +262,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Colony Satisfaction',
 			type: 'number',
 			icon: '⭐',
-			categories: ['colony'],
 			keywords: ['satisfaction', 'morale', 'happiness', 'rating'],
 			constraints: { min: 1, max: 5, step: 1 },
 		},
@@ -282,7 +270,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Deflector Shields',
 			type: 'boolean',
 			icon: '🛡️',
-			categories: ['defense'],
 			keywords: ['shields', 'defense', 'protection', 'barrier'],
 		},
 		{
@@ -290,7 +277,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Hyper-Tick Mode',
 			type: 'boolean',
 			icon: '⚡',
-			categories: ['simulation'],
 			keywords: ['fast', 'speed', 'turbo', 'tick'],
 		},
 		{
@@ -298,7 +284,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Emergency Lockdown',
 			type: 'action',
 			icon: '🚨',
-			categories: ['system', 'action'],
 			keywords: ['lockdown', 'evacuate', 'alert', 'crisis'],
 			can: () => demoLens.alertLevel !== 'green',
 			run() {
@@ -310,7 +295,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Save Colony State',
 			type: 'action',
 			icon: '💾',
-			categories: ['system'],
 			keywords: ['save', 'serialize', 'export', 'backup'],
 			can: () => true,
 			run() {
@@ -327,7 +311,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Reset Colony',
 			type: 'action',
 			icon: '🔄',
-			categories: ['system'],
 			keywords: ['reset', 'wipe', 'restart', 'default'],
 			can: () => isColonyDirtyValues(demoLens as unknown as Record<string, unknown>),
 			run() {
@@ -340,7 +323,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Developer Console',
 			type: 'action',
 			icon: '💻',
-			categories: ['system'],
 			keywords: ['console', 'terminal', 'command', 'cli', 'shell'],
 			can: () => true,
 			run() {
@@ -352,7 +334,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Selected ship',
 			type: 'nothing',
 			icon: '🚀',
-			categories: ['fleet'],
 			keywords: ['ship', 'fleet', 'selection', 'status'],
 			controls: ['status'],
 			uses: ['ship'],
@@ -362,7 +343,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Ship Shields',
 			type: 'boolean',
 			icon: '🛡️',
-			categories: ['fleet', 'defense'],
 			keywords: ['ship', 'shields', 'defense', 'fleet'],
 			uses: ['ship'],
 		},
@@ -371,7 +351,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Ship Reactor',
 			type: 'number',
 			icon: '🔋',
-			categories: ['fleet', 'power'],
 			keywords: ['ship', 'reactor', 'power', 'fleet'],
 			constraints: { min: 0.5, max: 5, step: 0.5 },
 			uses: ['ship'],
@@ -381,7 +360,6 @@ export function demoPoints(): AnyPoint[] {
 			label: 'Fire Torpedo',
 			type: 'action',
 			icon: '💥',
-			categories: ['fleet', 'action'],
 			keywords: ['ship', 'fire', 'torpedo', 'weapon', 'fleet'],
 			uses: ['ship'],
 			can: (bag) => bag?.get('shipId') !== undefined,
@@ -397,17 +375,17 @@ export function demoPoints(): AnyPoint[] {
 	]
 }
 
-export const demoKeys: Record<string, string> = {
-	'`': 'console',
-	N: 'autoOxygen',
-	S: 'shieldGenerator',
-	E: 'emergencyProtocol',
-	'Ctrl+S': 'saveGame',
-	'+': 'gameSpeed:inc',
-	'-': 'gameSpeed:dec',
-	'1': 'alertLevel=green',
-	'2': 'alertLevel=yellow',
-	'3': 'alertLevel=red',
+export const demoKeys: KeyBindings = {
+	'`': { kind: 'action', point: 'console' },
+	N: { kind: 'toggle', point: 'autoOxygen' },
+	S: { kind: 'toggle', point: 'shieldGenerator' },
+	E: { kind: 'action', point: 'emergencyProtocol' },
+	'Ctrl+S': { kind: 'action', point: 'saveGame' },
+	'+': { kind: 'inc', point: 'gameSpeed', delta: 0.5 },
+	'-': { kind: 'dec', point: 'gameSpeed', delta: 0.5 },
+	'1': { kind: 'set', point: 'alertLevel', value: 'green' },
+	'2': { kind: 'set', point: 'alertLevel', value: 'yellow' },
+	'3': { kind: 'set', point: 'alertLevel', value: 'red' },
 }
 
 const rwComboboxLayout: Borders = {
@@ -492,6 +470,12 @@ const rwComboboxLayout: Borders = {
 					{
 						point: 'moreDrawer',
 						control: 'drawer',
+						config: {
+							icon: '🗂',
+							label: 'More',
+							hint: 'Outer drawer (toggle, closes on command)',
+							closeOnClick: true,
+						},
 						toolbar: [
 							{
 								space: 1,
@@ -513,13 +497,39 @@ const rwComboboxLayout: Borders = {
 									},
 								],
 							},
+							{
+								space: 1,
+								toolbar: [
+									{
+										point: 'moreDrawer',
+										control: 'drawer',
+										config: {
+											icon: '🗂',
+											label: 'More',
+											hint: 'Nested drawer (axis inversion)',
+											open: 'hover',
+											closeOnClick: true,
+										},
+										toolbar: [
+											{
+												space: 1,
+												toolbar: [
+													{
+														point: 'saveGame',
+														control: 'button',
+														config: {
+															icon: '💾',
+															label: 'Save',
+															hint: 'Nested command (closes drawers)',
+														},
+													},
+												],
+											},
+										],
+									},
+								],
+							},
 						],
-						config: {
-							icon: '🗂',
-							label: 'More',
-							hint: 'Nested drawer (axis inversion)',
-							open: 'hover',
-						},
 					},
 				],
 			},

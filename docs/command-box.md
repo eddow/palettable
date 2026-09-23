@@ -12,14 +12,14 @@ head modal): `src/lib/palette/console.svelte.ts` + `src/lib/head/Console.svelte`
 
 | Builder                  | Contents                                                                 |
 | ------------------------ | ------------------------------------------------------------------------ |
-| `paletteCommandEntries`  | Executable commands from points: run points, boolean on/off, enum per-value setters, number inc/dec. `mode: 'catalog'` keeps entries enabled for search/drag. `excludeTools` omits meta-points (the console excludes `console` inside the console). |
+| `paletteCommandEntries`  | Executable commands from points: run points, boolean toggle + on/off setters, enum per-value setters, number steps (`id+=x`/`id-=x` by the point step). `mode: 'catalog'` keeps entries enabled for search/drag. `excludeTools` omits meta-points (the console excludes `console` inside the console). |
 | `paletteAddItemEntries`  | Add sources: one per valued point (boolean/number/enum/… — the concrete control is picked per-variant) + one per nothing-point by point name (Theme, Command, More, … — each binds 1:1 to its `controls` allowlist). `context.itemControls` survives only as a fallback for controls no nothing-point claims. Runnable points are excluded (they already have command entries). |
 | `paletteDerivedVariants` | Concrete insertable variants for an add source: `tool` (toolbar command), `set` (boolean/enum/number control — value chosen on bar/inspector), `action`, `item` (control-only). |
 | `paletteCatalogEntries`  | Full catalogue (headless helper, not rendered by the console): `mode: 'catalog'` commands + flattened add variants (`add:<variant-id>`), sorted by label. Each carries `catalogDrag` (`{ kind: 'spec' }` or `{ kind: 'variant' }`). |
 | `paletteEnumSubsetValues`| Filter enum values by keywords (powers `EnumSubsetConfigurator` + add-flow keyword filters). |
 
-Labels are humanized (`gameSpeed` → `Game Speed`); keywords collect tool/value/
-category words; `meta` shows the key binding (`keys.findByTool`) or a fallback.
+Labels are humanized (`gameSpeed` → `Game Speed`); keywords collect tool/value
+words (kept for future use — command-box keyword search); `meta` shows the key binding (`keys.findByTool`) or a fallback.
 `can: false` entries are filtered from `results` (but stay searchable in catalog
 mode). `commandRunner` throws `PaletteError` for non-runnable specs.
 
@@ -34,13 +34,11 @@ initializers throw (or detach) in late handlers, `setTimeout`, or after `await`.
 Drive from handlers via `box.search()` / `box.execute()` / `box.input.value`.
 
 - `input`: `{ value, placeholder?, clear() }` — setting `value` clears selection.
-- `query`: `{ free, keywords, categories }` — parsed from input (`#cat` prefix
-  selects categories; known keywords become tokens; rest is free text) unless
-  overridden by `search({ free?, keywords?, categories? })`.
+- `query`: `{ free, keywords }` — parsed from input (known keywords become
+  tokens; rest is free text) unless overridden by `search({ free?, keywords? })`.
 - `results`: filtered + scored entries (exact label +8, prefix +5, substring +2,
   then alphabetical). `suggestions`: keyword completions for the current word.
-- `categories` / `keywords`: `available`, `active`, `toggle`/`addToken`/
-  `removeToken`/`removeLast`/`clear`.
+- `keywords`: `available`, `active`, `addToken`/`removeToken`/`removeLast`/`clear`.
 - `selection`: `index`, `item`, `set`/`select`/`next`/`previous`/`clear`.
 - `select(entryId?)` / `execute(entryId?)` — execute runs `entry.run()`, then
   clears filters + selection. `handleKeyDown`: ArrowUp/Down navigate,

@@ -8,11 +8,6 @@ describe('ConsoleStore', () => {
 			open: false,
 			mode: 'run',
 			selectedEntryId: undefined,
-			selectedVariantId: undefined,
-			booleanValue: 'true',
-			setValue: '',
-			enumValues: '',
-			enumKeywords: '',
 		})
 	})
 
@@ -33,15 +28,12 @@ describe('ConsoleStore', () => {
 
 	it('open resets add state; patch updates it', () => {
 		const console = new ConsoleStore()
-		console.patch({ selectedEntryId: 'tool:foo', setValue: 'x' })
+		console.patch({ selectedEntryId: 'tool:foo' })
 		expect(console.snapshot.selectedEntryId).toBe('tool:foo')
 		console.open('run')
 		expect(console.snapshot.selectedEntryId).toBeUndefined()
-		expect(console.snapshot.setValue).toBe('')
-		console.patch({ booleanValue: 'false' })
-		expect(console.snapshot.booleanValue).toBe('false')
 		console.resetAddState()
-		expect(console.snapshot.booleanValue).toBe('true')
+		expect(console.snapshot.selectedEntryId).toBeUndefined()
 	})
 
 	it('unsubscribe and clearListeners stop notifications', () => {

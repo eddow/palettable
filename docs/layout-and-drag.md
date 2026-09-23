@@ -70,7 +70,7 @@ participants in edit mode:
 - **Hover-open**: while editing + dragging, hovering a drawer trigger or its
   popup opens it (any `config.open` mode; `head.ts` `renderDrawer` threads
   `isEditing`/`isDragging` from the adapter). Outside a drag,
-  `config.open` (`click`/`hover`/`press`) behaves as before.
+  `config.open` (`hover`/`toggle`) behaves as before.
 - **Hierarchy close**: in edit mode drawers never close on mouseleave —
   every drag hover (`renderToolbarElement` bar moves + `renderDrawerTrack`
   moves) calls `closeDrawersOutside(target)`, which closes only popups whose

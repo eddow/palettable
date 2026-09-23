@@ -38,6 +38,7 @@ import type { PaletteRegion, SurfaceContext, ToolbarItem } from './layout.js'
 import { isDrawerItem } from './layout.js'
 import type { AnyPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
+import type { Runnable } from './runnable.js'
 import type { EnumOption } from './type.js'
 import { matchEnumOption } from './virtual.js'
 
@@ -53,7 +54,8 @@ import { matchEnumOption } from './virtual.js'
  *   `inline`; explicit `slider`/`drawerSlider` control ids win)
  * - status: `statusKey` (named bag key; default first non-empty string)
  * - drawer: `open` (see `DrawerToolbarItem` in `layout.ts`;
- *   default `click` via `drawerOpenOf`)
+ *   default `toggle` via `drawerOpenOf`), `closeOnClick` (opt-in,
+ *   default `false` via `drawerCloseOnClickOf`)
  * Absent key = default everywhere.
  *
  * Deliberately NOT config: enum `values`/`keywords` live on the point
@@ -110,14 +112,25 @@ export function headTooltip(item: ToolbarItem, suffix?: string): string {
 	return suffix !== undefined ? `${meta.label} · ${suffix}` : meta.label
 }
 
-/** Drawer trigger open mode (`config.open`; default `click`). */
-export type DrawerOpenMode = 'click' | 'hover' | 'press'
+/** Drawer trigger open mode (`config.open`; default `toggle`).
+ * Legacy `click` / `press` values normalize to `toggle` in `drawerOpenOf`. */
+export type DrawerOpenMode = 'hover' | 'toggle'
 
-/** Read the drawer open mode with default (`click`). */
+/** Read the drawer open mode with default (`toggle`).
+ * Only `'hover'` selects hover; everything else (absent, legacy
+ * `'click'` / `'press'`, unknown) normalizes to `'toggle'`. */
 export function drawerOpenOf(item: ToolbarItem): DrawerOpenMode {
 	const config = (item as { config?: unknown }).config as { open?: unknown } | undefined
 	const value = config?.open
-	return value === 'hover' || value === 'press' ? value : 'click'
+	return value === 'hover' ? 'hover' : 'toggle'
+}
+
+/** Read the drawer close-on-click flag (`config.closeOnClick`; default `false`).
+ * Strict opt-in: only `closeOnClick === true` closes ancestor drawers when a
+ * command / toggle / segmented inside fires. */
+export function drawerCloseOnClickOf(item: ToolbarItem): boolean {
+	const config = (item as { config?: unknown }).config as { closeOnClick?: unknown } | undefined
+	return config?.closeOnClick === true
 }
 
 /**
@@ -142,6 +155,24 @@ export function drawerChildAxis(axis: 'horizontal' | 'vertical'): 'horizontal' |
 /** Child region following the perpendicular rule (`vertical` → `'left'`, else `'top'`). */
 export function drawerChildRegion(axis: 'horizontal' | 'vertical'): PaletteRegion {
 	return axis === 'vertical' ? 'left' : 'top'
+}
+
+/**
+ * Center-seeking child region for a drawer popup ("which half of the IDE
+ * are you in"). The child axis is perpendicular to the parent, so halves
+ * measured along the PARENT axis are always compatible with the child
+ * axis: a horizontal parent measures left/right (child axis vertical),
+ * a vertical parent measures top/bottom (child axis horizontal).
+ * Stamped as the popup's `--region` at open time; placement needs no
+ * stamping — the popup queries the PARENT container's `--region`.
+ */
+export function drawerChildRegionFor(
+	parentAxis: 'horizontal' | 'vertical',
+	triggerCenter: number,
+	ideCenter: number
+): PaletteRegion {
+	if (parentAxis === 'horizontal') return triggerCenter < ideCenter ? 'left' : 'right'
+	return triggerCenter < ideCenter ? 'top' : 'bottom'
 }
 
 /**
@@ -191,7 +222,7 @@ export function resolveControl(
 /** Display inputs for one bound point: definition + current value + bags. */
 export type BoundDisplay = {
 	readonly point: AnyPoint | undefined
-	/** Current value (root-bag value, enum-from key, or stash pressed-state — resolved by the adapter). */
+	/** Current value (root-bag value or enum-from key — resolved by the adapter). */
 	readonly value: unknown
 	/**
 	 * Context bags in `uses` order (`undefined` = unregistered).
@@ -226,15 +257,15 @@ export type ButtonPresenter = {
 	readonly title: string
 	readonly tone: 'neutral' | 'accent'
 	readonly can: boolean
-	/** Spec string to execute via `PaletteCore.run(spec)`. */
-	readonly run: string
+	/** Runnable description to execute via `PaletteCore.run(runnable)`. */
+	readonly run: Runnable
 }
 
-/** View-model for an action point: label/icon/hint/tone + `can` + `run` spec. */
+/** View-model for an action point: label/icon/hint/tone + `can` + `run` runnable. */
 export function buttonPresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,
-	spec: string,
+	runnable: Runnable,
 	can?: boolean
 ): ButtonPresenter {
 	const meta = headMeta(item)
@@ -249,7 +280,7 @@ export function buttonPresenter(
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
 		can: resolved,
-		run: spec,
+		run: runnable,
 	}
 }
 
@@ -266,11 +297,11 @@ export type TogglePresenter = {
 	 * context tool (`uses` non-empty) is skeleton — adapter renders disabled.
 	 */
 	readonly can: boolean
-	/** Spec string toggling the value (`id=true` / `id=false`). */
-	readonly toggle: string
+	/** Runnable description toggling the value. */
+	readonly toggle: Runnable
 }
 
-/** View-model for a boolean point: resolved icon + pressed flag + toggle spec.
+/** View-model for a boolean point: resolved icon + pressed flag + toggle runnable.
  * Skeleton: `bound.value === undefined` → `pressed: undefined` (no `false`
  * coercion hiding the skeleton — adapters render the unset state).
  */
@@ -279,13 +310,14 @@ export function togglePresenter(item: ToolbarItem, bound: BoundDisplay): ToggleP
 	const pressed = bound.value === undefined ? undefined : bound.value === true
 	const icon =
 		meta.icon ?? (typeof bound.point?.icon === 'string' ? bound.point.icon : pressed ? '●' : '○')
+	const point = bound.point?.id ?? ''
 	return {
 		icon,
 		title: headTooltip(item, meta.hint),
 		tone: meta.tone,
 		pressed,
 		can: valuedCan(bound),
-		toggle: `${bound.point?.id ?? ''}=${pressed ? 'false' : 'true'}`,
+		toggle: { kind: 'toggle', point },
 	}
 }
 
@@ -369,8 +401,8 @@ export type ThemePresenter = {
 	readonly value: ThemeValue | undefined
 	/** Icon of the current option (`light` → ☀️ …), resolved from the bound enum point; falls back to the tool icon. */
 	readonly valueIcon: string | undefined
-	/** Spec string cycling to the next theme (`id=next`). */
-	readonly cycle: string
+	/** Runnable description cycling to the next theme. */
+	readonly cycle: Runnable
 }
 
 const THEME_ORDER: readonly ThemeValue[] = ['light', 'dark', 'system']
@@ -397,7 +429,7 @@ export function themePresenter(item: ToolbarItem, bound: BoundDisplay): ThemePre
 		tone: meta.tone,
 		value,
 		valueIcon,
-		cycle: `${bound.point?.id ?? ''}=${next}`,
+		cycle: { kind: 'set', point: bound.point?.id ?? '', value: next },
 	}
 }
 
@@ -466,8 +498,8 @@ export type SelectPresenter = {
 	readonly options: readonly SelectOption[]
 	/** Unfiltered rows for the select listbox (always full text). */
 	readonly listOptions: readonly SelectListOption[]
-	/** Spec string selecting a value (`id=value`). */
-	readonly select: (value: string) => string
+	/** Runnable description selecting a value. */
+	readonly select: (value: string) => Runnable
 }
 
 /** Icon part of an option; `undefined` when none declared. */
@@ -582,7 +614,7 @@ export function selectPresenter(
 			label: option.label ?? option.value,
 			can: option.can !== false,
 		})),
-		select: (next: string) => `${pointId}=${next}`,
+		select: (next: string): Runnable => ({ kind: 'set', point: pointId, value: next }),
 	}
 }
 
@@ -735,9 +767,9 @@ export function configuratorTonePatch(value: string): Record<string, string> {
  * - select keeps `showText` + `showFilter`, prunes `showValue`.
  * - segmented keeps `showText`, prunes `showValue` + `showFilter`.
  * - other enum controls prune `showValue` + `showText` + `showFilter`.
- * - drawer keeps `open`, prunes every display key.
- * - status keeps `statusKey`, prunes every display key.
- * - everything else prunes all display keys.
+ * - drawer keeps `open` + `closeOnClick`, prunes every display key.
+ * - status keeps `statusKey`, prunes every display key + `open` + `closeOnClick`.
+ * - everything else prunes all display keys + `open` + `closeOnClick`.
  * `sliderVariant` needs no entry: it is a legacy fallback shadowed by the
  * explicit `slider` / `drawerSlider` control ids (`sliderVariantOf`).
  * Returns the keys to delete (adapter deletes them from `item.config`).
@@ -757,11 +789,11 @@ export function configuratorControlCleanup(nextControl: string): readonly string
 	if (nextControl === 'drawer')
 		return ['showValue', 'showText', 'showFilter', 'sliderVariant', 'statusKey']
 	if (nextControl === 'status')
-		return ['showValue', 'showText', 'showFilter', 'sliderVariant', 'open']
-	return ['showValue', 'showText', 'showFilter']
+		return ['showValue', 'showText', 'showFilter', 'sliderVariant', 'open', 'closeOnClick']
+	return ['showValue', 'showText', 'showFilter', 'open', 'closeOnClick']
 }
 
-// ── Enum-from / stash display helpers ───────────────────────────────────────
+// ── Enum-from display helper ────────────────────────────────────────────────
 
 /**
  * Resolve the display key of an `enum-from` virtual for a source value
@@ -772,11 +804,6 @@ export function enumFromDisplayKey(
 	sourceValue: unknown
 ): string | undefined {
 	return matchEnumOption({ options } as never, sourceValue)?.key
-}
-
-/** Pressed state of a `stash` virtual (current `Object.is`-equals the stashed value). */
-export function stashPressedState(current: unknown, stashedValue: unknown): boolean {
-	return Object.is(current, stashedValue)
 }
 
 /** Whether a toolbar item is a drawer (re-export for presenter consumers). */

@@ -194,11 +194,11 @@ describe('defaultLayoutFromPoints', () => {
 								toolbar: [
 									{
 										point: {
-											id: 'pause',
-											label: 'Pause',
+											id: 'speedPreset',
+											label: 'Speed preset',
 											source: 'gameSpeed',
-											kind: 'stash',
-											stashedValue: 0,
+											kind: 'enum-from',
+											options: [{ key: 'slow', value: 0.5 }],
 										},
 									},
 								],
@@ -348,28 +348,28 @@ describe('PaletteLayoutTree construction', () => {
 	})
 
 	it('round-trips inline virtual definitions through snapshot', () => {
-		const stash = {
-			id: 'pause',
-			label: 'Pause',
+		const preset = {
+			id: 'speedPreset',
+			label: 'Speed preset',
 			source: 'gameSpeed',
-			kind: 'stash',
-			stashedValue: 0,
+			kind: 'enum-from',
+			options: [{ key: 'slow', value: 0.5 }],
 		} as const
 		const tree = new PaletteLayoutTree({
 			version: 2,
 			borders: {
-				top: [[{ space: 1, toolbar: [{ point: stash }] }]],
+				top: [[{ space: 1, toolbar: [{ point: preset }] }]],
 				right: [],
 				bottom: [],
 				left: [],
 			},
 		})
 		const snapshot = tree.getSnapshot()
-		expect(snapshot.borders.top[0]?.[0]?.toolbar[0]?.point).toEqual({ ...stash })
+		expect(snapshot.borders.top[0]?.[0]?.toolbar[0]?.point).toEqual({ ...preset })
 		// The snapshot shares no structure with the live tree.
 		;(snapshot.borders.top[0]?.[0]?.toolbar[0]?.point as { label: string }).label = 'mutated'
 		expect(tree.getLayout().borders.top[0]?.[0]?.toolbar[0]).toEqual({
-			point: { ...stash },
+			point: { ...preset },
 			control: undefined,
 			config: undefined,
 		})
@@ -1816,7 +1816,7 @@ function drawerLayout(): SerializedLayout {
 	}
 }
 
-describe('drawer locations + persistent empty toolbar', () => {
+describe('drawer locations + child-track prune', () => {
 	it('resolves a drawer-child toolbar to a drawer location', () => {
 		const tree = new PaletteLayoutTree(drawerLayout())
 		const live = tree.getLayout()
@@ -1832,7 +1832,7 @@ describe('drawer locations + persistent empty toolbar', () => {
 		}
 	})
 
-	it('moveItem out of a drawer keeps the emptied drawer toolbar (no prune)', () => {
+	it('moveItem out of a drawer prunes the emptied non-last toolbar', () => {
 		const tree = new PaletteLayoutTree(drawerLayout())
 		const live = tree.getLayout()
 		const drawerItem = live.borders.top[0]?.[0]?.toolbar[1]
@@ -1846,9 +1846,44 @@ describe('drawer locations + persistent empty toolbar', () => {
 			{ ...drawerLoc, itemIndex: 0 },
 			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 }
 		)
-		// The drawer child toolbar persists empty (no prune victims).
-		expect(childToolbar).toHaveLength(0)
-		expect(childTrack).toHaveLength(2)
+		// The emptied non-last toolbar prunes (child track shrinks);
+		// the surviving bar keeps its tools.
+		expect(childTrack).toHaveLength(1)
+		expect(childTrack[0]?.toolbar.map((item) => (item as { point?: unknown }).point)).toEqual([
+			'x',
+			'y',
+		])
+	})
+
+	it('moveItem out of a drawer keeps the last toolbar empty (drop target)', () => {
+		const tree = new PaletteLayoutTree(drawerLayout())
+		const live = tree.getLayout()
+		const drawerItem = live.borders.top[0]?.[0]?.toolbar[1]
+		const childTrack = (drawerItem as { toolbar: Track }).toolbar
+		// Empty the first bar, then the (now last) second bar.
+		const first = childTrack[0]?.toolbar
+		const firstLoc = toolbarLocationOf(first!, live)
+		if (firstLoc?.container !== 'drawer') throw new Error('expected drawer location')
+		for (const item of [...first!]) {
+			const at = toolbarLocationOf(first!, live)
+			if (at?.container !== 'drawer') throw new Error('expected drawer location')
+			tree.moveItem(
+				{ ...at, itemIndex: 0 },
+				{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 }
+			)
+			void item
+		}
+		expect(childTrack).toHaveLength(1)
+		const last = childTrack[0]?.toolbar
+		const lastLoc = toolbarLocationOf(last!, live)
+		if (lastLoc?.container !== 'drawer') throw new Error('expected drawer location')
+		tree.moveItem(
+			{ ...lastLoc, itemIndex: 0 },
+			{ container: 'border', region: 'top', trackIndex: 0, toolbarIndex: 0, itemIndex: 0 }
+		)
+		// Last bar persists empty (the drawer's drop target).
+		expect(last).toHaveLength(0)
+		expect(childTrack).toHaveLength(1)
 	})
 
 	it('moveItem into a drawer merges and follows into a drawer origin', () => {
@@ -1879,7 +1914,7 @@ describe('drawer locations + persistent empty toolbar', () => {
 		expect(session.origin.kind).toBe('drawer')
 	})
 
-	it('commitDraggedToDrawer merges and persists the emptied drawer origin', () => {
+	it('commitDraggedToDrawer merges and prunes the emptied non-last origin', () => {
 		const tree = new PaletteLayoutTree(drawerLayout())
 		const live = tree.getLayout()
 		const drawerItem = live.borders.top[0]?.[0]?.toolbar[1]
@@ -1895,9 +1930,8 @@ describe('drawer locations + persistent empty toolbar', () => {
 		const result = commitDraggedToDrawer(session, target!, childTrack, drawerLoc.path, 2)
 		expect(result.moved).toBe(true)
 		expect(target!.map((item) => (item as { point?: unknown }).point)).toEqual(['x', 'y', 'z'])
-		// Emptied drawer origin persists (no prune).
-		expect(source).toHaveLength(0)
-		expect(childTrack).toHaveLength(2)
+		// Emptied non-last origin prunes (child track shrinks).
+		expect(childTrack).toHaveLength(1)
 		expect(session.origin.kind).toBe('drawer')
 	})
 })

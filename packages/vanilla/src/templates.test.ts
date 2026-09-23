@@ -75,8 +75,6 @@ describe('drawer + command-box shells', () => {
 				hint: 'More tools',
 				tone: 'neutral',
 				icon: '▤',
-				axis: 'vertical',
-				region: 'left',
 			})
 		)
 		expect(trigger.getAttribute('aria-label')).toBe('More')
@@ -85,18 +83,26 @@ describe('drawer + command-box shells', () => {
 		expect(
 			trigger.querySelector('.palette-default-drawer-chevron')?.getAttribute('aria-hidden')
 		).toBe('true')
-		expect(trigger.classList.contains('palette-default-layout-vertical')).toBe(true)
-		expect(trigger.classList.contains('palette-default-region-left')).toBe(true)
 	})
 
 	it('drawer popup shell is a hidden dialog popup (hierarchical, no overlay)', () => {
 		const popup = elementFromHtml(drawerPopupShellTemplate('horizontal'))
 		expect(popup.classList.contains('palettable-drawer__popup')).toBe(true)
-		expect(popup.classList.contains('is-horizontal')).toBe(true)
+		// No axis/region classes: the popup's `--layout` is the single
+		// source of truth (classes would accumulate down the tree instead
+		// of overriding).
+		expect(popup.className).toBe('palettable-drawer__popup')
 		expect(popup.getAttribute('role')).toBe('dialog')
 		expect(popup.hasAttribute('hidden')).toBe(true)
 		expect(popup.style.getPropertyValue('--layout')).toBe('horizontal')
-		expect(popup.style.getPropertyValue('--region')).toBe('')
+		// Declarative placement: own `--region` content half, compatible
+		// with the child axis.
+		expect(popup.style.getPropertyValue('--region')).toBe('left')
+	})
+
+	it('drawer popup shell honors an explicit content region', () => {
+		const popup = elementFromHtml(drawerPopupShellTemplate('vertical', 'bottom'))
+		expect(popup.style.getPropertyValue('--region')).toBe('bottom')
 	})
 
 	it('command-box shell carries combobox testids', () => {
@@ -110,21 +116,13 @@ describe('drawer + command-box shells', () => {
 
 describe('status shells', () => {
 	it('horizontal shell carries a single value node', () => {
-		const span = elementFromHtml(
-			statusShellTemplate({ tone: 'neutral', direction: 'horizontal', region: 'top' })
-		)
-		expect(span.classList.contains('palette-default-layout-horizontal')).toBe(true)
-		expect(span.classList.contains('palette-default-region-top')).toBe(true)
+		const span = elementFromHtml(statusShellTemplate({ tone: 'neutral', direction: 'horizontal' }))
 		expect(span.querySelector('.palette-default-status-value')).not.toBe(null)
 		expect(span.querySelector('.palette-default-status-minutes')).toBe(null)
 	})
 
 	it('vertical shell stacks minutes above seconds with a hidden fallback', () => {
-		const span = elementFromHtml(
-			statusShellTemplate({ tone: 'neutral', direction: 'vertical', region: 'left' })
-		)
-		expect(span.classList.contains('palette-default-layout-vertical')).toBe(true)
-		expect(span.classList.contains('palette-default-region-left')).toBe(true)
+		const span = elementFromHtml(statusShellTemplate({ tone: 'neutral', direction: 'vertical' }))
 		expect(span.querySelector('.palette-default-status-minutes')).not.toBe(null)
 		expect(span.querySelector('.palette-default-status-seconds')).not.toBe(null)
 		expect(span.querySelector('.palette-default-status-value')?.hasAttribute('hidden')).toBe(true)

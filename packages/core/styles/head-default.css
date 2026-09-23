@@ -89,8 +89,6 @@
  * options and stepper ± buttons are covered by the descendant rule
  * above; the readout chips and group boxes below complete the set. */
 .palette-default-status.palette-default-tone-accent,
-.palette-default-select.palette-default-tone-accent:not(.palette-default-layout-vertical)
-	> .palette-default-select-trigger,
 .palette-default-select.palette-default-tone-accent
 	> .palette-default-select-trigger
 	> .palette-default-select-value,
@@ -176,37 +174,21 @@
 	}
 }
 
-.toolbar-item-content > :is(
-	.palette-default-status,
-	.palette-default-select-trigger,
-	.palette-default-select-value,
-	.palette-default-stepper-value,
-	.palette-default-slider-value
-).palette-default-layout-horizontal {
-	min-block-size: var(--palette-toolbar-perpendicular);
-	box-sizing: border-box;
-}
-
 /* ── 3. Shared floating panel ── */
 /* One chrome for every popout: command popover, select list, drawer track,
  * vertical text overlays. Positioned per-component in §4/§7/§8/§10. */
 
 .palette-default-command-popover,
 .palette-default-select-list,
-.palette-default-slider-drawer > .palette-default-slider-track,
-.palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
-	> .palette-default-choice,
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger
-	> .palette-default-choice {
+.palette-default-slider-drawer > .palette-default-slider-track {
 	border: 1px solid var(--pd-border-soft);
 	border-radius: var(--pd-r-l);
 	background: var(--pd-panel);
 	box-shadow: var(--pd-pop-shadow);
 }
 
-/* Live-var overlay chrome: same panel, queried from the container. */
+/* Vertical overlay labels float beside the bar, so they share the panel
+ * chrome. Horizontal labels are inline text and must stay unboxed. */
 @container palette style(--layout: vertical) {
 	.palette-default-segmented
 		> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
@@ -699,18 +681,7 @@
 	.palette-default-select > .palette-default-select-trigger {
 		min-block-size: var(--palette-toolbar-perpendicular);
 	}
-}
 
-.palette-default-select.palette-default-layout-horizontal > .palette-default-select-trigger {
-	min-block-size: var(--palette-toolbar-perpendicular);
-}
-
-.palette-default-select.palette-default-layout-horizontal > .palette-default-select-list {
-	top: calc(100% + 4px);
-	inset-inline-start: 0;
-}
-
-@container palette style(--layout: horizontal) {
 	.palette-default-select > .palette-default-select-list {
 		top: calc(100% + 4px);
 		inset-inline-start: 0;
@@ -722,12 +693,6 @@
 		top: auto;
 		bottom: calc(100% + 4px);
 	}
-}
-
-.palette-default-select.palette-default-layout-horizontal.palette-default-region-bottom
-	> .palette-default-select-list {
-	top: auto;
-	bottom: calc(100% + 4px);
 }
 
 /* Vertical: square icon stack at rest; label overlays beside the toolbar
@@ -767,44 +732,6 @@
 		> .palette-default-select-trigger:has(> .palette-default-choice) {
 		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
 	}
-}
-
-.palette-default-select.palette-default-layout-vertical {
-	inline-size: var(--palette-toolbar-perpendicular);
-	block-size: auto;
-}
-
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	block-size: auto;
-	min-block-size: var(--palette-toolbar-perpendicular);
-	box-sizing: border-box;
-	justify-content: center;
-	position: relative;
-	overflow: visible;
-	/* Borderless wrapper (drawer pattern): chip + label carry the chrome,
-	 * so the overlay positions against a borderless box — no 1px miss. */
-	padding: 0;
-	border: 0;
-	background: transparent;
-	border-radius: var(--pd-r-l);
-}
-
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger:has(> .palette-default-choice) {
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-}
-
-.palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-trigger:has(> .palette-default-choice) {
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-}
-
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger::after {
-	content: none;
 }
 
 /* Chip = visible trigger at rest (icon stack in flow, bordered chrome).
@@ -892,87 +819,63 @@
 	}
 }
 
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger
-	> .palette-default-select-value {
-	flex-direction: column;
-	gap: 1px;
-	line-height: 1;
-	align-items: center;
-	justify-content: center;
-	position: relative;
-	overflow: visible;
-	inline-size: 100%;
-	min-block-size: var(--palette-toolbar-perpendicular);
-	padding: 0.3rem 0;
-	box-sizing: border-box;
-	border: 1px solid var(--pd-border);
-	border-radius: var(--pd-r-l);
-	background: var(--pd-surface);
-}
-
 /* Text on board: chip squares its joint side to meet the overlay. */
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger:has(> .palette-default-choice)
-	> .palette-default-select-value {
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+@container palette style(--layout: vertical) {
+	.palette-default-select
+		> .palette-default-select-trigger:has(> .palette-default-choice)
+		> .palette-default-select-value {
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+	}
+
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		position: absolute;
+		inset-block: 0;
+		inset-inline-start: 100%;
+		z-index: 2;
+		display: inline-flex;
+		align-items: center;
+		inline-size: max-content;
+		padding-inline: 0.72rem;
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		white-space: nowrap;
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(-0.4rem);
+		transition:
+			transform var(--pd-slide),
+			opacity var(--pd-ease);
+	}
+
+	.palette-default-select:hover
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		opacity: 1;
+		transform: translateX(0);
+		pointer-events: auto;
+	}
+
+	.palette-default-select > .palette-default-select-list {
+		inset-block-start: 0;
+		inset-inline-start: calc(100% + 4px);
+	}
 }
 
-.palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-trigger:has(> .palette-default-choice)
-	> .palette-default-select-value {
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-}
+@container palette style(--region: right) {
+	.palette-default-select
+		> .palette-default-select-trigger
+		> .palette-default-choice {
+		inset-inline-start: auto;
+		inset-inline-end: 100%;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		transform: translateX(0.4rem);
+	}
 
-.palette-default-select.palette-default-layout-vertical
-	> .palette-default-select-trigger
-	> .palette-default-choice {
-	position: absolute;
-	inset-block: 0;
-	inset-inline-start: 100%;
-	z-index: 2;
-	display: inline-flex;
-	align-items: center;
-	inline-size: max-content;
-	padding-inline: 0.72rem;
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-	white-space: nowrap;
-	opacity: 0;
-	pointer-events: none;
-	transform: translateX(-0.4rem);
-	transition:
-		transform var(--pd-slide),
-		opacity var(--pd-ease);
-}
-
-.palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-trigger
-	> .palette-default-choice {
-	inset-inline-start: auto;
-	inset-inline-end: 100%;
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-	transform: translateX(0.4rem);
-}
-
-/* Hover-only (never focus): at rest the label ignores the pointer; on hover
- * it catches it, so moving across the text keeps `:hover` alive. */
-.palette-default-select.palette-default-layout-vertical:hover
-	> .palette-default-select-trigger
-	> .palette-default-choice {
-	opacity: 1;
-	transform: translateX(0);
-	pointer-events: auto;
-}
-
-.palette-default-select.palette-default-layout-vertical > .palette-default-select-list {
-	inset-block-start: 0;
-	inset-inline-start: calc(100% + 4px);
-}
-
-.palette-default-select.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-select-list {
-	inset-inline-start: auto;
-	inset-inline-end: calc(100% + 4px);
+	.palette-default-select > .palette-default-select-list {
+		inset-inline-start: auto;
+		inset-inline-end: calc(100% + 4px);
+	}
 }
 
 /* ── 8. Slider, by variant ── */
@@ -1131,37 +1034,123 @@
 	}
 }
 
-.palette-default-slider-drawer.palette-default-layout-horizontal {
-	flex-direction: column;
-	align-items: stretch;
+@container palette style(--layout: horizontal) {
+	.palette-default-slider-drawer.palette-default-layout-horizontal {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-horizontal
+		> .palette-default-slider-trigger {
+		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+		justify-content: center;
+		min-block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-horizontal
+		> .palette-default-slider-track {
+		top: 100%;
+		bottom: auto;
+		left: 0;
+		right: 0;
+		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+		width: 100%;
+		height: 6.5rem;
+		padding: 0.72rem 0;
+		box-sizing: border-box;
+		transform: translateY(-0.4rem);
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-horizontal
+		> .palette-default-slider-track
+		> input[type='range'] {
+		writing-mode: vertical-lr;
+		direction: rtl;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-horizontal:hover
+		> .palette-default-slider-track,
+	.palette-default-slider-drawer.palette-default-layout-horizontal:focus-within
+		> .palette-default-slider-track {
+		transform: translateY(0);
+	}
 }
 
-.palette-default-slider-drawer.palette-default-layout-horizontal
-	> .palette-default-slider-trigger {
-	border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
-	justify-content: center;
-	min-block-size: var(--palette-toolbar-perpendicular);
-	box-sizing: border-box;
+@container palette style(--region: bottom) {
+	.palette-default-slider-drawer.palette-default-layout-horizontal
+		> .palette-default-slider-trigger {
+		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-horizontal
+		> .palette-default-slider-track {
+		top: auto;
+		bottom: 100%;
+		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
+		transform: translateY(0.4rem);
+	}
 }
 
-.palette-default-slider-drawer.palette-default-layout-horizontal > .palette-default-slider-track {
-	top: 100%;
-	left: 0;
-	right: 0;
-	border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
-	/* `writing-mode` swaps logical axes — physical sizes keep full width. */
-	width: 100%;
-	height: 6.5rem;
-	padding: 0.72rem 0;
-	box-sizing: border-box;
-	transform: translateY(-0.4rem);
+@container palette style(--layout: vertical) {
+	.palette-default-slider-drawer.palette-default-layout-vertical {
+		flex-direction: row;
+		block-size: var(--palette-toolbar-perpendicular);
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-vertical
+		> .palette-default-slider-trigger {
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		inline-size: var(--palette-toolbar-perpendicular);
+		block-size: var(--palette-toolbar-perpendicular);
+		box-sizing: border-box;
+		flex-direction: column;
+		gap: 1px;
+		padding: 0.3rem 0;
+		justify-content: center;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-vertical
+		> .palette-default-slider-track {
+		inset-block: 0;
+		inset-inline-start: 100%;
+		inset-inline-end: auto;
+		inline-size: 6.5rem;
+		block-size: 100%;
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+		padding: 0 0.72rem 0 0.9rem;
+		box-sizing: border-box;
+		transform: translateX(-0.4rem);
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-vertical
+		> .palette-default-slider-track
+		> input[type='range'] {
+		writing-mode: horizontal-tb;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-vertical:hover
+		> .palette-default-slider-track,
+	.palette-default-slider-drawer.palette-default-layout-vertical:focus-within
+		> .palette-default-slider-track {
+		transform: translateX(0);
+	}
 }
 
-.palette-default-slider-drawer.palette-default-layout-horizontal
-	> .palette-default-slider-track
-	> input[type='range'] {
-	writing-mode: vertical-lr;
-	direction: rtl;
+@container palette style(--region: right) {
+	.palette-default-slider-drawer.palette-default-layout-vertical
+		> .palette-default-slider-trigger {
+		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
+	}
+
+	.palette-default-slider-drawer.palette-default-layout-vertical
+		> .palette-default-slider-track {
+		inset-inline-start: auto;
+		inset-inline-end: 100%;
+		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
+		padding: 0 0.9rem 0 0.72rem;
+		transform: translateX(0.4rem);
+	}
 }
 
 /* Vertical toolbar: trigger inline-start, range beside it, horizontal track. */
@@ -1217,88 +1206,8 @@
 	}
 }
 
-.palette-default-slider-drawer.palette-default-layout-vertical {
-	flex-direction: row;
-	block-size: var(--palette-toolbar-perpendicular);
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical
-	> .palette-default-slider-trigger {
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-	inline-size: var(--palette-toolbar-perpendicular);
-	block-size: var(--palette-toolbar-perpendicular);
-	box-sizing: border-box;
-	flex-direction: column;
-	gap: 1px;
-	padding: 0.3rem 0;
-	justify-content: center;
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical > .palette-default-slider-track {
-	inset-block: 0;
-	inset-inline-start: 100%;
-	inline-size: 6.5rem;
-	block-size: 100%;
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-	padding: 0 0.72rem 0 0.9rem;
-	box-sizing: border-box;
-	transform: translateX(-0.4rem);
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical
-	> .palette-default-slider-track
-	> input[type='range'] {
-	writing-mode: horizontal-tb;
-}
-
 /* Region mirrors the group into the workspace; trigger keeps the
- * toolbar-outer half-rounding, range takes the workspace half.
- * (Live-var equivalents live above next to the layout rules; the stamped
- * classes below stay as the no-container-query fallback.) */
-.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
-	> .palette-default-slider-trigger {
-	border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
-}
-
-.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom
-	> .palette-default-slider-track {
-	top: auto;
-	bottom: 100%;
-	border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
-	transform: translateY(0.4rem);
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-slider-trigger {
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right
-	> .palette-default-slider-track {
-	inset-inline-start: auto;
-	inset-inline-end: 100%;
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-	padding: 0 0.9rem 0 0.72rem;
-	transform: translateX(0.4rem);
-}
-
-:is(
-	.palette-default-slider-drawer.palette-default-layout-horizontal:hover,
-	.palette-default-slider-drawer.palette-default-layout-horizontal:focus-within,
-	.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:hover,
-	.palette-default-slider-drawer.palette-default-layout-horizontal.palette-default-region-bottom:focus-within
-) > .palette-default-slider-track {
-	transform: translateY(0);
-}
-
-:is(
-	.palette-default-slider-drawer.palette-default-layout-vertical:hover,
-	.palette-default-slider-drawer.palette-default-layout-vertical:focus-within,
-	.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:hover,
-	.palette-default-slider-drawer.palette-default-layout-vertical.palette-default-region-right:focus-within
-) > .palette-default-slider-track {
-	transform: translateX(0);
-}
+ * toolbar-outer half-rounding, range takes the workspace half. */
 
 /* ── 9. Stepper / stars ── */
 
@@ -1330,20 +1239,12 @@
 }
 
 /* Horizontal stepper readout stretches to the buttons' block size so
- * minus/value/plus share one edge at rest height. Drawer popups are
- * horizontal tracks too (`.is-horizontal`) whatever the host axis. */
+ * minus/value/plus share one edge at rest height. */
 @container palette style(--layout: horizontal) {
 	.palette-default-stepper > .palette-default-stepper-value {
 		min-block-size: var(--palette-toolbar-perpendicular);
 		box-sizing: border-box;
 	}
-}
-
-.palette-default-stepper:not(.palette-default-layout-vertical)
-	> .palette-default-stepper-value,
-.palettable-drawer__popup.is-horizontal .palette-default-stepper-value {
-	min-block-size: var(--palette-toolbar-perpendicular);
-	box-sizing: border-box;
 }
 
 /* Drawer ("More") trigger: always icon-only. Label survives as accessible
@@ -1352,7 +1253,8 @@
  * border around a full-size toolbar, so the trigger grows by the same 2px
  * along the joint axis — both land at 42px and read as one group-field.
  * Click/press triggers at rest are standalone 40px squares. Vertical
- * toolbars share heights, horizontal share widths. */
+ * toolbars share heights, horizontal share widths. The joint axis follows
+ * the PARENT `--region` (same container the popup placement queries). */
 .palette-default-tool.palettable-drawer__trigger {
 	inline-size: var(--palette-toolbar-perpendicular);
 	min-inline-size: var(--palette-toolbar-perpendicular);
@@ -1361,27 +1263,45 @@
 	padding: 0;
 	justify-content: center;
 }
-.palettable-drawer.from-left:has(> .palettable-drawer__trigger[aria-expanded='true'])
-	.palettable-drawer__trigger,
-.palettable-drawer.from-left:has(> .palettable-drawer__trigger.is-open-hover)
-	.palettable-drawer__trigger,
-.palettable-drawer.from-right:has(> .palettable-drawer__trigger[aria-expanded='true'])
-	.palettable-drawer__trigger,
-.palettable-drawer.from-right:has(> .palettable-drawer__trigger.is-open-hover)
+
+@container palette style(--region: left) {
+	.palettable-drawer:has(
+		> .palettable-drawer__trigger:is([aria-expanded='true'], .is-open-hover)
+	)
 	.palettable-drawer__trigger {
-	block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
-	min-block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		min-block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	}
 }
-.palettable-drawer.from-top:has(> .palettable-drawer__trigger[aria-expanded='true'])
-	.palettable-drawer__trigger,
-.palettable-drawer.from-top:has(> .palettable-drawer__trigger.is-open-hover)
-	.palettable-drawer__trigger,
-.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger[aria-expanded='true'])
-	.palettable-drawer__trigger,
-.palettable-drawer.from-bottom:has(> .palettable-drawer__trigger.is-open-hover)
+
+@container palette style(--region: right) {
+	.palettable-drawer:has(
+		> .palettable-drawer__trigger:is([aria-expanded='true'], .is-open-hover)
+	)
 	.palettable-drawer__trigger {
-	inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
-	min-inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		min-block-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	}
+}
+
+@container palette style(--region: top) {
+	.palettable-drawer:has(
+		> .palettable-drawer__trigger:is([aria-expanded='true'], .is-open-hover)
+	)
+	.palettable-drawer__trigger {
+		inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		min-inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	}
+}
+
+@container palette style(--region: bottom) {
+	.palettable-drawer:has(
+		> .palettable-drawer__trigger:is([aria-expanded='true'], .is-open-hover)
+	)
+	.palettable-drawer__trigger {
+		inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+		min-inline-size: calc(var(--palette-toolbar-perpendicular) + 2px);
+	}
 }
 
 /* Drawer chevron: marker beside the icon on horizontal bars, stacked
@@ -1398,10 +1318,6 @@
 		gap: 1px;
 	}
 }
-.palettable-drawer__trigger.palette-default-layout-vertical {
-	flex-direction: column;
-	gap: 1px;
-}
 
 /* ── 10. Vertical axis ── */
 /* Perpendicular width stays standardized; content grows along the toolbar.
@@ -1412,9 +1328,7 @@
  * (§11 accounts for it).
  *
  * Orientation comes from the nearest `palette` container's `--layout` /
- * `--region` vars (set on borders, parking, drawer popups). The stamped
- * `palette-default-layout-*` / `palette-default-region-*` classes below
- * stay as the no-container-query fallback. */
+ * `--region` vars (stamped inline on borders, parking, drawer popups). */
 
 @container palette style(--layout: vertical) {
 	.palette-default-segmented,
@@ -1425,18 +1339,13 @@
 	}
 }
 
-.palette-default-segmented.palette-default-layout-vertical,
-.palette-default-stepper.palette-default-layout-vertical,
-.palette-default-stars.palette-default-layout-vertical,
-.palette-default-stars-row.palette-default-layout-vertical {
-	flex-direction: column-reverse;
-}
-
 /* Square tools in vertical toolbars. */
-.palette-vertical .palette-default-tool {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	padding-inline: 0;
+@container palette style(--layout: vertical) {
+	.palette-default-tool {
+		inline-size: var(--palette-toolbar-perpendicular);
+		min-inline-size: var(--palette-toolbar-perpendicular);
+		padding-inline: 0;
+	}
 }
 
 /* Command box: icon-only square; shell grows sideways, toolbar width fixed. */
@@ -1506,74 +1415,79 @@
 	}
 }
 
-.palette-default-command-box.palette-default-layout-vertical {
-	inline-size: var(--palette-toolbar-perpendicular);
-	max-inline-size: none;
-	block-size: var(--palette-toolbar-perpendicular);
-	position: relative;
-	overflow: visible;
+@container palette style(--layout: vertical) {
+	.palette-default-command-box.palette-default-layout-vertical {
+		inline-size: var(--palette-toolbar-perpendicular);
+		max-inline-size: none;
+		block-size: var(--palette-toolbar-perpendicular);
+		position: relative;
+		overflow: visible;
+	}
+
+	.palette-default-command-box.palette-default-layout-vertical
+		.palette-default-command-shell {
+		position: absolute;
+		inset-block: 0;
+		inset-inline-start: 0;
+		inline-size: var(--palette-toolbar-perpendicular);
+		padding: 0;
+		justify-content: center;
+		overflow: hidden;
+		z-index: 1;
+		transition:
+			inline-size var(--pd-slide),
+			box-shadow var(--pd-ease);
+	}
+
+	.palette-default-command-box.palette-default-layout-vertical:hover
+		.palette-default-command-shell,
+	.palette-default-command-box.palette-default-layout-vertical:focus-within
+		.palette-default-command-shell {
+		inline-size: 14rem;
+		background: var(--pd-panel);
+		border-color: var(--pd-accent);
+		box-shadow: var(--pd-pop-shadow);
+		justify-content: flex-start;
+		padding-inline: 0.6rem;
+	}
+
+	.palette-default-command-box.palette-default-layout-vertical
+		.palette-default-command-tokens {
+		flex-wrap: nowrap;
+		overflow: hidden;
+		opacity: 0;
+		transition: opacity var(--pd-ease);
+	}
+
+	.palette-default-command-box.palette-default-layout-vertical:hover
+		.palette-default-command-tokens,
+	.palette-default-command-box.palette-default-layout-vertical:focus-within
+		.palette-default-command-tokens {
+		opacity: 1;
+	}
+
+	.palette-default-command-box.palette-default-layout-vertical
+		.palette-default-command-popover {
+		position: absolute;
+		inset-inline-start: 0;
+		top: calc(100% + 6px);
+		inline-size: 18rem;
+		z-index: 6;
+	}
 }
 
-.palette-default-command-box.palette-default-layout-vertical .palette-default-command-shell {
-	position: absolute;
-	inset-block: 0;
-	inset-inline-start: 0;
-	inline-size: var(--palette-toolbar-perpendicular);
-	padding: 0;
-	justify-content: center;
-	overflow: hidden;
-	z-index: 1;
-	transition:
-		inline-size var(--pd-slide),
-		box-shadow var(--pd-ease);
-}
+@container palette style(--region: right) {
+	.palette-default-command-box.palette-default-layout-vertical
+		.palette-default-command-shell {
+		inset-inline-start: auto;
+		inset-inline-end: 0;
+	}
 
-.palette-default-command-box.palette-default-layout-vertical:hover
-	.palette-default-command-shell,
-.palette-default-command-box.palette-default-layout-vertical:focus-within
-	.palette-default-command-shell {
-	inline-size: 14rem;
-	background: var(--pd-panel);
-	border-color: var(--pd-accent);
-	box-shadow: var(--pd-pop-shadow);
-	justify-content: flex-start;
-	padding-inline: 0.6rem;
-}
-
-.palette-default-command-box.palette-default-layout-vertical
-	.palette-default-command-tokens {
-	flex-wrap: nowrap;
-	overflow: hidden;
-	opacity: 0;
-	transition: opacity var(--pd-ease);
-}
-
-.palette-default-command-box.palette-default-layout-vertical:hover
-	.palette-default-command-tokens,
-.palette-default-command-box.palette-default-layout-vertical:focus-within
-	.palette-default-command-tokens {
-	opacity: 1;
-}
-
-.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
-	.palette-default-command-shell {
-	inset-inline-start: auto;
-	inset-inline-end: 0;
-}
-
-.palette-default-command-box.palette-default-layout-vertical
-	.palette-default-command-popover {
-	position: absolute;
-	inset-inline-start: 0;
-	top: calc(100% + 6px);
-	inline-size: 18rem;
-	z-index: 6;
-}
-
-.palette-default-command-box.palette-default-layout-vertical.palette-default-region-right
-	.palette-default-command-popover {
-	inset-inline-start: auto;
-	inset-inline-end: 0;
+	.palette-default-command-box.palette-default-layout-vertical
+		.palette-default-command-popover {
+		inset-inline-start: auto;
+		inset-inline-end: 0;
+	}
 }
 
 /* Inline slider grows along the toolbar; range runs vertically below chip. */
@@ -1673,88 +1587,6 @@
 	}
 }
 
-.palette-default-slider-inline.palette-default-layout-vertical {
-	inline-size: var(--palette-toolbar-perpendicular);
-	block-size: auto;
-	padding: 0;
-	box-sizing: border-box;
-	flex-direction: column;
-	gap: 0;
-	border: 0;
-	background: transparent;
-}
-
-.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-value {
-	min-inline-size: 100%;
-	min-block-size: 1.6rem;
-	padding: 0.35rem 0;
-	margin-inline-start: 0;
-	margin-block-start: 0;
-	border-radius: var(--pd-r-s) var(--pd-r-s) 0 0;
-	box-sizing: border-box;
-	flex-direction: column;
-	gap: 2px;
-	line-height: 1;
-}
-
-.palette-default-slider-inline.palette-default-layout-vertical > .palette-default-slider-track {
-	width: 100%;
-	height: 3.5rem;
-	margin: 0;
-	margin-block-start: -1px;
-	padding: 0.35rem 0;
-	border-radius: 0 0 var(--pd-r-s) var(--pd-r-s);
-	box-sizing: border-box;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-}
-
-.palette-default-slider-inline.palette-default-layout-vertical
-	> .palette-default-slider-track
-	> input[type='range'] {
-	writing-mode: vertical-lr;
-	direction: rtl;
-	width: 100%;
-	height: 100%;
-	min-width: 0;
-	max-width: 100%;
-	margin: 0;
-	padding: 0;
-	flex: 0 0 auto;
-	border: 0;
-	background: transparent;
-	border-radius: 0;
-}
-
-/* Stars row stacks; constrained so it never widens the toolbar. */
-.palette-default-stars.palette-default-layout-vertical {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	padding: 0;
-	box-sizing: border-box;
-}
-
-.palette-default-stars.palette-default-layout-vertical > .palette-default-stars-row {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	flex-direction: column-reverse;
-	align-items: center;
-	justify-content: center;
-}
-
-/* Stepper readout + square vertical triggers stack icon above value. */
-.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	padding: 0.35rem 0;
-	box-sizing: border-box;
-	flex-direction: column;
-	gap: 2px;
-	line-height: 1;
-}
-
 /* Vertical status: pinned square, icon above minutes above seconds.
  * Tabular numerals keep mm/ss from jittering; the split pair and the
  * non-time fallback toggle via `hidden` (renderer-owned), so the square
@@ -1780,43 +1612,22 @@
 		font-weight: 600;
 		color: var(--pd-status-fg);
 	}
-}
 
-.palette-default-status.palette-default-layout-vertical {
-	inline-size: var(--palette-toolbar-perpendicular);
-	min-inline-size: var(--palette-toolbar-perpendicular);
-	block-size: auto;
-	flex-direction: column;
-	gap: 1px;
-	line-height: 1;
-	justify-content: center;
-	padding: 0.35rem 0;
-	box-sizing: border-box;
-}
+	.palette-default-stepper > .palette-default-stepper-value > .palette-default-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-inline-size: 0;
+		padding-inline: 0;
+	}
 
-.palette-default-status.palette-default-layout-vertical > :is(
-	.palette-default-status-minutes,
-	.palette-default-status-seconds,
-	.palette-default-status-value
-) {
-	font-weight: 600;
-	color: var(--pd-status-fg);
-}
-
-.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value > .palette-default-icon {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-inline-size: 0;
-	padding-inline: 0;
-}
-
-.palette-default-slider-drawer.palette-default-layout-vertical
-	> .palette-default-slider-trigger
-	> .palette-default-slider-value {
-	flex-direction: column;
-	gap: 1px;
-	line-height: 1;
+	.palette-default-slider-drawer
+		> .palette-default-slider-trigger
+		> .palette-default-slider-value {
+		flex-direction: column;
+		gap: 1px;
+		line-height: 1;
+	}
 }
 
 /* Segmented at rest: icons only; labels overlay beside them on group hover.
@@ -1869,51 +1680,6 @@
 		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
 		transform: translateX(-0.4rem);
 	}
-}
-
-.palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden])) {
-	position: relative;
-	overflow: visible;
-}
-
-.palette-default-segmented.palette-default-layout-vertical
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
-	> .palette-default-choice {
-	position: absolute;
-	inset-block: -1px;
-	inset-inline-end: calc(100% + 1px);
-	display: inline-flex;
-	align-items: center;
-	inline-size: max-content;
-	padding-inline: 0.72rem;
-	border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-	white-space: nowrap;
-	opacity: 0;
-	pointer-events: none;
-	transform: translateX(0.4rem);
-	transition:
-		transform var(--pd-slide),
-		opacity var(--pd-ease);
-}
-
-.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
-	> .palette-default-choice {
-	inset-inline-end: auto;
-	inset-inline-start: calc(100% + 1px);
-	border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-	transform: translateX(-0.4rem);
-}
-
-.palette-default-segmented.palette-default-layout-vertical:hover
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
-	> .palette-default-choice,
-.palette-default-segmented.palette-default-layout-vertical:focus-within
-	> .palette-default-tool:has(> .palette-default-choice-icon:not([hidden]))
-	> .palette-default-choice {
-	opacity: 1;
-	transform: translateX(0);
 }
 
 /* ── 11. Joined-box collapsing ── */
@@ -2013,6 +1779,9 @@
 		border-bottom-right-radius: 0;
 	}
 
+	/* Text on board: square joint, round exterior. Gate mirrors the
+	 * overlay — only buttons with icon + label square the joint.
+	 * Default opens left (exterior right); `left` mirrors. */
 	.palette-default-segmented
 		> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
 		border-top-left-radius: 0;
@@ -2046,89 +1815,6 @@
 		border-bottom-left-radius: 0;
 		border-bottom-right-radius: 0;
 	}
-}
-
-:is(
-	.palette-default-segmented.palette-default-layout-vertical > .palette-default-tool,
-	.palette-default-stepper.palette-default-layout-vertical > .palette-default-tool,
-	.palette-default-stepper.palette-default-layout-vertical > .palette-default-stepper-value,
-	.palette-default-stars.palette-default-layout-vertical > :is(.palette-default-icon, .palette-default-stars-row)
-) {
-	margin-inline-start: 0;
-	margin-block-start: -1px;
-}
-
-:is(
-	.palette-default-segmented.palette-default-layout-vertical,
-	.palette-default-stepper.palette-default-layout-vertical,
-	.palette-default-stars.palette-default-layout-vertical
-) > :first-child {
-	margin-block-start: 0;
-	border-top-left-radius: 0;
-	border-top-right-radius: 0;
-	border-bottom-left-radius: var(--pd-r-s);
-	border-bottom-right-radius: var(--pd-r-s);
-}
-
-:is(
-	.palette-default-segmented.palette-default-layout-vertical,
-	.palette-default-stepper.palette-default-layout-vertical,
-	.palette-default-stars.palette-default-layout-vertical
-) > :last-child {
-	border-top-left-radius: var(--pd-r-s);
-	border-top-right-radius: var(--pd-r-s);
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: 0;
-}
-
-.palette-default-stepper.palette-default-layout-vertical > :not(:first-child):not(:last-child),
-.palette-default-stars.palette-default-layout-vertical > :not(:first-child):not(:last-child) {
-	border-radius: 0;
-}
-
-.palette-default-segmented.palette-default-layout-vertical > :not(:last-child) {
-	border-top-left-radius: 0;
-	border-top-right-radius: 0;
-}
-
-.palette-default-segmented.palette-default-layout-vertical > :not(:first-child) {
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: 0;
-}
-
-/* Text on board: square joint, round exterior. Gate mirrors the overlay —
- * only buttons with icon + label square the joint. Default opens left
- * (exterior right); `region-left` mirrors. */
-.palette-default-segmented.palette-default-layout-vertical
-	> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
-	border-top-left-radius: 0;
-	border-top-right-radius: 0;
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: var(--pd-r-s);
-}
-
-.palette-default-segmented.palette-default-layout-vertical
-	> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
-	border-top-left-radius: 0;
-	border-top-right-radius: var(--pd-r-s);
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: 0;
-}
-
-.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :first-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
-	border-top-left-radius: 0;
-	border-top-right-radius: 0;
-	border-bottom-left-radius: var(--pd-r-s);
-	border-bottom-right-radius: 0;
-}
-
-.palette-default-segmented.palette-default-layout-vertical.palette-default-region-left
-	> :last-child:has(> .palette-default-choice-icon:not([hidden])):has(> .palette-default-choice) {
-	border-top-left-radius: var(--pd-r-s);
-	border-top-right-radius: 0;
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: 0;
 }
 
 /* ── 12. Configurator / add-item panel ── */

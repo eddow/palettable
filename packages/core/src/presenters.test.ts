@@ -11,6 +11,8 @@ import {
 	configuratorTonePatch,
 	drawerChildAxis,
 	drawerChildRegion,
+	drawerChildRegionFor,
+	drawerCloseOnClickOf,
 	drawerOpenOf,
 	enumFromDisplayKey,
 	headMeta,
@@ -20,7 +22,6 @@ import {
 	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
-	stashPressedState,
 	statusPresenter,
 	themePresenter,
 	togglePresenter,
@@ -59,6 +60,18 @@ describe('axisForRegion / drawer rules', () => {
 		expect(drawerChildRegion('vertical')).toBe('left')
 		expect(drawerChildRegion('horizontal')).toBe('top')
 	})
+
+	it('picks the center-seeking child region along the parent axis', () => {
+		// Horizontal parent → child axis vertical → left/right halves.
+		expect(drawerChildRegionFor('horizontal', 100, 500)).toBe('left')
+		expect(drawerChildRegionFor('horizontal', 700, 500)).toBe('right')
+		// Vertical parent → child axis horizontal → top/bottom halves.
+		expect(drawerChildRegionFor('vertical', 100, 400)).toBe('top')
+		expect(drawerChildRegionFor('vertical', 700, 400)).toBe('bottom')
+		// Child axis always matches the picked region.
+		expect(axisForRegion(drawerChildRegionFor('horizontal', 100, 500))).toBe('vertical')
+		expect(axisForRegion(drawerChildRegionFor('vertical', 100, 400))).toBe('horizontal')
+	})
 })
 
 describe('resolveControl', () => {
@@ -94,35 +107,39 @@ describe('headMeta / headTooltip', () => {
 })
 
 describe('buttonPresenter / togglePresenter / statusPresenter', () => {
-	it('builds action view-models with run specs', () => {
+	it('builds action view-models with run runnables', () => {
 		const view = buttonPresenter(
 			{ point: 'save' },
 			{ point: { id: 'save', label: 'Save', type: 'action', run: () => {} }, value: undefined },
-			'save'
+			{ kind: 'action', point: 'save' }
 		)
-		expect(view).toMatchObject({ label: 'save', can: true, run: 'save' })
+		expect(view).toMatchObject({
+			label: 'save',
+			can: true,
+			run: { kind: 'action', point: 'save' },
+		})
 		const disabled = buttonPresenter(
 			{ point: 'save' },
 			{
 				point: { id: 'save', label: 'Save', type: 'action', run: () => {}, can: () => false },
 				value: undefined,
 			},
-			'save'
+			{ kind: 'action', point: 'save' }
 		)
 		expect(disabled.can).toBe(false)
 	})
 
-	it('builds toggle view-models with toggle specs', () => {
+	it('builds toggle view-models with toggle runnables', () => {
 		const on = togglePresenter(
 			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: true }
 		)
-		expect(on).toMatchObject({ pressed: true, toggle: 'flag=false' })
+		expect(on).toMatchObject({ pressed: true, toggle: { kind: 'toggle', point: 'flag' } })
 		const off = togglePresenter(
 			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: false }
 		)
-		expect(off.toggle).toBe('flag=true')
+		expect(off.toggle).toEqual({ kind: 'toggle', point: 'flag' })
 		const skeleton = togglePresenter(
 			{ point: 'flag' },
 			{ point: { id: 'flag', label: 'Flag', type: 'boolean' }, value: undefined }
@@ -224,24 +241,36 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		} as const
 		expect(
 			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'light' })
-		).toMatchObject({ value: 'light', valueIcon: '☀️', cycle: 'theme=dark' })
+		).toMatchObject({
+			value: 'light',
+			valueIcon: '☀️',
+			cycle: { kind: 'set', point: 'theme', value: 'dark' },
+		})
 		expect(
 			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'dark' })
-		).toMatchObject({ value: 'dark', valueIcon: '🌙', cycle: 'theme=system' })
+		).toMatchObject({
+			value: 'dark',
+			valueIcon: '🌙',
+			cycle: { kind: 'set', point: 'theme', value: 'system' },
+		})
 		expect(
 			themePresenter({ point: 'theme', control: 'theme' }, { point, value: 'system' })
-		).toMatchObject({ value: 'system', valueIcon: '💻', cycle: 'theme=light' })
+		).toMatchObject({
+			value: 'system',
+			valueIcon: '💻',
+			cycle: { kind: 'set', point: 'theme', value: 'light' },
+		})
 		const skeleton = themePresenter(
 			{ point: 'theme', control: 'theme' },
 			{ point, value: undefined }
 		)
 		expect(skeleton.value).toBeUndefined()
-		expect(skeleton.cycle).toBe('theme=light')
+		expect(skeleton.cycle).toEqual({ kind: 'set', point: 'theme', value: 'light' })
 	})
 })
 
 describe('selectPresenter / sliderPresenter', () => {
-	it('resolves current icon/value + options with select specs', () => {
+	it('resolves current icon/value + options with select runnables', () => {
 		const view = selectPresenter(
 			{ point: 'theme' },
 			{
@@ -263,7 +292,7 @@ describe('selectPresenter / sliderPresenter', () => {
 		expect(view.value).toBe('dark')
 		expect(view.options).toHaveLength(2)
 		expect(view.options[1]?.can).toBe(false)
-		expect(view.select('light')).toBe('theme=light')
+		expect(view.select('light')).toEqual({ kind: 'set', point: 'theme', value: 'light' })
 		const skeleton = selectPresenter(
 			{ point: 'theme' },
 			{
@@ -644,7 +673,13 @@ describe('configuratorModel + patches', () => {
 		expect(configuratorControlCleanup('segmented')).toEqual(['showValue', 'showFilter'])
 		expect(configuratorControlCleanup('slider')).toEqual(['showText', 'showFilter'])
 		expect(configuratorControlCleanup('drawerSlider')).toEqual(['showText', 'showFilter'])
-		expect(configuratorControlCleanup('button')).toEqual(['showValue', 'showText', 'showFilter'])
+		expect(configuratorControlCleanup('button')).toEqual([
+			'showValue',
+			'showText',
+			'showFilter',
+			'open',
+			'closeOnClick',
+		])
 		expect(configuratorControlCleanup('drawer')).toEqual([
 			'showValue',
 			'showText',
@@ -658,25 +693,61 @@ describe('configuratorModel + patches', () => {
 			'showFilter',
 			'sliderVariant',
 			'open',
+			'closeOnClick',
 		])
 	})
 
 	it('reads drawer open with default', () => {
-		expect(drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [] })).toBe('click')
+		expect(drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [] })).toBe('toggle')
 		expect(
 			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'hover' } })
 		).toBe('hover')
 		expect(
+			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'toggle' } })
+		).toBe('toggle')
+		// Legacy values normalize to `toggle` so stored layouts keep working.
+		expect(
 			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'press' } })
-		).toBe('press')
+		).toBe('toggle')
+		expect(
+			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'click' } })
+		).toBe('toggle')
 		expect(
 			drawerOpenOf({ point: 'd', control: 'drawer', toolbar: [], config: { open: 'nope' } })
-		).toBe('click')
+		).toBe('toggle')
+	})
+
+	it('reads drawer close-on-click opt-in', () => {
+		expect(drawerCloseOnClickOf({ point: 'd', control: 'drawer', toolbar: [] })).toBe(false)
+		expect(
+			drawerCloseOnClickOf({
+				point: 'd',
+				control: 'drawer',
+				toolbar: [],
+				config: { closeOnClick: true },
+			})
+		).toBe(true)
+		expect(
+			drawerCloseOnClickOf({
+				point: 'd',
+				control: 'drawer',
+				toolbar: [],
+				config: { closeOnClick: false },
+			})
+		).toBe(false)
+		expect(
+			drawerCloseOnClickOf({
+				point: 'd',
+				control: 'drawer',
+				toolbar: [],
+				config: { closeOnClick: 'yes' },
+			})
+		).toBe(false)
 	})
 })
 
-describe('enum-from / stash display helpers', () => {
-	it('resolves display keys and pressed state', () => {
+describe('enum-from display helper', () => {
+	it('resolves display keys', () => {
 		expect(
 			enumFromDisplayKey(
 				[
@@ -687,8 +758,6 @@ describe('enum-from / stash display helpers', () => {
 			)
 		).toBe('fast')
 		expect(enumFromDisplayKey([{ key: 'slow', value: 0.5 }], 9)).toBeUndefined()
-		expect(stashPressedState(0, 0)).toBe(true)
-		expect(stashPressedState(1, 0)).toBe(false)
 	})
 
 	it('detects drawer items', () => {

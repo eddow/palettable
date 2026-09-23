@@ -124,7 +124,7 @@ describe('ServerPointDescriptor round-trip', () => {
 			runners
 		)
 		const core = new PaletteCore(rebuilt)
-		core.run('save')
+		core.run({ kind: 'action', point: 'save' })
 		expect(run).toHaveBeenCalledTimes(1)
 	})
 
@@ -187,7 +187,10 @@ describe('PaletteCore.resolveEditablePoint / readActionCan', () => {
 	it('resolves valued points, rejects actions/unknown/family mismatch', () => {
 		const core = new PaletteCore(points())
 		expect(core.resolveEditablePoint('theme').id).toBe('theme')
-		expect(core.resolveEditablePoint('theme=dark').id).toBe('theme')
+		// Runnable points are plain ids — no spec-suffix stripping.
+		expect(() => core.resolveEditablePoint('theme=dark')).toThrow(
+			'Unknown palette point "theme=dark"'
+		)
 		expect(() => core.resolveEditablePoint('missing')).toThrow('Unknown palette point "missing"')
 		expect(() => core.resolveEditablePoint('save')).toThrow(
 			'Palette point "save" does not support editing'

@@ -12,39 +12,67 @@
  * - Input is `readonly AnyPoint[]` + plain-data context (keystrokes,
  *   current values, `can` flags) instead of a live `Palette` instance —
  *   the builders never touch `run()` closures or `$state`.
- * - `run` specs are strings (`id`, `id=value`, `id:action`, virtual ids);
- *   adapters execute them via `PaletteCore.run(spec)`.
+ * - `run` entries are runnables (`{ kind, point, value/delta }`);
+ *   adapters execute them via `PaletteCore.run(runnable)`.
  * - Catalogue drag payloads (`PALETTE_CATALOG_DRAG_MIME`,
  *   `serialize/parseCatalogDragPayload`, `paletteToolbarItemFromCatalogPayload`,
  *   `paletteCatalogEntries`) are **deleted per `plans/simplify.md`** (dead
  *   code — zero `draggable=` in `src`): rows are click-to-select, not
- *   draggable. Only `spec` payloads survive as plain `{ kind: 'spec', spec }`
+ *   draggable. Only runnable payloads survive as plain `{ kind: 'runnable', runnable }`
  *   data (no JSON helpers — adapters serialize if they need to).
  * - `commandBoxEnumCommands` / `per-value` is **deleted per
  *   `plans/simplify.md`** (never set by demo/tools): enum catalog always
  *   collapses to one tool-label row.
  * - `paletteToolbarItemFromSpec` / `paletteToolbarItemFromDerivedVariant`
  *   (which resolve control registries + components) stay adapter-owned —
- *   core has no components. The builders emit specs + variant descriptors;
+ *   core has no components. The builders emit runnables + variant descriptors;
  *   adapters map them to items.
  */
 import type { IconToken } from './identifiers.js'
 import type { KeyBindings } from './keys.js'
-import { findKeystrokesFor } from './keys.js'
-import type { AnyPoint, NumberPoint } from './points.js'
+import type { AnyPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
+import type { Runnable } from './runnable.js'
+import { entryIdOf } from './catalog.js'
 import type { EnumOption } from './type.js'
+
+// Shared text/keyword helpers live in `catalog.ts` (single source of truth
+// — this module imports them, never the reverse, so there is no runtime
+// cycle). Re-exported here so existing imports keep working unchanged.
+export {
+	type ActionableEntry,
+	type AddableEntry,
+	actionableEntries,
+	addableEntries,
+	type BindableEntry,
+	bindableEntries,
+	type CatalogKind,
+	collectKeywords,
+	entryMeta,
+	humanizeCommandText,
+	numberStepEnabled,
+	splitCommandWords,
+} from './catalog.js'
+
+import type { AddableEntry } from './catalog.js'
+import {
+	actionableEntries,
+	addableEntries,
+	collectKeywords,
+	normalizeToken,
+	splitCommandWords,
+	uniqueNormalized,
+} from './catalog.js'
 
 /** Search query accepted by `filterCommandEntries`. */
 export type CommandBoxQuery = {
 	readonly free?: string
 	readonly keywords?: readonly string[]
-	readonly categories?: readonly string[]
 }
 
 /**
- * Command entry built from a point definition. `run` is a spec string for
- * `PaletteCore.run(spec)` — never a closure (SSR-safe). `can: false`
+ * Command entry built from a point definition. `run` is a runnable for
+ * `PaletteCore.run(runnable)` — never a closure (SSR-safe). `can: false`
  * entries are filtered from results; `can: undefined` = enabled.
  */
 export type CommandBoxEntry = {
@@ -53,26 +81,15 @@ export type CommandBoxEntry = {
 	readonly meta: string
 	readonly icon?: IconToken
 	readonly keywords?: readonly string[]
-	readonly categories?: readonly string[]
 	readonly can?: boolean
-	/** Spec string to execute via `PaletteCore.run(spec)`. */
-	readonly run: string
+	/** Runnable description to execute via `PaletteCore.run(runnable)`. */
+	readonly run: Runnable
 	/** Optional context bags (Context §2.7 — filter at render, not here). */
 	readonly uses?: readonly string[]
 }
 
-/** Add-item source: a point or a control-only item that can seed a toolbar item. */
-export type AddItemSource = {
-	readonly id: string
-	readonly label: string
-	readonly meta: string
-	readonly icon?: IconToken
-	readonly keywords?: readonly string[]
-	readonly categories?: readonly string[]
-	readonly kind: 'tool' | 'item'
-	readonly pointId?: string
-	readonly control?: string
-}
+/** Add-item source — standard addable row (alias kept for compat). */
+export type AddItemSource = AddableEntry
 
 /** Concrete variant derived from an add-item source. */
 export type DerivedVariant = {
@@ -81,12 +98,11 @@ export type DerivedVariant = {
 	readonly meta: string
 	readonly icon?: IconToken
 	readonly keywords?: readonly string[]
-	readonly categories?: readonly string[]
 	readonly kind: 'tool' | 'item' | 'set' | 'action'
 	readonly pointId?: string
 	readonly control?: string
 	readonly action?: string
-	/** Spec string this variant inserts (`pointId`, `pointId=value`, `pointId:action`). */
+	/** Point id this variant inserts (tools bind the point, value chosen on the bar). */
 	readonly spec?: string
 	readonly valueType?: 'boolean' | 'number' | 'enum'
 	readonly values?: readonly EnumOption[]
@@ -104,20 +120,111 @@ export type CommandBoxContext = {
 	readonly itemControls?: readonly string[]
 }
 
-function normalizeToken(value: string): string {
-	return value.trim().toLowerCase()
+/**
+ * Legacy executable-command builder — thin adapter over `actionableEntries`
+ * (same rows, same ids/labels/metas/keywords/`can`). Kept for the frozen
+ * svelte adapter + existing tests; new code uses `actionableEntries`.
+ * `mode: 'catalog'` keeps the old preset/collapsed rows for catalog display.
+ */
+export function paletteCommandEntries(
+	points: readonly AnyPoint[],
+	context: CommandBoxContext = {},
+	options: { excludePoints?: readonly string[]; mode?: 'run' | 'catalog' } = {}
+): readonly CommandBoxEntry[] {
+	if (options.mode === 'catalog') {
+		const excluded = new Set(options.excludePoints ?? [])
+		return addableEntries(points, context, { excludePoints: [...excluded] }).flatMap(
+			(source): readonly CommandBoxEntry[] => {
+				if (source.kind === 'item') {
+					return []
+				}
+				const point = points.find((candidate) => candidate.id === source.pointId)
+				if (point === undefined) return []
+				const run: Runnable = { kind: 'action', point: point.id }
+				if (isActionPoint(point)) {
+					return [
+						{
+							id: entryIdOf(run),
+							label: source.label,
+							meta: 'Run command',
+							icon: point.icon,
+							keywords: [...source.keywords],
+							run,
+							uses: point.uses,
+						},
+					]
+				}
+				if (isNothingPoint(point)) {
+					return [
+						{
+							id: `tool:${point.id}`,
+							label: source.label,
+							meta: source.meta,
+							icon: point.icon,
+							keywords: [...source.keywords],
+							run,
+							uses: point.uses,
+						},
+					]
+				}
+				if (!isValuedPoint(point)) return []
+				if (point.type === 'boolean') {
+					const presets: readonly Runnable[] = [
+						{ kind: 'toggle', point: point.id },
+						{ kind: 'set', point: point.id, value: true },
+						{ kind: 'set', point: point.id, value: false },
+					]
+					return presets.map((preset, index) => ({
+						id: entryIdOf(preset),
+						label: `${source.label} → ${index === 0 ? 'Toggle' : index === 1 ? 'On' : 'Off'} (preset)`,
+						meta: 'Preset — toggle on toolbar',
+						icon: point.icon,
+						keywords: [...source.keywords],
+						run: preset,
+						uses: point.uses,
+					}))
+				}
+				return [
+					{
+						id: `${point.id}:catalog-enum`,
+						label: source.label,
+						meta: 'Control — add to toolbar; value is chosen on the bar or in the inspector',
+						icon: point.icon,
+						keywords: [...source.keywords],
+						run,
+						uses: point.uses,
+					},
+				]
+			}
+		)
+	}
+	return actionableEntries(points, context, {
+		excludePoints: options.excludePoints,
+	}).map((entry) => ({
+		id: entry.id,
+		label: entry.label,
+		meta: entry.meta,
+		icon: entry.icon,
+		keywords: [...entry.keywords],
+		can: entry.can,
+		run: entry.run,
+		uses: entry.uses,
+	}))
 }
 
-function uniqueNormalized(values: readonly string[]): string[] {
-	const seen = new Set<string>()
-	const result: string[] = []
-	for (const value of values) {
-		const normalized = normalizeToken(value)
-		if (normalized === '' || seen.has(normalized)) continue
-		seen.add(normalized)
-		result.push(value)
-	}
-	return result
+/**
+ * Legacy add-item builder — standard addable list (actions included, so
+ * e.g. a Save button can be added). Kept as a named alias for the frozen
+ * svelte adapter + existing tests; new code calls `addableEntries` directly.
+ */
+export function paletteAddItemEntries(
+	points: readonly AnyPoint[],
+	context: CommandBoxContext = {},
+	options: { excludePoints?: readonly string[] } = {}
+): readonly AddItemSource[] {
+	return addableEntries(points, context, {
+		excludePoints: options.excludePoints,
+	})
 }
 
 /** Split a query into whitespace-separated tokens. */
@@ -128,295 +235,23 @@ export function tokenizeQuery(value: string): string[] {
 		.filter((token) => token.length > 0)
 }
 
-/** Drop the last whitespace-separated token (suggestion-accept helper). */
+function matchesAllTerms(haystack: string, terms: readonly string[]): boolean {
+	return terms.every((term) => haystack.includes(term))
+}
+
+/**
+ * Expand an enum value into searchable keywords (dot-separated names split).
+ * Keywords are kept for future use (command-box keyword search).
+ */
 export function trimLastToken(value: string): string {
 	const tokens = tokenizeQuery(value)
 	tokens.pop()
 	return tokens.join(' ')
 }
 
-function matchesAllTerms(haystack: string, terms: readonly string[]): boolean {
-	return terms.every((term) => haystack.includes(term))
-}
-
-function splitCommandWords(value: string): string[] {
-	return value
-		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-		.replace(/[^a-zA-Z0-9]+/g, ' ')
-		.split(/\s+/)
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0)
-}
-
-function humanizeCommandText(value: string): string {
-	const words = splitCommandWords(value)
-	if (words.length === 0) return value
-	return words.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
-}
-
-function collectKeywords(...sources: (string | readonly string[] | undefined)[]): string[] {
-	const values: string[] = []
-	for (const source of sources) {
-		if (source === undefined) continue
-		if (typeof source === 'string') {
-			values.push(source)
-			values.push(...splitCommandWords(source).map((word) => word.toLowerCase()))
-			continue
-		}
-		for (const value of source) {
-			values.push(value)
-			values.push(...splitCommandWords(value).map((word) => word.toLowerCase()))
-		}
-	}
-	return uniqueNormalized(values)
-}
-
-function entryMeta(context: CommandBoxContext, spec: string, fallback: string): string {
-	const keys =
-		context.keys !== undefined ? findKeystrokesFor(context.keys, spec.split(/[=|:]/)[0]!) : []
-	return keys.length > 0 ? keys.join(' / ') : fallback
-}
-
-function entryCategories(point: AnyPoint, extra?: readonly string[]): string[] {
-	const categories = uniqueNormalized([...(point.categories ?? []), ...(extra ?? [])])
-	return categories.length > 0 ? categories : [isActionPoint(point) ? 'action' : point.type]
-}
-
-function currentValue(context: CommandBoxContext, id: string): unknown {
-	return context.values?.[id]
-}
-
-function actionEnabled(context: CommandBoxContext, id: string): boolean {
-	return context.actionCan?.[id] ?? true
-}
-
-/**
- * Bounds `can` for a number `inc` / `dec` entry from plain-data context.
- * Step-aware (`value + step <= max`, `value - step >= min`, epsilon for
- * float drift), mirroring `namedActionCan` in `core.ts` — but lenient:
- * no values context (or a non-number current) = enabled, so adapters
- * without live values keep the old default. Adapters with live values
- * refine via `PaletteCore.canRunAction` at render time.
- */
-function numberActionEnabled(
-	context: CommandBoxContext,
-	point: AnyPoint,
-	action: 'inc' | 'dec'
-): boolean {
-	const current = currentValue(context, point.id)
-	if (typeof current !== 'number' || !Number.isFinite(current)) return true
-	const constraints = (point as NumberPoint).constraints ?? {}
-	const step = constraints.step ?? 1
-	const epsilon = Number.EPSILON * Math.max(1, Math.abs(current), Math.abs(step)) * 8
-	if (action === 'inc')
-		return constraints.max === undefined || current + step <= constraints.max + epsilon
-	return constraints.min === undefined || current - step >= constraints.min - epsilon
-}
-
-/**
- * Build the executable command entries for a point list.
- *
- * In `catalog` mode, entries stay enabled for search and catalogue display;
- * `run` specs are unchanged. Pure over descriptors — no closures.
- */
-export function paletteCommandEntries(
-	points: readonly AnyPoint[],
-	context: CommandBoxContext = {},
-	options: { excludePoints?: readonly string[]; mode?: 'run' | 'catalog' } = {}
-): readonly CommandBoxEntry[] {
-	const catalog = options.mode === 'catalog'
-	const excluded = new Set(options.excludePoints ?? [])
-	const entries: CommandBoxEntry[] = []
-	for (const point of points) {
-		if (excluded.has(point.id)) continue
-		const label = point.label ?? humanizeCommandText(point.id)
-		if (isActionPoint(point)) {
-			entries.push({
-				id: point.id,
-				label,
-				meta: entryMeta(context, point.id, 'Run command'),
-				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords),
-				categories: entryCategories(point),
-				can: catalog ? undefined : actionEnabled(context, point.id),
-				run: point.id,
-				uses: point.uses,
-			})
-			continue
-		}
-		if (!isValuedPoint(point)) {
-			// Nothing-points (status, commandBox, drawer, theme) bind tools
-			// but carry no runnable value: no executable run entries.
-			// They stay eligible as add-item `item`-kind sources via
-			// `context.itemControls` below.
-			continue
-		}
-		if (point.type === 'boolean') {
-			for (const [value, verb] of [
-				[true, 'Enable'],
-				[false, 'Disable'],
-			] as const) {
-				const spec = `${point.id}=${value}`
-				const presetLabel = value ? 'On' : 'Off'
-				entries.push({
-					id: spec,
-					label: catalog ? `${label} → ${presetLabel} (preset)` : `${verb} ${label}`,
-					meta: catalog
-						? 'Preset — fixed on/off on toolbar'
-						: entryMeta(context, spec, `Set ${label}`),
-					icon: point.icon,
-					keywords: collectKeywords(
-						point.id,
-						label,
-						point.keywords,
-						value ? ['enable', 'on', 'true'] : ['disable', 'off', 'false']
-					),
-					categories: entryCategories(point),
-					can: catalog ? undefined : currentValue(context, point.id) !== value,
-					run: spec,
-					uses: point.uses,
-				})
-			}
-			continue
-		}
-		if (point.type === 'enum') {
-			if (catalog) {
-				entries.push({
-					id: `${point.id}:catalog-enum`,
-					label,
-					meta: 'Control — add to toolbar; value is chosen on the bar or in the inspector',
-					icon: point.icon,
-					keywords: collectKeywords(point.id, label, point.keywords, 'set', 'value', 'choose'),
-					categories: entryCategories(point),
-					run: point.id,
-					uses: point.uses,
-				})
-				continue
-			}
-			const optionsList =
-				(point.constraints as { readonly options?: readonly EnumOption[] } | undefined)?.options ??
-				[]
-			for (const option of optionsList) {
-				const optionLabel = option.label ?? humanizeCommandText(option.value)
-				const spec = `${point.id}=${option.value}`
-				const current = currentValue(context, point.id)
-				entries.push({
-					id: spec,
-					label: `Set ${label} to ${optionLabel}`,
-					meta: entryMeta(context, spec, label),
-					icon: option.icon ?? point.icon,
-					keywords: collectKeywords(
-						point.id,
-						label,
-						point.keywords,
-						option.value,
-						optionLabel,
-						option.keywords
-					),
-					categories: entryCategories(point),
-					// No values context = enabled (adapters with live values
-					// refine via the store); otherwise disable the current value.
-					can: option.can !== false && (current === undefined || current !== option.value),
-					run: spec,
-					uses: point.uses,
-				})
-			}
-			continue
-		}
-		if (point.type === 'number') {
-			for (const [action, actionLabel, actionKeywords] of [
-				['inc', `Increase ${label}`, ['increase', 'increment', 'up', 'more']],
-				['dec', `Decrease ${label}`, ['decrease', 'decrement', 'down', 'less']],
-			] as const) {
-				const spec = `${point.id}:${action}`
-				entries.push({
-					id: spec,
-					label: actionLabel,
-					meta: entryMeta(context, spec, `Adjust ${label}`),
-					icon: point.icon,
-					keywords: collectKeywords(point.id, label, point.keywords, actionKeywords),
-					categories: entryCategories(point),
-					// Bounds-aware when values context is present; enabled
-					// by default so adapters without live values keep the
-					// old behaviour (they refine via `canRunAction`).
-					can: catalog ? undefined : numberActionEnabled(context, point, action),
-					run: spec,
-					uses: point.uses,
-				})
-			}
-		}
-	}
-	return entries
-}
-
-/** Build the add-item entries used when creating new toolbar items. Valued + nothing points seed `tool`-kind sources by point name; `context.itemControls` (`item`-kind) survives only as a fallback for controls no nothing-point claims. */
-export function paletteAddItemEntries(
-	points: readonly AnyPoint[],
-	context: CommandBoxContext = {},
-	options: { excludePoints?: readonly string[] } = {}
-): readonly AddItemSource[] {
-	const excluded = new Set(options.excludePoints ?? [])
-	const entries: AddItemSource[] = []
-	for (const point of points) {
-		if (excluded.has(point.id)) continue
-		if (isActionPoint(point)) continue
-		if (isNothingPoint(point)) {
-			// Nothing-points list by point name (Theme, Command, More, …),
-			// not as interchangeable generic controls — each binds 1:1 to
-			// its allowed control(s) via `point.controls`.
-			const label = point.label ?? humanizeCommandText(point.id)
-			entries.push({
-				id: `tool:${point.id}`,
-				kind: 'tool',
-				pointId: point.id,
-				label,
-				meta: 'Add tool',
-				icon: point.icon,
-				keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
-				categories: entryCategories(point, ['tools']),
-			})
-			continue
-		}
-		if (!isValuedPoint(point)) continue
-		// Every valued family (boolean/number/enum/…) seeds one add source;
-		// the concrete control is picked per-variant via `paletteDerivedVariants`.
-		const label = point.label ?? humanizeCommandText(point.id)
-		entries.push({
-			id: `tool:${point.id}`,
-			kind: 'tool',
-			pointId: point.id,
-			label,
-			meta: `Add ${point.type} tool`,
-			icon: point.icon,
-			keywords: collectKeywords(point.id, label, point.keywords, 'add', 'tool'),
-			categories: entryCategories(point, ['tools']),
-		})
-	}
-	for (const control of context.itemControls ?? []) {
-		// Fallback only: skip controls already claimed 1:1 by a nothing-point
-		// (`point.controls` includes the id), so the list shows points by
-		// name instead of interchangeable generic controls.
-		const claimed = points.some(
-			(point) =>
-				isNothingPoint(point) && !excluded.has(point.id) && point.controls?.includes(control)
-		)
-		if (claimed) continue
-		entries.push({
-			id: `item:${control}`,
-			kind: 'item',
-			control,
-			label: humanizeCommandText(control),
-			meta: 'Add control-only item',
-			keywords: collectKeywords(control, 'add', 'control', 'toolbox'),
-			categories: ['controls', 'items'],
-		})
-	}
-	return [...entries].sort((left, right) => left.label.localeCompare(right.label))
-}
-
 /** Expand an add-item source into the concrete variants a user can insert. */
 export function paletteDerivedVariants(
-	source: AddItemSource,
+	source: AddableEntry,
 	points: readonly AnyPoint[] = []
 ): readonly DerivedVariant[] {
 	if (source.kind === 'item') {
@@ -429,7 +264,6 @@ export function paletteDerivedVariants(
 				meta: 'Control-only item',
 				icon: source.icon,
 				keywords: source.keywords,
-				categories: source.categories,
 			},
 		]
 	}
@@ -446,7 +280,6 @@ export function paletteDerivedVariants(
 				meta: 'Toolbar command',
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords),
-				categories: [...(source.categories ?? []), 'tool'],
 				spec: source.pointId,
 			},
 		]
@@ -463,7 +296,6 @@ export function paletteDerivedVariants(
 				meta: 'Control — configure in inspector',
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, 'set', 'value'),
-				categories: [...(source.categories ?? []), 'derived'],
 				spec: source.pointId,
 			},
 		]
@@ -482,7 +314,6 @@ export function paletteDerivedVariants(
 				meta: 'Add tool',
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords),
-				categories: [...(source.categories ?? []), 'tool'],
 				spec: source.pointId,
 			},
 		]
@@ -497,7 +328,6 @@ export function paletteDerivedVariants(
 				meta: 'Control — configure on/off in inspector',
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'toggle'),
-				categories: [...(source.categories ?? []), 'derived'],
 				valueType: 'boolean',
 				spec: source.pointId,
 			},
@@ -513,7 +343,6 @@ export function paletteDerivedVariants(
 				meta: 'Control — choose mode in inspector',
 				icon: source.icon,
 				keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
-				categories: [...(source.categories ?? []), 'derived'],
 				valueType: 'enum',
 				values:
 					(point.constraints as { readonly options?: readonly EnumOption[] } | undefined)
@@ -531,7 +360,6 @@ export function paletteDerivedVariants(
 			meta: 'Control — numeric field in inspector',
 			icon: source.icon,
 			keywords: collectKeywords(source.pointId, label, point.keywords, 'set', 'value'),
-			categories: [...(source.categories ?? []), 'derived'],
 			valueType: 'number',
 			spec: source.pointId,
 		},
@@ -559,17 +387,11 @@ export function paletteEnumSubsetValues<TValue extends string>(options: {
 
 /**
  * Expand an enum value into searchable keywords (dot-separated names split).
- * Categories are included alongside value/label/keywords so `#categoryName`
- * filters match option-level categories too, not just point-level.
+ * Keywords are kept for future use (command-box keyword search).
  */
 export function enumValueKeywords<TValue extends string>(value: EnumOption<TValue>): string[] {
 	const result = new Set<string>()
-	for (const entry of [
-		value.value,
-		value.label,
-		...(value.categories ?? []),
-		...(value.keywords ?? []),
-	]) {
+	for (const entry of [value.value, value.label, ...(value.keywords ?? [])]) {
 		if (typeof entry !== 'string') continue
 		const normalized = entry.trim()
 		if (normalized === '') continue
@@ -582,29 +404,24 @@ export function enumValueKeywords<TValue extends string>(value: EnumOption<TValu
 // ── Headless query model (vanilla `(entries, query) => results`) ────────────
 // The svelte adapter wraps these in `$derived`; core stays rune-free.
 
-function entrySearchData(
-	entry: Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords' | 'categories'>
-): {
+function entrySearchData(entry: Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords'>): {
 	keywords: string[]
-	categories: string[]
 	searchable: string
 	label: string
 } {
 	const keywords = uniqueNormalized(entry.keywords ?? [])
-	const categories = uniqueNormalized(entry.categories ?? [])
 	const searchable = normalizeToken(
-		[entry.id, entry.label, entry.meta ?? '', ...keywords, ...categories].join(' ')
+		[entry.id, entry.label, entry.meta ?? '', ...keywords].join(' ')
 	)
 	return {
 		keywords: keywords.map((keyword) => normalizeToken(keyword)),
-		categories: categories.map((category) => normalizeToken(category)),
 		searchable,
 		label: normalizeToken(entry.label),
 	}
 }
 
 function entryScore(
-	entry: Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords' | 'categories'>,
+	entry: Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords'>,
 	freeTerms: readonly string[]
 ): number {
 	const data = entrySearchData(entry)
@@ -621,13 +438,13 @@ function entryScore(
  * Filter + rank entries for a query. `can: false` entries are excluded.
  * Pure `(entries, query) => results` — the svelte `resultsValue`
  * `$derived.by` chain without the runes.
+ * Generic over the searchable shape so unified catalog entries
+ * (`catalog.ts`) filter through the same implementation — no second scorer.
  */
-export function filterCommandEntries(
-	entries: readonly CommandBoxEntry[],
-	query: CommandBoxQuery
-): readonly CommandBoxEntry[] {
+export function filterCommandEntries<
+	T extends Pick<CommandBoxEntry, 'id' | 'label' | 'meta' | 'keywords' | 'can'>,
+>(entries: readonly T[], query: CommandBoxQuery): readonly T[] {
 	const freeTerms = tokenizeQuery(query.free ?? '').map((term) => normalizeToken(term))
-	const categoryTerms = (query.categories ?? []).map((term) => normalizeToken(term))
 	const keywordTerms = (query.keywords ?? []).map((term) => normalizeToken(term))
 	return [...entries]
 		.filter((entry) => {
@@ -641,7 +458,6 @@ export function filterCommandEntries(
 			) {
 				return false
 			}
-			if (!categoryTerms.every((term) => data.categories.includes(term))) return false
 			return true
 		})
 		.sort((left, right) => {
@@ -662,13 +478,13 @@ export type CommandBoxKeywordSuggestion = {
  * Pure — the svelte `suggestionsValue` `$derived.by` chain without the runes.
  */
 export function suggestCommandKeywords(
-	entries: readonly CommandBoxEntry[],
+	entries: readonly Pick<CommandBoxEntry, 'keywords'>[],
 	input: string,
 	activeKeywords: readonly string[] = []
 ): readonly CommandBoxKeywordSuggestion[] {
 	const currentWord = tokenizeQuery(input).at(-1)
-	const prefix = currentWord !== undefined ? normalizeToken(currentWord.replace(/^#/, '')) : ''
-	if (prefix === '' || currentWord?.startsWith('#')) return []
+	const prefix = currentWord !== undefined ? normalizeToken(currentWord) : ''
+	if (prefix === '') return []
 	const active = new Set(activeKeywords.map((keyword) => normalizeToken(keyword)))
 	const remaining = new Set<string>()
 	for (const entry of entries) {
@@ -684,28 +500,18 @@ export function suggestCommandKeywords(
 }
 
 /**
- * Parse raw input into categories (`#name`), known keywords, and free text.
+ * Parse raw input into known keywords and free text.
  * Pure — the svelte `parsedInput` `$derived.by` chain without the runes.
  */
 export function parseCommandInput(
 	input: string,
-	availableCategories: readonly string[],
 	availableKeywords: readonly string[]
-): { categories: string[]; keywords: string[]; text: string } {
-	const categoryAliases: Record<string, string> = {}
-	for (const category of availableCategories) categoryAliases[normalizeToken(category)] = category
+): { keywords: string[]; text: string } {
 	const keywordAliases: Record<string, string> = {}
 	for (const keyword of availableKeywords) keywordAliases[normalizeToken(keyword)] = keyword
-	const categories: string[] = []
 	const keywords: string[] = []
 	const textTokens: string[] = []
 	for (const token of tokenizeQuery(input)) {
-		const categoryToken = token.startsWith('#') ? token.slice(1) : token
-		const category = categoryAliases[normalizeToken(categoryToken)]
-		if (category !== undefined && token.startsWith('#')) {
-			if (!categories.includes(category)) categories.push(category)
-			continue
-		}
 		const keyword = keywordAliases[normalizeToken(token)]
 		if (keyword !== undefined) {
 			if (!keywords.includes(keyword)) keywords.push(keyword)
@@ -713,18 +519,13 @@ export function parseCommandInput(
 		}
 		textTokens.push(token)
 	}
-	return { categories, keywords, text: textTokens.join(' ') }
-}
-
-/** Available categories across entries (sorted, de-duplicated). */
-export function availableEntryCategories(entries: readonly CommandBoxEntry[]): readonly string[] {
-	return uniqueNormalized(entries.flatMap((entry) => entry.categories ?? [])).sort((left, right) =>
-		left.localeCompare(right)
-	)
+	return { keywords, text: textTokens.join(' ') }
 }
 
 /** Available keywords across entries (sorted, de-duplicated). */
-export function availableEntryKeywords(entries: readonly CommandBoxEntry[]): readonly string[] {
+export function availableEntryKeywords(
+	entries: readonly Pick<CommandBoxEntry, 'keywords'>[]
+): readonly string[] {
 	return uniqueNormalized(entries.flatMap((entry) => entry.keywords ?? [])).sort((left, right) =>
 		left.localeCompare(right)
 	)

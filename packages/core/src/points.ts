@@ -28,7 +28,6 @@ export type PointBase<K extends PointType = PointType> = {
 	readonly label: string
 	readonly type: K
 	readonly description?: string
-	readonly categories?: readonly string[]
 	readonly keywords?: readonly string[]
 	readonly icon?: IconToken
 	/**

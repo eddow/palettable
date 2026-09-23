@@ -77,8 +77,7 @@ resolvers, in `uses` order.
 | Plain-object lens (`myValues.alertLevel` get/set) | adapter (`vanilla`) | `createValueProxy()` bridge: single render path — bag keys render via bag-notify `onChange` only (setter never renders), local keys (`isBagKey` → false) render via direct `onChange`. |
 
 Strictness: `get(id)` stays lenient (absent → `undefined`, the skeleton probe).
-Strict paths throw on absent: `run` setter, `applyNamedAction` (`id:action`),
-`namedActionCan`, `runStash` source read (`require(id)` helper).
+Strict paths throw on absent: `run` setter / toggle / step (`require(id)` helper).
 Skeleton: `resolveRenderTree({ points, values: {} })` renders every tool
 (descriptor + control + keystrokes, `value: undefined`). Presenters propagate
 `undefined` instead of coercing (`false` / `0` / `''`).
@@ -98,8 +97,8 @@ Points carry no defaults (core holds no defaults — absent key = skeleton).
 Consumer-owned defaults live outside core (demo `CONSUMER_DEFAULTS`, applied
 via `setMany`).
 
-Points carry `label`, `icon` (`PaletteIcon = string | Component`), `categories`,
-`keywords`. Editable points expose get/set `value` — in the demo these proxy a
+Points carry `label`, `icon` (`PaletteIcon = string | Component`),
+`keywords` (kept for future use — command-box keyword search). Editable points expose get/set `value` — in the demo these proxy a
 module-level `$state` object (`demoState`, the Stellar Outpost colony state), so
 every tool mutation is reactive.
 `Snippet` is excluded from `PaletteIcon`: `Component` and `Snippet` are both
@@ -131,16 +130,17 @@ in the console add-flow (`consoleState.enumValues` / `enumKeywords`).
 `palette.tool(spec)` resolves three forms (the `tool:` item field and `keys:` map
 both use this syntax to bind a tool to a point):
 
-- `toolId` → the tool itself (`autoOxygen`)
-- `toolId=value` → setter runner (`alertLevel=red`, `colonyTheme=mars`); strict:
+- `toolId` → the tool itself (`autoOxygen` — action runner)
+- `toolId=value` → pure setter (`alertLevel=red`, `colonyTheme=mars`); strict:
   absent (skeleton) values throw `PaletteError` (hydrate via `setMany` first).
-  Legacy `toolId|value` still resolves.
-- `toolId:action` → action runner (`gameSpeed:inc`, `gameSpeed:dec`); only `number`
-  has built-in actions (`valueActions.number`)
+- `toolId!` → boolean toggle (`autoOxygen!`); strict on skeleton.
+- `toolId+=x` / `toolId-=x` → number step by an explicit amount
+  (`gameSpeed+=0.5`, `gameSpeed-=2`); bounds-clamped, strict on skeleton.
 
-Unknown tools, non-editable setters, and unknown actions throw `PaletteError`
+Unknown tools, non-editable setters, and unknown steps throw `PaletteError`
 (the palette error taxonomy — `commandRunner` deliberately throws `PaletteError`,
-not plain `Error`).
+not plain `Error`). Argumented actions and stash-style push-aside/pop-back
+are consumer-owned: presets provide specific argument-less action points.
 
 Key bindings (`src/lib/palette/keys.ts`): pass a raw map (`keys: { E: 'emergencyProtocol' }`)
 — `Palette` normalizes it internally via `createPaletteKeys` (also accepts a
@@ -149,7 +149,7 @@ prebuilt registry). Keystrokes normalize (`Ctrl`/`Alt`/`Shift`/`Meta` order, `cm
 IDE root (skips editable targets) and runs the tool: run tools execute when
 `can`, boolean tools toggle. Demo bindings live in `src/lib/demo/palette.svelte.ts`
 (`` ` `` console toggle, `N` life support, `S` shields, `E` lockdown,
-`Ctrl+S` save, `+`/`-` sim speed, `1/2/3` threat presets).
+`Ctrl+S` save, `+`/`-` sim speed (`gameSpeed+=0.5` / `gameSpeed-=0.5`), `1/2/3` threat presets).
 
 ## Palette class (`src/lib/palette/palette.svelte.ts`)
 

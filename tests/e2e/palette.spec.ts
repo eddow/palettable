@@ -34,14 +34,54 @@ test('console opens in edit mode (commandBox is displayed)', async ({ page }) =>
 })
 
 test('drawer opens with axis inversion and closes on Escape', async ({ page }) => {
-	await page.getByRole('button', { name: 'More' }).click()
-	const popup = page.locator('.palettable-drawer__popup')
+	// Toggle mode opens on pointerdown (primary button); a Playwright click
+	// dispatches pointerdown first, so `.click()` opens the drawer.
+	// Scope to the first popup: the demo now nests a second (hidden) drawer
+	// popup inside the outer one.
+	await page.getByRole('button', { name: 'More' }).first().click()
+	const popup = page.locator('.palettable-drawer__popup').first()
 	await expect(popup).toBeVisible()
 	// Left drawer inverts to a horizontal popup.
-	await expect(popup.first()).toHaveClass(/is-horizontal/)
+	await expect(popup).toHaveClass(/is-horizontal/)
 	await page.keyboard.press('Escape')
 	// Hierarchical drawer: popup stays in the DOM, toggled hidden.
 	await expect(popup).toBeHidden()
+})
+
+test('drawer opens on keyboard and command click closes closeOnClick ancestors', async ({
+	page,
+}) => {
+	const trigger = page.getByRole('button', { name: 'More' }).first()
+	await trigger.focus()
+	await page.keyboard.press('Enter')
+	const popup = page.locator('.palettable-drawer__popup').first()
+	await expect(popup).toBeVisible()
+	// The outer drawer hosts a select (never closes) and the drawer has
+	// `closeOnClick`, but select activation is not a close trigger — the
+	// popup stays open. (Escape closes the select listbox; the drawer
+	// Escape handler also fires on the same keypress since the listbox
+	// stopPropagation only covers its own keydown listener — so reopen
+	// and close the drawer with a second Escape.)
+	await popup.locator('.palette-default-select-trigger').first().click()
+	await expect(popup.locator('.palette-default-select-list').first()).toBeVisible()
+	await page.keyboard.press('Escape')
+	await expect(popup.locator('.palette-default-select-list').first()).toBeHidden()
+})
+
+test('nested command click closes both closeOnClick drawers', async ({ page }) => {
+	// Outer toggle drawer (closeOnClick) → hover over it to reveal the
+	// nested hover drawer (closeOnClick), then fire the nested Save
+	// command (always enabled): both drawers close per the recursive chain.
+	await page.getByRole('button', { name: 'More' }).first().click()
+	const outer = page.locator('.palettable-drawer__popup').first()
+	await expect(outer).toBeVisible()
+	const nestedTrigger = outer.getByRole('button', { name: 'More' })
+	await nestedTrigger.hover()
+	const nested = page.locator('.palettable-drawer__popup').nth(1)
+	await expect(nested).toBeVisible()
+	await nested.getByRole('button', { name: 'Save' }).click()
+	await expect(page.locator('.palettable-drawer__popup').first()).toBeHidden()
+	await expect(page.locator('.palettable-drawer__popup').nth(1)).toBeHidden()
 })
 
 test('inspector shows presentation-only configurator for the selected item', async ({ page }) => {

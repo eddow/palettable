@@ -1257,6 +1257,13 @@ describe('highlight diff events (Phase 2)', () => {
 		// computed on an independent tree because `dragOver` commits to the
 		// layout it is given — using the session's own tree would mutate it
 		// before the session ran and turn the commit into a no-op.
+		//
+		// The oracle decision is pre-commit (gap 3 in ABCD with B dragged);
+		// the session commits on that hover and re-derives the paint from
+		// the dragged tool's live position (ACBD: B at index 2, free gaps
+		// 1 and 4 around it) — so the emitted set is the *post-commit*
+		// decision, computed here by running the oracle decision a second
+		// time against the mutated layout.
 		const oracleTree = new PaletteLayoutTree(fourItemLayout())
 		const oracleLive = oracleTree.getLayout()
 		const oracleToolbar = oracleLive.borders.top[0]?.[0]?.toolbar ?? []
@@ -1277,7 +1284,15 @@ describe('highlight diff events (Phase 2)', () => {
 			{},
 			true
 		)
-		for (const paint of decision.itemHighlights) {
+		expect(decision.moved).toBe(true)
+		const repaint = dragOver(
+			oracle,
+			oracleLive,
+			{ kind: 'tool', toolbar: oracleToolbar, item: oracleItem },
+			{ activeItem: oracleToolbar.indexOf(oracleItem) },
+			true
+		)
+		for (const paint of repaint.itemHighlights) {
 			for (const gap of paint.gaps) expected.add(`item-gap:${gap}`)
 		}
 		const tree = new PaletteLayoutTree(fourItemLayout())

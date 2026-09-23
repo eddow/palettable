@@ -137,32 +137,31 @@ describe('insertToolbar / resizeToolbar', () => {
 })
 
 describe('canonicalItemPoint / itemFingerprint', () => {
-	it('strips setter and action suffixes', () => {
+	it('resolves plain point ids', () => {
 		expect(canonicalItemPoint({ point: 'alertLevel' })).toBe('alertLevel')
-		expect(canonicalItemPoint({ point: 'alertLevel=red' })).toBe('alertLevel')
-		expect(canonicalItemPoint({ point: 'alertLevel|red' })).toBe('alertLevel')
-		expect(canonicalItemPoint({ point: 'alertLevel:inc' })).toBe('alertLevel')
+		expect(canonicalItemPoint({ point: 'flag' })).toBe('flag')
+		expect(canonicalItemPoint({ point: 'fontSize' })).toBe('fontSize')
 		expect(() => canonicalItemPoint({ control: 'status' } as never)).toThrow('no bound point')
 	})
 
 	it('resolves inline virtual definitions to their own id', () => {
 		expect(
 			canonicalItemPoint({
-				point: { id: 'pause', label: 'Pause', source: 'gameSpeed', kind: 'stash', stashedValue: 0 },
+				point: {
+					id: 'speedPreset',
+					label: 'Speed preset',
+					source: 'gameSpeed',
+					kind: 'enum-from',
+					options: [{ key: 'slow', value: 0.5 }],
+				},
 			})
-		).toBe('pause')
+		).toBe('speedPreset')
 	})
 
-	it('fingerprints canonical point + control + config', () => {
-		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
-			itemFingerprint({ point: 'alertLevel=red' })
-		)
-		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
-			itemFingerprint({ point: 'alertLevel|red' })
-		)
-		expect(itemFingerprint({ point: 'alertLevel' })).toBe(
-			itemFingerprint({ point: 'alertLevel:inc' })
-		)
+	it('fingerprints point + control + config', () => {
+		expect(itemFingerprint({ point: 'alertLevel' })).toBe(itemFingerprint({ point: 'alertLevel' }))
+		expect(itemFingerprint({ point: 'flag' })).toBe(itemFingerprint({ point: 'flag' }))
+		expect(itemFingerprint({ point: 'fontSize' })).toBe(itemFingerprint({ point: 'fontSize' }))
 		expect(itemFingerprint({ point: 'a', control: 'toggle' })).not.toBe(
 			itemFingerprint({ point: 'a', control: 'select' })
 		)

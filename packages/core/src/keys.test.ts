@@ -4,20 +4,23 @@ import { findKeystrokesFor, findKeystrokesForTarget, type KeyBindings } from './
 
 describe('findKeystrokesFor', () => {
 	const bindings: KeyBindings = {
-		'Ctrl+S': 'save',
-		'Ctrl+Shift+S': 'save',
-		'Ctrl+T': 'theme=dark',
-		'Ctrl+I': 'fontSize:inc',
-		'Ctrl+X': 'other',
+		'Ctrl+S': { kind: 'action', point: 'save' },
+		'Ctrl+Shift+S': { kind: 'action', point: 'save' },
+		'Ctrl+T': { kind: 'set', point: 'theme', value: 'dark' },
+		'Ctrl+I': { kind: 'inc', point: 'fontSize', delta: 1 },
+		'Ctrl+X': { kind: 'action', point: 'other' },
 	}
 
 	it('finds every keystroke bound to a point id', () => {
 		expect(findKeystrokesFor(bindings, 'save')).toEqual(['Ctrl+S', 'Ctrl+Shift+S'])
 	})
 
-	it('matches setter and action specs by their canonical point id', () => {
+	it('matches setter, toggle and step runnables by their point id', () => {
 		expect(findKeystrokesFor(bindings, 'theme')).toEqual(['Ctrl+T'])
 		expect(findKeystrokesFor(bindings, 'fontSize')).toEqual(['Ctrl+I'])
+		expect(findKeystrokesFor({ 'Ctrl+N': { kind: 'toggle', point: 'flag' } }, 'flag')).toEqual([
+			'Ctrl+N',
+		])
 	})
 
 	it('returns an empty array when nothing is bound', () => {
@@ -26,26 +29,35 @@ describe('findKeystrokesFor', () => {
 	})
 
 	it('does not prefix-match point ids', () => {
-		expect(findKeystrokesFor({ 'Ctrl+A': 'saveGame' }, 'save')).toEqual([])
+		expect(
+			findKeystrokesFor({ 'Ctrl+A': { kind: 'action', point: 'saveGame' } }, 'save')
+		).toEqual([])
 	})
 })
 
 describe('findKeystrokesForTarget', () => {
-	const bindings: KeyBindings = { 'Ctrl+P': 'pause', 'Ctrl+T': 'theme=dark' }
+	const bindings: KeyBindings = {
+		'Ctrl+P': { kind: 'set', point: 'speedPreset', value: 'slow' },
+		'Ctrl+T': { kind: 'set', point: 'theme', value: 'dark' },
+	}
 
-	it('matches string specs by canonical id', () => {
-		expect(findKeystrokesForTarget(bindings, 'pause')).toEqual(['Ctrl+P'])
-		expect(findKeystrokesForTarget(bindings, 'theme=dark')).toEqual(['Ctrl+T'])
+	it('matches runnables by their point', () => {
+		expect(
+			findKeystrokesForTarget(bindings, { kind: 'set', point: 'speedPreset', value: 'slow' })
+		).toEqual(['Ctrl+P'])
+		expect(
+			findKeystrokesForTarget(bindings, { kind: 'set', point: 'theme', value: 'dark' })
+		).toEqual(['Ctrl+T'])
 	})
 
 	it('matches inline virtual definitions by their own id', () => {
 		expect(
 			findKeystrokesForTarget(bindings, {
-				id: 'pause',
-				label: 'Pause',
+				id: 'speedPreset',
+				label: 'Speed preset',
 				source: 'gameSpeed',
-				kind: 'stash',
-				stashedValue: 0,
+				kind: 'enum-from',
+				options: [{ key: 'slow', value: 0.5 }],
 			})
 		).toEqual(['Ctrl+P'])
 	})

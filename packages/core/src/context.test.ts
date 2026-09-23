@@ -278,7 +278,7 @@ describe('context-display resolvers', () => {
 				value: undefined,
 				bags: [new ValuesBag({ dirty: false })],
 			},
-			'save'
+			{ kind: 'action', point: 'save' }
 		)
 		expect(view.can).toBe(false)
 	})
@@ -333,14 +333,16 @@ describe('context-routed valued reads/writes (ship selection pattern)', () => {
 		expect(() => core.writeValue('missing', true)).toThrow(PaletteError)
 	})
 
-	it('run setters and inc/dec route through the context bag', () => {
+	it('run setters, toggles and steps route through the context bag', () => {
 		const core = shipCore()
 		const bag = new ValuesBag({ shipShields: false, shipPower: 1.5 })
 		core.setContext('ship', bag)
-		core.run('shipShields=true')
+		core.run({ kind: 'set', point: 'shipShields', value: true })
 		expect(bag.get('shipShields')).toBe(true)
-		core.run('shipPower:inc')
+		core.run({ kind: 'toggle', point: 'shipShields' })
+		expect(bag.get('shipShields')).toBe(false)
+		core.run({ kind: 'inc', point: 'shipPower', delta: 0.5 })
 		expect(bag.get('shipPower')).toBe(2)
-		expect(core.canRunAction('shipPower', 'inc')).toBe(true)
+		expect(core.can({ kind: 'inc', point: 'shipPower', delta: 0.5 })).toBe(true)
 	})
 })

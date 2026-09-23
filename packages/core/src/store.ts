@@ -13,7 +13,7 @@
  *   asynchronously via `queueMicrotask` — the store stays consistent).
  * - Strictness: `get(id)` stays lenient (absent → `undefined`, the skeleton
  *   probe). `require(id)` throws `PaletteError` on absent (strict paths:
- *   `run` setter, `applyNamedAction`, `namedActionCan`, `runStash` source).
+ * `run` setter / toggle / step source).
  */
 import { PaletteError } from './errors.js'
 import { scheduleMicrotask } from './globals.js'

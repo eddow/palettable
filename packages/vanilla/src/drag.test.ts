@@ -142,7 +142,15 @@ describe('itemFromAddSelection', () => {
 	it('builds a tool item from a set variant (bare tool id — no =value preset)', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'tool:speed', kind: 'tool', pointId: 'speed', label: 'Speed', meta: '' },
+				source: {
+					id: 'tool:speed',
+					kind: 'tool',
+					pointId: 'speed',
+					label: 'Speed',
+					meta: '',
+					keywords: [],
+					activity: 'valued',
+				},
 				variant: {
 					id: 'tool:speed:set',
 					kind: 'set',
@@ -152,19 +160,25 @@ describe('itemFromAddSelection', () => {
 					valueType: 'number',
 					spec: 'speed',
 				},
-				booleanValue: 'true',
-				setValue: '7',
 			},
 			points as never
 		)
-		// The draft binds the point and displays the live value — the
-		// inline `setValue` is ignored (no `=value` preset is carried).
+		// The draft binds the point and displays the live value — no
+		// `=value` preset is carried.
 		expect(item).toMatchObject({ point: 'speed' })
 	})
 	it('builds a control-only item from an item variant', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'item:status', kind: 'item', control: 'status', label: 'Status', meta: '' },
+				source: {
+					id: 'item:status',
+					kind: 'item',
+					control: 'status',
+					label: 'Status',
+					meta: '',
+					keywords: [],
+					activity: 'item',
+				},
 				variant: {
 					id: 'item:status:item',
 					kind: 'item',
@@ -172,8 +186,6 @@ describe('itemFromAddSelection', () => {
 					label: 'Status',
 					meta: '',
 				},
-				booleanValue: 'true',
-				setValue: '',
 			},
 			points as never
 		)
@@ -182,7 +194,15 @@ describe('itemFromAddSelection', () => {
 	it('returns undefined for mismatched families', () => {
 		const item = itemFromAddSelection(
 			{
-				source: { id: 'tool:lamp', kind: 'tool', pointId: 'lamp', label: 'Lamp', meta: '' },
+				source: {
+					id: 'tool:lamp',
+					kind: 'tool',
+					pointId: 'lamp',
+					label: 'Lamp',
+					meta: '',
+					keywords: [],
+					activity: 'valued',
+				},
 				variant: {
 					id: 'tool:lamp:set',
 					kind: 'set',
@@ -192,8 +212,6 @@ describe('itemFromAddSelection', () => {
 					valueType: 'number',
 					spec: 'lamp',
 				},
-				booleanValue: 'true',
-				setValue: '3',
 			},
 			points as never
 		)

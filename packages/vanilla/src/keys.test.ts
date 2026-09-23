@@ -38,24 +38,51 @@ describe('normalizeKeystroke', () => {
 
 describe('keystrokeFromEvent / createVanillaKeys', () => {
 	it('derives keystrokes from events and resolves bindings', () => {
-		const keys = createVanillaKeys({ '`': 'console', 'ctrl+s': 'saveGame' })
-		expect(keys.resolve(event({ key: '`' }))).toBe('console')
-		expect(keys.resolve(event({ key: 's', ctrlKey: true }))).toBe('saveGame')
+		const keys = createVanillaKeys({
+			'`': { kind: 'action', point: 'console' },
+			'ctrl+s': { kind: 'action', point: 'saveGame' },
+		})
+		expect(keys.resolve(event({ key: '`' }))).toEqual({ kind: 'action', point: 'console' })
+		expect(keys.resolve(event({ key: 's', ctrlKey: true }))).toEqual({
+			kind: 'action',
+			point: 'saveGame',
+		})
 		expect(keys.findByTool('console')).toEqual(['`'])
 		expect(keystrokeFromEvent(event({ key: 'n' }))).toBe('N')
 	})
 
 	it('resolves Plus bindings from both Shift+= and numpad presses', () => {
-		const keys = createVanillaKeys({ '+': 'gameSpeed:inc', '-': 'gameSpeed:dec' })
+		const keys = createVanillaKeys({
+			'+': { kind: 'inc', point: 'gameSpeed', delta: 0.5 },
+			'-': { kind: 'dec', point: 'gameSpeed', delta: 0.5 },
+		})
 		// US layout: `+` is `Shift+=` → `key: '+'` with `shiftKey: true`.
-		expect(keys.resolve(event({ key: '+', shiftKey: true }))).toBe('gameSpeed:inc')
+		expect(keys.resolve(event({ key: '+', shiftKey: true }))).toEqual({
+			kind: 'inc',
+			point: 'gameSpeed',
+			delta: 0.5,
+		})
 		// Numpad `+`: `key: '+'` with no modifiers.
-		expect(keys.resolve(event({ key: '+' }))).toBe('gameSpeed:inc')
-		expect(keys.resolve(event({ key: '-' }))).toBe('gameSpeed:dec')
+		expect(keys.resolve(event({ key: '+' }))).toEqual({
+			kind: 'inc',
+			point: 'gameSpeed',
+			delta: 0.5,
+		})
+		expect(keys.resolve(event({ key: '-' }))).toEqual({
+			kind: 'dec',
+			point: 'gameSpeed',
+			delta: 0.5,
+		})
 		// Shift-letter bindings stay distinct.
-		const letters = createVanillaKeys({ A: 'x', 'Shift+A': 'y' })
-		expect(letters.resolve(event({ key: 'a' }))).toBe('x')
-		expect(letters.resolve(event({ key: 'A', shiftKey: true }))).toBe('y')
+		const letters = createVanillaKeys({
+			A: { kind: 'action', point: 'x' },
+			'Shift+A': { kind: 'action', point: 'y' },
+		})
+		expect(letters.resolve(event({ key: 'a' }))).toEqual({ kind: 'action', point: 'x' })
+		expect(letters.resolve(event({ key: 'A', shiftKey: true }))).toEqual({
+			kind: 'action',
+			point: 'y',
+		})
 	})
 })
 

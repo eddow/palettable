@@ -22,16 +22,15 @@ import {
 import { readSetterValue, validateInitialValues } from './palette.js'
 import type { AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isRootContext, isValuedPoint } from './points.js'
-import { canonicalPointId, isInlineSpec, type PointTarget, parsePointSpec } from './specs.js'
+import type { Runnable, RunnableTextualise } from './runnable.js'
+import { describeRunnable, isRunnable } from './runnable.js'
+import { isInlineSpec } from './virtual.js'
 import { PaletteStateStore } from './store.js'
 import {
 	assertValidVirtual,
-	computeStashTransition,
-	isStashPoint,
 	readEnumFrom,
 	resolveEnumSourceValue,
 	resolveVirtualSource,
-	type StashAside,
 	type VirtualPoint,
 } from './virtual.js'
 
@@ -41,8 +40,14 @@ export type PaletteCoreOptions = {
 	readonly controlDefaults?: ControlDefaults
 	readonly initialLayout?: AnySerializedLayout | PaletteLayout
 	// Note: not completely implemented, still under construction
-	/** End-user-defined virtual points (`enum-from` / `stash`). */
+	/** End-user-defined virtual points (`enum-from`). */
 	readonly virtuals?: readonly VirtualPoint[]
+	/**
+	 * Overridable end-user textualization: makes a description out of an
+	 * action description (`"Increment thatValue by X"` style). Defaults to
+	 * `describeRunnable` (pure over definitions — no store reads).
+	 */
+	readonly textualise?: RunnableTextualise
 	/**
 	 * Value hydration (SSR §4.2): one-shot construction fill, validated per
 	 * point (`unknown id` → throw, `action`/`nothing` id → throw,
@@ -79,10 +84,11 @@ export type DefinitionListener = (pointId: string) => void
  * Value access is **not** re-implemented here: adapters read/write/subscribe
  * through the public `values` store (`core.values.get` / `set` / `subscribe`),
  * which is the single source of truth for valued-point state. `PaletteCore`
- * only adds what the raw store cannot: virtual-point resolution
- * (`resolveTargetVirtual`), command execution (`run` / `runStash`), stash
- * aside slots, validated batch hydration (`setMany` / `initialValues`), and
- * layout. All pointer math, DOM and components live outside this class.
+ * only adds what the raw store cannot: virtual-point lookup
+ * (`getVirtual` / `resolveTargetVirtual`), command execution (`run` +
+ * `can` gate beside it), validated batch hydration (`setMany` /
+ * `initialValues`), and layout. All pointer math,
+ * DOM and components live outside this class.
  */
 export class PaletteCore {
 	/** Valued-point store — the single value surface (raw, virtual-unaware). */
@@ -91,13 +97,13 @@ export class PaletteCore {
 	readonly keys: KeyBindings
 	readonly controls: ControlRegistry | undefined
 	readonly controlDefaults: ControlDefaults | undefined
+	/** Overridable end-user textualization (defaults to `describeRunnable`). */
+	readonly textualise: RunnableTextualise
 	private definitions = new Map<string, AnyPoint>()
 	private virtuals = new Map<string, VirtualPoint>()
 	/** Cached definition arrays (invalidated on registry mutation). */
 	private pointsCache: readonly AnyPoint[] | undefined
 	private virtualPointsCache: readonly VirtualPoint[] | undefined
-	/** Single aside slot per stash id (there is no stack). */
-	private stashAsides = new Map<string, StashAside>()
 
 	constructor(points: readonly AnyPoint[], options: PaletteCoreOptions = {}) {
 		for (const point of points) {
@@ -122,6 +128,7 @@ export class PaletteCore {
 		this.keys = { ...(options.keys ?? {}) }
 		this.controls = options.controls
 		this.controlDefaults = options.controlDefaults
+		this.textualise = options.textualise ?? describeRunnable
 	}
 
 	/** All registered point definitions (cached; invalidated on registry mutation). */
@@ -135,11 +142,11 @@ export class PaletteCore {
 	}
 
 	getDefinition(id: string): AnyPoint | undefined {
-		return this.definitions.get(canonicalPointId(id))
+		return this.definitions.get(id)
 	}
 
 	getVirtual(id: string): VirtualPoint | undefined {
-		return this.virtuals.get(canonicalPointId(id))
+		return this.virtuals.get(id)
 	}
 
 	/**
@@ -149,8 +156,7 @@ export class PaletteCore {
 	 * ids, action points, and (with `family`) family mismatches.
 	 */
 	resolveEditablePoint(id: string, family?: string): AnyValuedPoint {
-		const pointId = canonicalPointId(id)
-		const def = this.definitions.get(pointId)
+		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isValuedPoint(def))
 			throw new PaletteError(`Palette point "${id}" does not support editing`)
@@ -165,11 +171,10 @@ export class PaletteCore {
 	 * = enabled). Throws `PaletteError` on unknown ids and non-action points.
 	 */
 	readActionCan(id: string): boolean | undefined {
-		const pointId = canonicalPointId(id)
-		const def = this.definitions.get(pointId)
+		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isActionPoint(def)) throw new PaletteError(`Palette point "${id}" is not an action`)
-		return this.evaluateCan(pointId)
+		return this.evaluateCan(id)
 	}
 
 	/**
@@ -180,8 +185,7 @@ export class PaletteCore {
 	 * Adapters share this read path (vanilla `liveValue` delegates here).
 	 */
 	readValue(id: string): unknown {
-		const pointId = canonicalPointId(id)
-		const def = this.definitions.get(pointId)
+		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isValuedPoint(def)) return undefined
 		let value: unknown = this.values.get(def.id)
@@ -211,8 +215,7 @@ export class PaletteCore {
 		id: string,
 		value: unknown
 	): { readonly target: 'context'; readonly bag: string } | { readonly target: 'root' } {
-		const pointId = canonicalPointId(id)
-		const def = this.definitions.get(pointId)
+		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
 		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is not valued`)
 		const uses = def.uses ?? []
@@ -312,11 +315,11 @@ export class PaletteCore {
 	 * unknown point ids.
 	 */
 	evaluateCan(pointId: string): boolean {
-		const id = canonicalPointId(pointId)
-		const def = this.definitions.get(id)
-		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
+		const def = this.definitions.get(pointId)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${pointId}"`)
 		if (def.can !== undefined) return def.can(...this.resolveBags(def.uses))
-		if (isValuedPoint(def) && (def.uses ?? []).length > 0) return this.readValue(id) !== undefined
+		if (isValuedPoint(def) && (def.uses ?? []).length > 0)
+			return this.readValue(pointId) !== undefined
 		return true
 	}
 
@@ -400,24 +403,23 @@ export class PaletteCore {
 	}
 
 	/**
-	 * Resolve a point target to its virtual definition: registered virtuals
-	 * by id, or an inline definition carried directly in the spec. Returns
-	 * `undefined` for plain point ids (use `getDefinition` for those).
-	 * Inline definitions are validated against the registry on every call
-	 * (same `assertValidVirtual` rules as `defineVirtual`, minus the
-	 * id-collision check — the lifetime is the spec, not the registry).
+	 * Resolve a virtual by id, or validate an inline virtual definition
+	 * carried directly on a toolbar item. Returns `undefined` for plain
+	 * point ids (use `getDefinition` for those). Inline definitions are
+	 * validated against the registry on every call (same
+	 * `assertValidVirtual` rules as `defineVirtual`, minus the
+	 * id-collision check — the lifetime is the item, not the registry).
 	 */
-	resolveTargetVirtual(target: PointTarget<string, unknown>): VirtualPoint | undefined {
+	resolveTargetVirtual(target: string | VirtualPoint): VirtualPoint | undefined {
 		if (isInlineSpec(target)) {
 			assertValidVirtual(target, this.definitions, this.allPointIds())
 			return target
 		}
-		return this.virtuals.get(canonicalPointId(target))
+		return this.virtuals.get(target)
 	}
 
 	/**
 	 * Define (or redefine) a virtual point after construction.
-	 * Redefining a `stash` clears its aside slot.
 	 * Emits a definition notification for the virtual id.
 	 */
 	defineVirtual(virtual: VirtualPoint): void {
@@ -428,16 +430,14 @@ export class PaletteCore {
 		assertValidVirtual(virtual, this.definitions, ids)
 		this.virtuals.set(virtual.id, virtual)
 		this.virtualPointsCache = undefined
-		this.stashAsides.delete(virtual.id)
 		this.emitDefinitions(virtual.id)
 	}
 
-	/** Remove a virtual point (drops its stash aside slot). Emits a definition notification. */
+	/** Remove a virtual point. Emits a definition notification. */
 	removeVirtual(id: string): void {
 		this.virtuals.delete(id)
 		this.virtualPointsCache = undefined
-		this.stashAsides.delete(id)
-		this.emitDefinitions(canonicalPointId(id))
+		this.emitDefinitions(id)
 	}
 
 	/**
@@ -451,8 +451,7 @@ export class PaletteCore {
 	 * host writes a listed value.
 	 */
 	defineEnumOptions(id: string, options: readonly import('./type.js').EnumOption[]): void {
-		const pointId = canonicalPointId(id)
-		const def = this.definitions.get(pointId)
+		const def = this.definitions.get(id)
 		if (def === undefined) throw new PaletteError(`defineEnumOptions: unknown point "${id}"`)
 		if (!isValuedPoint(def) || def.type !== 'enum')
 			throw new PaletteError(`defineEnumOptions: point "${id}" is not an enum`)
@@ -466,32 +465,12 @@ export class PaletteCore {
 				)
 			seen.add(option.value)
 		}
-		this.definitions.set(pointId, {
+		this.definitions.set(id, {
 			...def,
 			constraints: { ...(def.constraints as object | undefined), options: [...options] },
 		} as AnyPoint)
 		this.pointsCache = undefined
-		this.emitDefinitions(pointId)
-	}
-
-	/**
-	 * Can a named action (`id:action`) run? Bounds-checked for `number`
-	 * actions (`inc` stops at `max`, `dec` stops at `min`), mirroring the
-	 * Svelte reference's `valueActions.number.inc.get can()`.
-	 * Reads the live value through context (`readValue`), so contextual
-	 * tools gate on the selection. Throws `PaletteError` on unknown
-	 * points/actions and on absent (skeleton) values — strict path.
-	 */
-	canRunAction(id: string, action: string): boolean {
-		const def = this.definitions.get(canonicalPointId(id))
-		if (def === undefined) throw new PaletteError(`Unknown palette point "${id}"`)
-		if (!isValuedPoint(def)) throw new PaletteError(`Palette point "${id}" is an action`)
-		const current = this.readValue(def.id)
-		if (current === undefined)
-			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
-		const can = namedActionCan(def, current, action)
-		if (can === undefined) throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
-		return can
+		this.emitDefinitions(id)
 	}
 
 	/**
@@ -507,78 +486,164 @@ export class PaletteCore {
 	}
 
 	/**
-	 * Run an action point, setter spec (`id=value`), action spec (`id:action`),
-	 * virtual `enum-from` setter (`virtualId=key`), or a `stash` virtual id.
+	 * Retrieve the runnable bound to a keystroke (`attach` counterpart).
+	 * Exact match — adapters normalize (`normalizeKeystroke`) before calling.
+	 * Returns `undefined` when nothing is bound.
+	 */
+	retrieve(keystroke: import('./identifiers.js').Keystroke): Runnable | undefined {
+		return this.keys[keystroke]
+	}
+
+	/**
+	 * Associate a runnable with a keystroke (overwrites any existing binding).
+	 * The runnable must be concrete (`isRunnable`); adapters normalize the
+	 * keystroke before calling. Stored by value (JSON-safe) — mutating the
+	 * passed object afterwards does not affect the binding.
+	 */
+	attach(keystroke: import('./identifiers.js').Keystroke, runnable: Runnable): void {
+		if (!isRunnable(runnable))
+			throw new PaletteError(`attach: invalid runnable for "${keystroke}"`)
+		this.keys[keystroke] = { ...runnable } as Runnable
+	}
+
+	/** Detach any runnable bound to a keystroke. Returns `true` when one was removed. */
+	detach(keystroke: import('./identifiers.js').Keystroke): boolean {
+		if (!(keystroke in this.keys)) return false
+		delete this.keys[keystroke]
+		return true
+	}
+
+	/**
+	 * End-user textualization of a runnable via the overridable
+	 * `textualise` option (`"Increment thatValue by X"` style). Pure over
+	 * definitions — no store reads.
+	 */
+	describe(runnable: Runnable): string {
+		return this.textualise(runnable, {
+			points: this.definitions,
+			virtuals: this.virtuals,
+		})
+	}
+
+	/**
+	 * Can a runnable run? Beside `run` (same shape in): action → `evaluateCan`,
+	 * set → skeleton + no-op-same-value gate, toggle → boolean + skeleton gate,
+	 * inc/dec → number + skeleton + bounds gate. Throws `PaletteError` on
+	 * unknown points and kind/type mismatches (programming errors, like `run`).
+	 */
+	can(runnable: Runnable): boolean {
+		const virtual = this.virtuals.get(runnable.point)
+		if (virtual !== undefined) {
+			const source = resolveVirtualSource(virtual, this.definitions)
+			if (runnable.kind === 'action') {
+				return readEnumFrom(virtual, this.values.get(source.id)) !== undefined
+			}
+			if (runnable.kind !== 'set' || typeof runnable.value !== 'string') return false
+			try {
+				resolveEnumSourceValue(virtual, runnable.value)
+				return true
+			} catch {
+				return false
+			}
+		}
+		const def = this.definitions.get(runnable.point)
+		if (def === undefined) throw new PaletteError(`Unknown palette point "${runnable.point}"`)
+		switch (runnable.kind) {
+			case 'action':
+				if (!isActionPoint(def))
+					throw new PaletteError(`run: point "${runnable.point}" is not an action`)
+				return this.evaluateCan(def.id)
+			case 'set': {
+				if (!isValuedPoint(def))
+					throw new PaletteError(`run: point "${runnable.point}" is an action`)
+				const current = this.readValue(def.id)
+				if (current === undefined) return false
+				return !Object.is(current, this.coerceSetValue(def, runnable.value))
+			}
+			case 'toggle': {
+				if (!isValuedPoint(def) || def.type !== 'boolean')
+					throw new PaletteError(`run: point "${runnable.point}" is not a boolean`)
+				return this.readValue(def.id) !== undefined
+			}
+			case 'inc':
+			case 'dec': {
+				if (!isValuedPoint(def))
+					throw new PaletteError(`Palette point "${runnable.point}" is an action`)
+				const current = this.readValue(def.id)
+				if (current === undefined) return false
+				const delta =
+					runnable.kind === 'inc' ? Math.abs(runnable.delta) : -Math.abs(runnable.delta)
+				const result = stepCan(def, current, delta)
+				if (result === undefined) throw new PaletteError(`run: unknown step "${def.id}"`)
+				return result
+			}
+		}
+	}
+
+	/**
+	 * Run a runnable description: action, setter, toggle, number step, or a
+	 * virtual `enum-from` (bare `action` re-writes the current key, `set`
+	 * maps a key).
 	 *
-	 * Strictness: `id=value` setters and `id:action` on absent (skeleton)
-	 * values throw `PaletteError` (no silent default fill — the consumer
-	 * hydrates via `setMany` first). `get(id)` stays lenient for
-	 * render/skeleton probing.
+	 * Strictness: setters, toggles and steps on absent (skeleton) values
+	 * throw `PaletteError` (no silent default fill — the consumer hydrates
+	 * via `setMany` first). `get(id)` stays lenient for render/skeleton
+	 * probing.
 	 *
 	 * Synchronous: `PaletteError`s are thrown, not rejected. Action-point
 	 * `run()` may return a promise; core does not await it — the caller
 	 * decides whether to `await`.
 	 */
-	run(spec: string): void {
-		const parsed = parsePointSpec(spec)
-		const virtual = this.virtuals.get(parsed.pointId)
+	run(runnable: Runnable): void {
+		const command: Runnable = runnable
+		if (!isRunnable(command)) throw new PaletteError(`run: invalid runnable`)
+		const virtual = this.virtuals.get(command.point)
 		if (virtual !== undefined) {
-			if (isStashPoint(virtual)) {
-				if (parsed.kind !== 'point')
-					throw new PaletteError(`run: stash "${virtual.id}" takes no suffix`)
-				this.runStash(virtual.id)
-				return
-			}
 			const source = resolveVirtualSource(virtual, this.definitions)
-			if (parsed.kind === 'point') {
+			if (command.kind === 'action') {
 				const key = readEnumFrom(virtual, this.values.get(source.id))
 				if (key === undefined)
 					throw new PaletteError(`run: virtual "${virtual.id}" has no option for the current value`)
 				this.values.set(source.id, resolveEnumSourceValue(virtual, key) as never)
 				return
 			}
-			if (parsed.kind === 'action')
-				throw new PaletteError(`run: virtual "${virtual.id}" supports no actions`)
-			this.values.set(source.id, resolveEnumSourceValue(virtual, parsed.value) as never)
+			if (command.kind !== 'set' || typeof command.value !== 'string')
+				throw new PaletteError(`run: virtual "${virtual.id}" supports only setters`)
+			this.values.set(source.id, resolveEnumSourceValue(virtual, command.value) as never)
 			return
 		}
-		const def = this.definitions.get(parsed.pointId)
-		if (def === undefined) throw new PaletteError(`run: unknown point "${parsed.pointId}"`)
-		if (parsed.kind === 'point') {
-			if (!isActionPoint(def)) throw new PaletteError(`run: point "${spec}" is not an action`)
+		const def = this.definitions.get(command.point)
+		if (def === undefined) throw new PaletteError(`run: unknown point "${command.point}"`)
+		if (command.kind === 'action') {
+			if (!isActionPoint(def))
+				throw new PaletteError(`run: point "${command.point}" is not an action`)
 			def.run(...this.resolveBags(def.uses))
 			return
 		}
-		if (!isValuedPoint(def)) throw new PaletteError(`run: point "${parsed.pointId}" is an action`)
-		if (parsed.kind === 'setter') {
-			this.writeValue(parsed.pointId, readSetterValue(def, parsed.value))
+		if (!isValuedPoint(def))
+			throw new PaletteError(`run: point "${command.point}" is an action`)
+		if (command.kind === 'set') {
+			this.writeValue(command.point, this.coerceSetValue(def, command.value))
 			return
 		}
-		this.applyNamedAction(def, parsed.action)
+		if (command.kind === 'toggle') {
+			if (def.type !== 'boolean')
+				throw new PaletteError(`run: point "${command.point}" is not a boolean`)
+			const current = this.readValue(def.id)
+			if (current === undefined) throw new PaletteError(`run: no value for "${def.id}" (skeleton)`)
+			this.writeValue(def.id, !(current as boolean))
+			return
+		}
+		const delta = command.kind === 'inc' ? Math.abs(command.delta) : -Math.abs(command.delta)
+		this.applyStep(def, delta)
 	}
 
-	/**
-	 * Run a `stash` virtual by id (pure toggle, see `computeStashTransition`).
-	 * Strict source read: absent (skeleton) source throws `PaletteError`.
-	 * Third branch writes `virtual.fallbackValue` (`undefined` = stay skeleton).
-	 */
-	runStash(id: string): void {
-		const virtual = this.virtuals.get(canonicalPointId(id))
-		if (virtual === undefined) throw new PaletteError(`runStash: unknown virtual "${id}"`)
-		if (!isStashPoint(virtual)) throw new PaletteError(`runStash: virtual "${id}" is not a stash`)
-		const source = resolveVirtualSource(virtual, this.definitions)
-		if (!this.values.has(source.id))
-			throw new PaletteError(`runStash: no value for source "${source.id}" (skeleton)`)
-		const aside = this.stashAsides.get(virtual.id) ?? { has: false }
-		const transition = computeStashTransition(
-			this.values.get(source.id),
-			virtual.stashedValue,
-			aside,
-			virtual.fallbackValue
-		)
-		this.values.set(source.id, transition.next as never)
-		if (transition.asideAfter.has) this.stashAsides.set(virtual.id, transition.asideAfter)
-		else this.stashAsides.delete(virtual.id)
+	/** Coerce a `set` payload: typed values pass through, string tokens parse like the wire. */
+	private coerceSetValue(def: AnyValuedPoint, value: unknown): unknown {
+		if (typeof value === 'string' && (def.type === 'boolean' || def.type === 'number')) {
+			return readSetterValue(def, value)
+		}
+		return value
 	}
 
 	/** Layout subscription — fresh `SerializedLayout` snapshot per mutation. */
@@ -613,59 +678,46 @@ export class PaletteCore {
 		return new Set(this.definitions.keys())
 	}
 
-	/** Apply a named action (`id:action`) to a valued point. Strict: absent value throws. */
-	private applyNamedAction(def: AnyValuedPoint, action: string): void {
+	/** Apply a step (`id+=x` / `id-=x`) to a number point. Strict: absent value throws. */
+	private applyStep(def: AnyValuedPoint, delta: number): void {
+		if (def.type !== 'number') throw new PaletteError(`run: unknown step "${def.id}"`)
 		const constraints = def.constraints as
-			| { readonly min?: number; readonly max?: number; readonly step?: number }
+			| { readonly min?: number; readonly max?: number }
 			| undefined
-		const step = constraints?.step ?? 1
 		const current = this.readValue(def.id)
 		if (current === undefined) throw new PaletteError(`run: no value for "${def.id}" (skeleton)`)
-		if (def.type === 'number') {
-			if (action === 'inc') {
-				const next = (current as number) + step
-				const clamped = constraints?.max === undefined ? next : Math.min(next, constraints.max)
-				this.writeValue(def.id, clamped)
-				return
-			}
-			if (action === 'dec') {
-				const next = (current as number) - step
-				const clamped = constraints?.min === undefined ? next : Math.max(next, constraints.min)
-				this.writeValue(def.id, clamped)
-				return
-			}
-		}
-		throw new PaletteError(`run: unknown action "${def.id}:${action}"`)
+		const next = (current as number) + delta
+		const clamped =
+			constraints?.max !== undefined && next > constraints.max
+				? constraints.max
+				: constraints?.min !== undefined && next < constraints.min
+					? constraints.min
+					: next
+		this.writeValue(def.id, clamped)
 	}
 }
 
 /**
- * Pure `can` for a named action over a valued point: returns `true` / `false`
- * for a known action, `undefined` for an unknown action. `inc` / `dec` are
- * bounds-checked against `max` / `min` (`undefined` bound = unlimited).
- * Absent (skeleton) `current` throws `PaletteError` — strict path.
+ * Pure `can` for a step over a number point: returns `true` / `false`,
+ * `undefined` for a non-number point. Bounds-checked against `max` / `min`
+ * (`undefined` bound = unlimited). Absent (skeleton) `current` throws
+ * `PaletteError` — strict path (surfaced as `can: no value for "…"`).
  */
-function namedActionCan(
-	def: AnyValuedPoint,
-	current: unknown,
-	action: string
-): boolean | undefined {
+function stepCan(def: AnyValuedPoint, current: unknown, delta: number): boolean | undefined {
 	if (def.type === 'number') {
 		const constraints = def.constraints as
-			| { readonly min?: number; readonly max?: number; readonly step?: number }
+			| { readonly min?: number; readonly max?: number }
 			| undefined
 		if (current === undefined)
-			throw new PaletteError(`canRunAction: no value for "${def.id}" (skeleton)`)
+			throw new PaletteError(`can: no value for "${def.id}" (skeleton)`)
 		const value = current as number
-		// Step-aware: a press that would overshoot the bound is disabled,
-		// mirroring the stepper UI (`value ± step >/< bound` → disabled).
-		// A small epsilon absorbs float error (`0.1 + 0.2` style drift).
-		const step = constraints?.step ?? 1
-		const epsilon = Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(step)) * 8
-		if (action === 'inc')
-			return constraints?.max === undefined || value + step <= constraints.max + epsilon
-		if (action === 'dec')
-			return constraints?.min === undefined || value - step >= constraints.min - epsilon
+		// A press that would overshoot the bound is disabled, mirroring the
+		// stepper UI (`value + delta >/< bound` → disabled). A small epsilon
+		// absorbs float error (`0.1 + 0.2` style drift).
+		const epsilon = Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(delta)) * 8
+		if (delta >= 0)
+			return constraints?.max === undefined || value + delta <= constraints.max + epsilon
+		return constraints?.min === undefined || value + delta >= constraints.min - epsilon
 	}
 	return undefined
 }

@@ -4,7 +4,7 @@
  * Each control renders one toolbar item into an `HTMLElement` from a core
  * presenter view-model (button/toggle/select/segmented/slider/stepper/stars/
  * status/theme/commandBox/drawer). Presentation only: all reads go through core
- * presenters, all writes through `core.run(spec)` / `core.values.set`.
+ * presenters, all writes through `core.run(runnable)` / `core.values.set`.
  * Status/commandBox/drawer/theme tools bind nothing-points (1:1 — one tool,
  * one nothing-point whose `uses` names its context); display state comes
  * from the resolved bags, never from `core.values`.
@@ -13,12 +13,16 @@
  */
 
 import {
+	type ActionableEntry,
 	type AnyPoint,
 	type AnyValuedPoint,
+	actionableEntries,
 	axisForRegion,
 	buttonPresenter,
 	canonicalItemPoint,
 	configuration,
+	drawerChildRegionFor,
+	drawerCloseOnClickOf,
 	drawerOpenOf,
 	filterCommandEntries,
 	isActionPoint,
@@ -26,7 +30,7 @@ import {
 	isValuedPoint,
 	type PaletteCore,
 	type PaletteRegion,
-	paletteCommandEntries,
+	type Runnable,
 	type SurfaceContext,
 	selectClosedLabel,
 	selectPresenter,
@@ -61,11 +65,33 @@ import {
 } from './templates.js'
 import { applyThemeSetting } from './theme.js'
 
+/** Consumer icon resolver: maps an `IconToken` to its rendered glyph
+ * (string-to-string only — keeps `textContent` + `escapeHtml` safety, no
+ * DOM/SVG injection). Return `undefined` to keep the token as-is. */
+export type IconResolver = (token: string) => string | undefined
+
+/** Resolve one icon token through an optional resolver. `undefined`/empty
+ * pass through untouched (still handled as absent by `fillIcon`/`takeIcon`);
+ * unknown `icon:` names fall back to the raw token (debuggable, never blank). */
+export function resolveIcon(
+	token: string | undefined,
+	resolver?: IconResolver
+): string | undefined {
+	if (token === undefined || token === '') return token
+	if (resolver === undefined) return token
+	return resolver(token) ?? token
+}
+
 export type HeadContext = {
 	readonly core: PaletteCore | PreviewCore
 	readonly item: ToolbarItem
 	readonly surface: SurfaceContext
 	readonly region?: PaletteRegion
+	/** Optional string-glyph resolver: maps an `IconToken` to its rendered
+	 * glyph. `undefined` return (or absent resolver) keeps the token as-is,
+	 * so emoji passthrough is the default. Consumer-owned (e.g. the demo
+	 * maps `icon:moon` via a hard-coded dictionary). */
+	readonly iconResolver?: IconResolver
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
 	/** Track an open drawer popup so the adapter can reposition it on layout change. */
@@ -85,6 +111,11 @@ export type HeadContext = {
 	readonly isDragging?: () => boolean
 	/** Hierarchy close: close open drawers not containing `target`. */
 	readonly closeUnrelatedDrawers?: (target: EventTarget | null) => void
+	/** Test-only geometry override for the drawer center-seeking flip
+	 * (jsdom reports zero rects): when provided, `renderDrawer` uses
+	 * these instead of live `getBoundingClientRect()` reads. */
+	readonly ideRect?: { left: number; top: number; width: number; height: number }
+	readonly triggerRect?: { left: number; top: number; width: number; height: number }
 }
 
 /** Fill a shelled icon node: show + set glyph, or hide when absent.
@@ -153,7 +184,7 @@ export function boundOf(
  * value (always `undefined` — display state comes from the bags).
  * Shared by initial render (`boundOf`) and in-place updates
  * (`ide.ts:updateToolNode`). Delegates to `core.readValue` (the single
- * read path — spec-string suffixes stripped via `canonicalPointId`).
+ * read path over plain point ids).
  */
 export function liveValue(core: PaletteCore | PreviewCore, point: AnyPoint | undefined): unknown {
 	if (point === undefined || !isValuedPoint(point)) return undefined
@@ -164,25 +195,70 @@ export function liveValue(core: PaletteCore | PreviewCore, point: AnyPoint | und
 	}
 }
 
-function specOf(item: ToolbarItem): string | undefined {
-	const point = (item as { point?: unknown }).point
-	return typeof point === 'string' ? point : undefined
-}
-
 function pointIdOf(item: ToolbarItem): string | undefined {
-	const spec = specOf(item)
-	if (spec === undefined) return undefined
+	const point = (item as { point?: unknown }).point
+	if (typeof point !== 'string') return undefined
 	const id = canonicalItemPoint(item)
 	return id === '' ? undefined : id
+}
+
+/** Bubbling activation event: a command / toggle / segmented inside a drawer
+ * fired. `renderDrawer` wrappers listen for it and run the recursive
+ * close-on-click chain. Dispatched AFTER `core.run(...)` so the action
+ * always lands even when no drawer is listening. */
+export const DRAWER_ITEM_ACTIVATE_EVENT = 'palettable-drawer-item-activate'
+
+/** Dispatch the drawer item-activate event from an inner control node. */
+export function notifyDrawerItemActivate(node: HTMLElement): void {
+	node.dispatchEvent(new CustomEvent(DRAWER_ITEM_ACTIVATE_EVENT, { bubbles: true }))
+}
+
+/** Per-drawer close-on-click chain entry (innermost first). */
+export type DrawerChainEntry = {
+	readonly close: () => void
+	readonly closeOnClick: boolean
+	readonly openMode: 'hover' | 'toggle'
+}
+
+/**
+ * Resolve which drawer chain entries to close after an inner activation.
+ * Rule ("keep from top, remove from bottom", `keep && !remove`):
+ * - pass 1 (bottom-up): mark remove from the leaf upward while
+ *   `closeOnClick === true`, stopping (exclusive) at the first `false`.
+ * - pass 2: mark remove from the leaf up to AND including the highest
+ *   (outermost) ancestor with `open === 'hover'`.
+ * The final set is the max / outermost of the two extents: indices
+ * `0 .. max(removeEnd1, removeEnd2)`.
+ * Returns the indices into `chain` (innermost-first) to close.
+ */
+export function drawerCloseChainIndices(chain: readonly DrawerChainEntry[]): readonly number[] {
+	let end1 = -1
+	for (let index = 0; index < chain.length; index++) {
+		if (chain[index]?.closeOnClick !== true) break
+		end1 = index
+	}
+	let end2 = -1
+	for (let index = 0; index < chain.length; index++) {
+		if (chain[index]?.openMode === 'hover') end2 = index
+	}
+	const end = Math.max(end1, end2)
+	if (end < 0) return []
+	return chain.slice(0, end + 1).map((_, index) => index)
 }
 
 /** Render a `button` (action) item. */
 export function renderButton(context: HeadContext): HTMLElement {
 	const { core, item } = context
-	const spec = specOf(item) ?? ''
+	const resolver = context.iconResolver
+	const pointId = pointIdOf(item) ?? ''
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
-	const view = buttonPresenter(item, { point, value: undefined, bags }, spec, can)
+	const view = buttonPresenter(
+		item,
+		{ point, value: undefined, bags },
+		{ kind: 'action', point: pointId },
+		can
+	)
 	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone }),
 		'.palette-default-icon',
@@ -192,15 +268,19 @@ export function renderButton(context: HeadContext): HTMLElement {
 	btn.disabled = !view.can
 	btn.title = view.title
 	if (view.icon === undefined) icon.remove()
-	else fillIcon(icon, view.icon)
+	else fillIcon(icon, resolveIcon(view.icon, resolver))
 	label.textContent = view.label
-	btn.addEventListener('click', () => core.run(view.run))
+	btn.addEventListener('click', () => {
+		core.run(view.run)
+		notifyDrawerItemActivate(btn)
+	})
 	return btn
 }
 
 /** Render a `toggle` (boolean) item. Skeleton (`pressed === undefined`) renders unpressed + `aria-pressed="mixed"`; a context tool with no value is disabled (`view.can === false`). */
 export function renderToggle(context: HeadContext): HTMLElement {
 	const { core, item } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = togglePresenter(item, { point, value, bags })
 	const [button, icon] = sel(
@@ -210,7 +290,7 @@ export function renderToggle(context: HeadContext): HTMLElement {
 	const btn = button as HTMLButtonElement
 	btn.disabled = !view.can
 	btn.title = view.title
-	fillIcon(icon, view.icon)
+	fillIcon(icon, resolveIcon(view.icon, resolver))
 	// Recompute the toggle spec at click time: `view.toggle` is captured
 	// from render and goes stale after the first click (false→true would
 	// replay forever, never unticking). Fresh read → run.
@@ -219,6 +299,7 @@ export function renderToggle(context: HeadContext): HTMLElement {
 		const live = togglePresenter(item, fresh)
 		if (!live.can) return
 		core.run(live.toggle)
+		notifyDrawerItemActivate(btn)
 	})
 	return btn
 }
@@ -235,6 +316,7 @@ export function renderToggle(context: HeadContext): HTMLElement {
  * icon+text select box (segmented pattern), so the toolbar never resizes. */
 export function renderSelect(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
 	const closedLabel = selectClosedLabel(view)
@@ -242,7 +324,6 @@ export function renderSelect(context: HeadContext): HTMLElement {
 		selectShellTemplate({
 			tone: view.tone,
 			direction: view.direction,
-			region: view.region ?? 'top',
 			iconOnly: closedLabel === undefined,
 		}),
 		'.palette-default-select-trigger',
@@ -260,8 +341,8 @@ export function renderSelect(context: HeadContext): HTMLElement {
 	// numerics. Absent icons are REMOVED (not hidden) so no space is
 	// reserved. Skeleton (`isSkeleton`) renders the tool icon + a `?`
 	// watermark instead of the closed label, so the trigger is never empty.
-	takeIcon(toolIcon, view.toolIcon)
-	takeIcon(valueIcon, view.icon)
+	takeIcon(toolIcon, resolveIcon(view.toolIcon, resolver))
+	takeIcon(valueIcon, resolveIcon(view.icon, resolver))
 	if (view.isSkeleton) {
 		label.replaceWith(selectWatermark())
 	} else if (closedLabel === undefined) label.remove()
@@ -341,7 +422,7 @@ export function renderSelect(context: HeadContext): HTMLElement {
 			'.palette-default-choice-icon',
 			'.palette-default-choice'
 		)
-		fillIcon(rowIcon, option.icon)
+		fillIcon(rowIcon, resolveIcon(option.icon, resolver))
 		if (option.icon === undefined) rowIcon.remove()
 		rowText.textContent = option.label
 		row.addEventListener('click', (event) => {
@@ -405,13 +486,12 @@ export function renderSelect(context: HeadContext): HTMLElement {
  * without widening the toolbar when shown. */
 export function renderSegmented(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = selectPresenter(item, { point, value, bags }, surface)
 	const [group] = sel(
 		segmentedShellTemplate({
 			tone: view.tone,
-			direction: view.direction,
-			region: view.region ?? 'top',
 		})
 	)
 	group.title = view.title
@@ -430,7 +510,7 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 		// option with no icon keeps its label as a fallback so the button
 		// is never empty.
 		if (option.icon === undefined) icon.remove()
-		else fillIcon(icon, option.icon)
+		else fillIcon(icon, resolveIcon(option.icon, resolver))
 		// `showText: false` hides the label (icon-only on both axes); an
 		// option with no icon keeps its label as a fallback so the button
 		// is never empty.
@@ -444,7 +524,10 @@ export function renderSegmented(context: HeadContext): HTMLElement {
 			text.hidden = false
 			text.textContent = label
 		}
-		button.addEventListener('click', () => core.run(view.select(option.value)))
+		button.addEventListener('click', () => {
+			core.run(view.select(option.value))
+			notifyDrawerItemActivate(button)
+		})
 		group.append(button)
 	}
 	return group
@@ -457,15 +540,13 @@ export function renderSegmented(context: HeadContext): HTMLElement {
  * without opening the range when shown. */
 export function renderSlider(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const [label, icon, input] = sel(
 		sliderShellTemplate({
 			variant: view.variant,
 			tone: view.tone,
-			direction: view.direction,
-			region: view.region,
-			rangeAxis: view.rangeAxis,
 			iconOnly: !view.showValue,
 		}),
 		'.palette-default-slider-value > .palette-default-icon',
@@ -474,7 +555,7 @@ export function renderSlider(context: HeadContext): HTMLElement {
 	label.title = view.title
 	// The readout mirrors the stepper readout exactly: the icon nests inside
 	// the value chip (icon + text), so both read as one bordered chip.
-	fillIcon(icon, view.icon)
+	fillIcon(icon, resolveIcon(view.icon, resolver))
 	if (view.showValue) label.querySelector('.palette-default-slider-value')?.append(view.text)
 	const range = input as HTMLInputElement
 	range.min = String(view.min)
@@ -497,10 +578,11 @@ export function renderSlider(context: HeadContext): HTMLElement {
 /** Render a `stepper` (number ±) item. */
 export function renderStepper(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const [group, minus, icon, readout, plus] = sel(
-		stepperShellTemplate({ tone: view.tone, direction: view.direction }),
+		stepperShellTemplate({ tone: view.tone }),
 		'button:first-of-type',
 		'.palette-default-stepper-value > .palette-default-icon',
 		'.palette-default-stepper-value',
@@ -534,7 +616,7 @@ export function renderStepper(context: HeadContext): HTMLElement {
 	;(minus as HTMLButtonElement).addEventListener('click', () => {
 		stepFromLive(-1)
 	})
-	fillIcon(icon, view.icon)
+	fillIcon(icon, resolveIcon(view.icon, resolver))
 	readout.append(String(view.value))
 	;(plus as HTMLButtonElement).disabled =
 		!view.can || view.value === undefined || view.value + view.step > view.max
@@ -547,14 +629,15 @@ export function renderStepper(context: HeadContext): HTMLElement {
 /** Render a `stars` (number rating) item — demo extension the head lacks. */
 export function renderStars(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = sliderPresenter(item, { point, value, bags }, surface)
 	const [group, icon] = sel(
-		starsShellTemplate({ tone: view.tone, direction: view.direction, max: view.max }),
+		starsShellTemplate({ tone: view.tone, max: view.max }),
 		':scope > .palette-default-icon'
 	)
 	group.title = view.title
-	fillIcon(icon, view.icon)
+	fillIcon(icon, resolveIcon(view.icon, resolver))
 	const buttons = [...group.querySelectorAll('.palette-default-arrow')] as HTMLButtonElement[]
 	buttons.forEach((button, offset) => {
 		const index = offset + 1
@@ -583,9 +666,9 @@ export function readThemeSetting(): 'light' | 'dark' | 'system' {
 	return raw === 'light' || raw === 'dark' ? raw : 'system'
 }
 
-/** Parse the `theme=<next>` cycle spec into its next value. */
-function nextCycleValue(cycle: string): 'light' | 'dark' | 'system' {
-	const next = cycle.split('=')[1]
+/** Read the next theme value from a cycle runnable. */
+function nextCycleValue(cycle: Runnable): 'light' | 'dark' | 'system' {
+	const next = cycle.kind === 'set' ? cycle.value : undefined
 	return next === 'light' || next === 'dark' ? next : 'system'
 }
 
@@ -601,6 +684,7 @@ function nextCycleValue(cycle: string): 'light' | 'dark' | 'system' {
  * icon square. Skeleton renders the tool icon only. */
 export function renderTheme(context: HeadContext): HTMLElement {
 	const { core, item } = context
+	const resolver = context.iconResolver
 	const { point, bags } = boundOf(core, pointIdOf(item))
 	const value = readThemeSetting()
 	const view = themePresenter(item, { point, value, bags })
@@ -613,7 +697,7 @@ export function renderTheme(context: HeadContext): HTMLElement {
 	btn.title = view.title
 	btn.dataset.testid = 'theme-tool'
 	if (view.valueIcon === undefined) icon.remove()
-	else fillIcon(icon, view.valueIcon)
+	else fillIcon(icon, resolveIcon(view.valueIcon, resolver))
 	label.remove()
 	if (point === undefined) {
 		btn.disabled = true
@@ -633,7 +717,7 @@ export function renderTheme(context: HeadContext): HTMLElement {
 		const applied = nextCycleValue(next.cycle)
 		applyThemeSetting(document.documentElement, applied)
 		const synced = themePresenter(item, { ...fresh, value: applied })
-		fillIcon(icon, synced.valueIcon)
+		fillIcon(icon, resolveIcon(synced.valueIcon, resolver))
 		btn.title = synced.title
 	})
 	return btn
@@ -645,19 +729,19 @@ export function renderTheme(context: HeadContext): HTMLElement {
  * back to the single value node so the square is never empty. */
 export function renderStatus(context: HeadContext): HTMLElement {
 	const { core, item, surface } = context
+	const resolver = context.iconResolver
 	const { point, value, bags } = boundOf(core, pointIdOf(item))
 	const view = statusPresenter(item, { point, value, bags }, surface)
 	const [span, icon] = sel(
 		statusShellTemplate({
 			tone: view.tone,
 			direction: view.direction,
-			region: view.region ?? 'top',
 		}),
 		'.palette-default-icon'
 	)
 	span.title = view.title
 	if (view.icon === undefined) icon.remove()
-	else fillIcon(icon, view.icon)
+	else fillIcon(icon, resolveIcon(view.icon, resolver))
 	syncStatusValue(span, view.value)
 	if (!view.can) span.setAttribute('aria-disabled', 'true')
 	return span
@@ -697,14 +781,14 @@ export function syncStatusValue(span: HTMLElement, value: string): void {
  * Horizontal: full input + popover inline. Vertical: icon-only trigger whose
  * shell/popover are CSS overlays (no portal), so the toolbar width is fixed. */
 export function renderCommandBox(context: HeadContext): HTMLElement {
-	const { core, item, surface } = context
+	const { core, item } = context
+	const resolver = context.iconResolver
 	const meta = (item as { config?: Record<string, unknown> }).config ?? {}
+	const shellIcon = typeof meta.icon === 'string' ? (resolveIcon(meta.icon, resolver) ?? '⌘') : '⌘'
 	const [box, input, popover, results, openButton, text] = sel(
 		commandBoxShellTemplate({
 			hint: typeof meta.hint === 'string' ? meta.hint : 'Search and run a command',
-			icon: typeof meta.icon === 'string' ? meta.icon : '⌘',
-			axis: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
-			region: surface.region,
+			icon: shellIcon,
 		}),
 		'.palette-default-command-input',
 		'.palette-default-command-popover',
@@ -741,7 +825,8 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 	const refresh = () => {
 		const query = input.value
 		syncRest()
-		const all = paletteCommandEntries(core.points, {
+		// Run surface: concrete executable rows with live `can` + `uses`.
+		const all = actionableEntries(core.points, {
 			keys: core.keys,
 			values: core.values.asObject(),
 		})
@@ -756,7 +841,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 				commandResultRowTemplate({
 					label: entry.label,
 					meta: entry.meta,
-					icon: typeof entry.icon === 'string' ? entry.icon : undefined,
+					icon: typeof entry.icon === 'string' ? resolveIcon(entry.icon, resolver) : undefined,
 					disabled: entry.can === false,
 				})
 			)
@@ -781,7 +866,7 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 	input.addEventListener('keydown', (event) => {
 		if (event.key === 'Enter') {
 			event.preventDefault()
-			const all = paletteCommandEntries(core.points, {
+			const all: readonly ActionableEntry[] = actionableEntries(core.points, {
 				keys: core.keys,
 				values: core.values.asObject(),
 			})
@@ -800,18 +885,28 @@ export function renderCommandBox(context: HeadContext): HTMLElement {
 }
 
 /** Render a `drawer` trigger item. Hierarchical: trigger + popup are
- * siblings in a `.palettable-drawer.from-{region}` wrapper (child of the
- * tool node). The popup toggles `hidden` — no body portal, no JS
- * repositioning; the side is CSS-only from the parent region
- * (center-seeking: left→right, right→left, top→down, bottom→up).
+ * siblings in a `.palettable-drawer` wrapper (child of the tool node).
+ * The wrapper is purely structural (positioning anchor + flex item) and
+ * carries NO region or axis — placement queries the PARENT container's
+ * `--region` (center-seeked at open time: left→right, right→left,
+ * top→down, bottom→up). The popup stamps its own `--layout` (child axis)
+ * + `--region` (content half for inner tools).
  * Trigger behavior follows `config.open` (svelte `DrawerEditor` parity):
- * `click` toggles on click (default), `press` toggles on pointerdown,
- * `hover` opens on mouseenter and schedules close on mouseleave via
- * `configuration.drawerHoverCloseMs` (leaving the trigger for the popup
- * cancels the close; leaving the popup re-arms it).
+ * `toggle` toggles on primary-button pointerdown (default) plus a keyboard
+ * `click` fallback (`event.detail === 0` — pointerdown never fires for
+ * Enter/Space), `hover` opens on mouseenter and schedules close on
+ * mouseleave via `configuration.drawerHoverCloseMs` (leaving the trigger
+ * for the popup cancels the close; leaving the popup re-arms it).
+ *
+ * Close-on-click (`config.closeOnClick`, opt-in): a command / toggle /
+ * segmented activation inside the popup bubbles a
+ * `palettable-drawer-item-activate` event; the wrapper runs the recursive
+ * chain (bottom-up `closeOnClick` run maxed with the highest `hover`
+ * ancestor) and closes the resulting drawers.
  */
 export function renderDrawer(context: HeadContext): HTMLElement {
 	const { item, surface } = context
+	const resolver = context.iconResolver
 	const openMode = drawerOpenOf(item)
 	const config = ((item as { config?: Record<string, unknown> }).config ?? {}) as Record<
 		string,
@@ -830,9 +925,7 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 			label,
 			hint,
 			tone,
-			icon: typeof config.icon === 'string' ? config.icon : undefined,
-			axis: surface.axis === 'vertical' ? 'vertical' : 'horizontal',
-			region: surface.region,
+			icon: typeof config.icon === 'string' ? resolveIcon(config.icon, resolver) : undefined,
 			open: openMode,
 		})
 	)
@@ -841,14 +934,15 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 
 	const childAxis = surface.axis === 'vertical' ? 'horizontal' : 'vertical'
 	const childRegion: PaletteRegion = childAxis === 'vertical' ? 'left' : 'top'
-	const parentRegion = context.region ?? surface.region ?? 'top'
-	// The wrapper carries the parent region twice: the `from-*` class for
-	// the no-container-query fallback, the `--region` var for the live
-	// `@container palette style(--region)` side rules.
-	const wrapper = elementFromHtml(
-		`<div class="palettable-drawer from-${parentRegion}" style="--region: ${parentRegion};"></div>`
-	)
-	const popup = elementFromHtml(drawerPopupShellTemplate(childAxis))
+	// The wrapper is purely structural (positioning anchor + flex item):
+	// it stamps NO region and NO axis. Region/axis on the wrapper would
+	// accumulate down the tree (classes don't override) and leak stale
+	// parent values onto nested popups — placement queries the PARENT
+	// container's `--region`, the popup stamps the child `--layout`
+	// (inner toolbars query it) plus a pre-measure `--region` default;
+	// `openPopup` center-seeks the PARENT `--region` from live geometry.
+	const wrapper = elementFromHtml(`<div class="palettable-drawer"></div>`)
+	const popup = elementFromHtml(drawerPopupShellTemplate(childAxis, childRegion))
 	if (!popup.classList.contains('palettable-drawer__popup'))
 		throw new Error('drawer popup shell missing node')
 	// Drawer content is one track (several toolbars in line along the
@@ -860,38 +954,112 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 	wrapper.append(trigger, popup)
 
 	let open = false
+	let depth = 0
 	const close = () => {
 		if (!open) return
 		open = false
+		depth = 0
 		popup.hidden = true
+		popup.style.zIndex = ''
+		// Restore the pre-measure content region until the next center-seek.
+		popup.style.setProperty('--region', childRegion)
 		trigger.setAttribute('aria-expanded', 'false')
 		if (chevron) chevron.textContent = '▸'
 		context.onCloseDrawer?.(trigger)
 	}
 	const openPopup = () => {
+		// Depth = nesting level (1 = top-level drawer, 2 = nested, …):
+		// count ancestor drawer wrappers. Each level stacks above the
+		// 200-range base so a nested popup paints over the popup hosting
+		// it (base 211 keeps popups above command-box floats at z 5,
+		// select lists at 40, and edit guards at 1–6).
+		depth = 1
+		let ancestor = wrapper.parentElement?.closest('.palettable-drawer') ?? null
+		while (ancestor !== null) {
+			depth += 1
+			ancestor = ancestor.parentElement?.closest('.palettable-drawer') ?? null
+		}
 		open = true
 		popup.hidden = false
+		popup.style.zIndex = String(210 + depth)
+		// Center-seeking placement: the popup queries the PARENT
+		// container's `--region` (the half the trigger sits in) — the
+		// popup's own `--region` stays the content half for inner tools
+		// (always compatible with the child axis: a horizontal parent
+		// measures left/right, a vertical parent top/bottom).
+		// The wrapper carries nothing, so there is nothing to refresh —
+		// only the parent container + the popup are stamped.
+		// Skipped when the IDE reports a zero rect (jsdom / detached
+		// DOM): the parent-region defaults stand.
+		// NOTE: the override lives on the context captured at RENDER time.
+		// Nested drawers render through `renderToolbar` — the adapter
+		// forwards `ideRect`/`triggerRect` at every level (see
+		// `renderToolbarElement` `_basePath`), so inner drawers see it too.
+		// The seek measures the WRAPPER (trigger + popup as laid out), not
+		// the trigger alone: a nested trigger at the popup's far edge
+		// would otherwise always read "past center" and flip back outward.
+		// At OPEN time the wrapper rect is live in real DOM; in unit tests
+		// (jsdom zeros) the `triggerRect` override stands in for it — and
+		// it MUST win over the live zero rect (never fall through to it).
+		const liveIde = wrapper.closest('.palette-ide') ?? document.body
+		const liveIdeRect = liveIde.getBoundingClientRect()
+		const ideRect =
+			context.ideRect ?? (liveIdeRect.width > 0 && liveIdeRect.height > 0 ? liveIdeRect : null)
+		const liveWrapperRect = wrapper.getBoundingClientRect()
+		const liveWrapperUsable = liveWrapperRect.width > 0 && liveWrapperRect.height > 0
+		const triggerRect = context.triggerRect ?? (liveWrapperUsable ? liveWrapperRect : null)
+		// The live parent region drives the pre-measure defaults below
+		// (content region when geometry is missing).
+		if (ideRect !== null && ideRect.width > 0 && ideRect.height > 0 && triggerRect !== null) {
+			const triggerCenterX = triggerRect.left + triggerRect.width / 2
+			const triggerCenterY = triggerRect.top + triggerRect.height / 2
+			const ideCenterX = ideRect.left + ideRect.width / 2
+			const ideCenterY = ideRect.top + ideRect.height / 2
+			// Content half for inner tools (the popup's own `--region`).
+			// Placement needs no stamping: the popup queries the PARENT
+			// container's `--region` (static on borders, center-seeked on
+			// parent popups), so it follows automatically.
+			popup.style.setProperty(
+				'--region',
+				drawerChildRegionFor(
+					surface.axis === 'vertical' ? 'vertical' : 'horizontal',
+					surface.axis === 'horizontal' ? triggerCenterX : triggerCenterY,
+					surface.axis === 'horizontal' ? ideCenterX : ideCenterY
+				)
+			)
+		} else {
+			// No geometry (jsdom / detached DOM): parent-region defaults.
+			popup.style.setProperty('--region', childRegion)
+		}
 		trigger.setAttribute('aria-expanded', 'true')
 		if (chevron) chevron.textContent = '▾'
-		if (surface.axis === 'horizontal' || surface.axis === 'vertical') {
+		if (surface.axis !== 'both') {
 			context.onOpenDrawer?.(trigger, popup, surface.axis)
 		}
 	}
-	trigger.addEventListener('click', () => {
-		if (openMode !== 'click') return
+	trigger.addEventListener('click', (event) => {
+		// Toggle mode: pointer clicks are owned by the pointerdown toggle
+		// below — but synthetic `click()` (tests, keyboard fallback where
+		// pointerdown never fires for Enter/Space) carries `detail === 0`,
+		// so only ignore clicks that follow a real pointer press
+		// (`detail > 0`). This avoids a double toggle (down opens, click
+		// would close) while keeping programmatic clicks working.
+		if (openMode !== 'toggle' || event.detail !== 0) return
 		if (open) close()
 		else openPopup()
 	})
-	if (openMode === 'press') {
-		trigger.addEventListener('pointerdown', () => {
+	if (openMode === 'toggle') {
+		trigger.addEventListener('pointerdown', (event) => {
+			// Primary button only: right/middle presses must not toggle.
+			if (event.button !== 0) return
 			if (open) close()
 			else openPopup()
 		})
 	}
 	// `open: 'hover'` keeps the popup open while the pointer travels from
 	// the trigger to the popup: leaving the trigger schedules a close that
-	// entering the popup cancels (and vice versa). `click`/`press` modes
-	// ignore hover entirely.
+	// entering the popup cancels (and vice versa). `toggle` mode
+	// ignores hover entirely.
 	let cancelHoverClose: () => void = () => {}
 	if (openMode === 'hover') {
 		let hoverCloseTimer: ReturnType<typeof setTimeout> | undefined
@@ -916,42 +1084,102 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 		popup.addEventListener('mouseenter', cancelHoverClose)
 		popup.addEventListener('mouseleave', scheduleHoverClose)
 	}
-	// Edit-mode drag hover-open: while editing + dragging, hovering the
-	// trigger OR the popup opens the drawer (any `config.open` mode — the
-	// drag needs the toolbar visible to highlight its gaps). Hierarchy
-	// close is adapter-owned (no mouseleave close here): the adapter closes
-	// only drawers outside the hovered ancestor chain.
+	// Edit-mode hover-open: in edit mode hovering the trigger OR the popup
+	// opens the drawer — even when not dragging (any `config.open` mode).
+	// Run mode keeps the `config.open` behavior (`toggle`/`hover`).
+	// Hierarchy close is adapter-owned (no mouseleave close here): the
+	// adapter closes only drawers outside the hovered ancestor chain.
 	//
-	// NOTE: the trigger's own `pointerenter`/`pointermove` do NOT fire
-	// during a tool drag — the drawer tool's own guard
-	// (`position: absolute; inset: -3px; z-index: 1`) covers the trigger
-	// and retargets every pointer event to itself. The adapter's bar-level
-	// `pointermove` (coordinate hit-test via `elementFromPoint`, resolving
-	// the item through the guard's parent wrapper) owns hover-open
-	// instead: it dispatches a bubbling `palettable-drawer-drag-hover`
-	// CustomEvent carrying the hovered drawer item, and this wrapper opens
-	// only when the item is its own.
-	// The popup listener covers the already-open case (hovering the open
-	// popup's gaps keeps it open without re-dispatch).
+	// NOTE: the trigger's own `pointerenter`/`pointermove`/`pointerover`
+	// do NOT fire while the drawer tool's own guard
+	// (`position: absolute; inset: -3px; z-index: 1`) covers the trigger:
+	// every pointer event retargets to the guard, and the guard is a
+	// SIBLING of the drawer content (appended after it in the wrapper),
+	// so guard events bubble to the `.toolbar-item` wrapper — never
+	// through `.palettable-drawer`. The adapter's bar-level `pointermove`
+	// (coordinate hit-test via `elementFromPoint`, resolving the item
+	// through the guard's parent wrapper) owns hover-open instead: it
+	// dispatches a bubbling `palettable-drawer-drag-hover` CustomEvent
+	// carrying the hovered drawer item, and this wrapper opens only when
+	// the item is its own. The popup listener covers the already-open
+	// case (hovering the open popup's gaps keeps it open without
+	// re-dispatch).
 	//
-	// Attached for EVERY open mode (including `hover`): a drag hover-open
+	// Attached for EVERY open mode (including `hover`): an edit hover-open
 	// must work regardless of the trigger's rest behavior — the drag needs
 	// the toolbar visible to highlight its gaps.
 	wrapper.addEventListener('palettable-drawer-drag-hover', (event) => {
-		event.stopPropagation()
 		if ((event as CustomEvent<ToolbarItem>).detail !== item) return
 		if (context.isEditing?.() !== true) return
-		if (context.isDragging?.() !== true) return
 		if (openMode === 'hover') cancelHoverClose()
 		openPopup()
 	})
-	if (openMode !== 'hover') {
-		popup.addEventListener('pointerenter', () => {
-			if (context.isEditing?.() !== true) return
-			if (context.isDragging?.() !== true) return
-			openPopup()
-		})
+	// Edit-mode rest hover-open (no drag): owned by the adapter's
+	// bar-level `pointerover` (coordinate hit-test via `elementFromPoint`,
+	// resolving the item through the guard's parent wrapper) — the guard
+	// covers the trigger and is a SIBLING of the drawer content (both
+	// children of the `.toolbar-item` wrapper, the drawer nested INSIDE
+	// the content), so guard events bubble to the item wrapper, never to
+	// `.palettable-drawer`. The adapter dispatches the
+	// `palettable-drawer-drag-hover` event above for BOTH cases (rest and
+	// mid-drag). The head keeps only the `__openDrawer` expando (read by
+	// the adapter's guard factory) + the fallback `pointerover` listeners
+	// below for run-mode-shaped DOM (no guard).
+	;(wrapper as unknown as { __openDrawer?: () => void }).__openDrawer = () => {
+		if (openMode === 'hover') cancelHoverClose()
+		openPopup()
 	}
+	// Hierarchy-close support: the adapter closes drawers outside the
+	// hovered chain — via this expando so the head's `open` flag stays in
+	// sync (toggling `hidden` directly would leave `open === true` stale
+	// and the next `close()` a no-op... actually the reverse: stale `open`
+	// keeps `close()` working; the real need is keeping trigger chrome +
+	// `onCloseDrawer` in one place).
+	;(wrapper as unknown as { __closeDrawer?: () => void }).__closeDrawer = () => close()
+	// Fallback for run-mode-shaped DOM (no guard): wrapper `pointerover`
+	// still catches trigger/content hovers (they bubble through the drawer).
+	wrapper.addEventListener('pointerover', () => {
+		if (context.isEditing?.() !== true) return
+		if (context.isDragging?.() === true) return
+		if (openMode === 'hover') cancelHoverClose()
+		openPopup()
+	})
+	popup.addEventListener('pointerover', () => {
+		if (context.isEditing?.() !== true) return
+		openPopup()
+	})
+	// Close-on-click chain: a command / toggle / segmented inside the popup
+	// bubbles `palettable-drawer-item-activate`. Collect the drawer wrapper
+	// chain innermost-first (this wrapper, then DOM ancestors), read each
+	// drawer's `openMode` + `closeOnClick` from its expando, and close the
+	// indices from `drawerCloseChainIndices`. Expandos are stamped below so
+	// nested drawers (rendered earlier, deeper in the DOM) are readable.
+	type DrawerExpando = {
+		__closeDrawer?: () => void
+		__drawerCloseOnClick?: boolean
+		__drawerOpenMode?: 'hover' | 'toggle'
+	}
+	wrapper.addEventListener(DRAWER_ITEM_ACTIVATE_EVENT, (event) => {
+		event.stopPropagation()
+		const chain: DrawerChainEntry[] = []
+		const closers: (() => void)[] = []
+		let node: HTMLElement | null = wrapper
+		while (node !== null) {
+			const expando = node as HTMLElement & DrawerExpando
+			if (typeof expando.__closeDrawer === 'function') {
+				chain.push({
+					close: expando.__closeDrawer,
+					closeOnClick: expando.__drawerCloseOnClick === true,
+					openMode: expando.__drawerOpenMode === 'hover' ? 'hover' : 'toggle',
+				})
+				closers.push(expando.__closeDrawer)
+			}
+			node = node.parentElement?.closest('.palettable-drawer') ?? null
+		}
+		for (const index of drawerCloseChainIndices(chain)) closers[index]?.()
+	})
+	;(wrapper as HTMLElement & DrawerExpando).__drawerCloseOnClick = drawerCloseOnClickOf(item)
+	;(wrapper as HTMLElement & DrawerExpando).__drawerOpenMode = openMode
 	// Outside-click closes (capture): clicks inside the wrapper (trigger,
 	// popup, nested drawers) are ignored. Self-removes when the wrapper
 	// leaves the DOM (re-render while open) so no listener leaks.
@@ -1043,8 +1271,8 @@ export type PreviewCore = {
 	writeValue(id: string, value: unknown): void
 	evaluateCan(id: string): boolean
 	subscribeDefinitions(listener: (pointId: string) => void): () => void
-	run(spec: string): void
-	readonly keys: Record<string, string>
+	run(runnable: Runnable): void
+	readonly keys: import('@palettable/core').KeyBindings
 }
 
 /**
@@ -1121,8 +1349,8 @@ export function createPreviewCore(
 			}
 		},
 		subscribeDefinitions: (_listener: (pointId: string) => void) => () => {},
-		run: (spec: string) => {
-			applyPreviewSpec(live, values.get, setLocal, spec)
+		run: (runnable: Runnable) => {
+			applyPreviewSpec(live, values.get, setLocal, runnable)
 		},
 		keys: { ...(live.keys ?? {}) },
 	}
@@ -1130,32 +1358,40 @@ export function createPreviewCore(
 }
 
 /**
- * Apply a head-emitted spec string to the preview-local map (never the
- * live store): `id=value` setters parse like the core (`boolean`
- * `1`/`true`/`0`/`false`, `number` via `Number`), `id:inc`/`id:dec`
- * step within `min`/`max`, action specs are absorbed as no-ops (a
- * disconnected preview cannot run side effects).
+ * Apply a head-emitted runnable to the preview-local map (never the
+ * live store): `set` writes (boolean/number tokens coerce like the core),
+ * `toggle` flips a boolean, `inc`/`dec` step within `min`/`max`, bare
+ * actions are absorbed as no-ops (a disconnected preview runs no side
+ * effects).
  */
 function applyPreviewSpec(
 	live: PaletteCore,
 	getLocal: (id: string) => unknown,
 	setLocal: (id: string, value: unknown) => void,
-	spec: string
+	runnable: Runnable
 ): void {
-	const setter = spec.match(/^([^=:|]+)(=|\|)(.*)$/)
-	if (setter) {
-		const id = setter[1]!
-		const raw = setter[3]!
+	if (runnable.kind === 'set') {
+		const id = runnable.point
+		const raw = runnable.value
 		const def = live.getDefinition(id) as AnyValuedPoint | undefined
 		if (def === undefined || !isValuedPoint(def)) return
 		if (def.type === 'boolean') {
+			if (typeof raw === 'boolean') {
+				setLocal(id, raw)
+				return
+			}
+			if (typeof raw !== 'string') return
 			const token = raw.toLowerCase()
 			if (token === '1' || token === 'true') setLocal(id, true)
 			else if (token === '0' || token === 'false') setLocal(id, false)
 			return
 		}
 		if (def.type === 'number') {
-			if (raw.trim() === '') return
+			if (typeof raw === 'number') {
+				if (Number.isFinite(raw)) setLocal(id, raw)
+				return
+			}
+			if (typeof raw !== 'string' || raw.trim() === '') return
 			const value = Number(raw)
 			if (Number.isFinite(value)) setLocal(id, value)
 			return
@@ -1163,31 +1399,32 @@ function applyPreviewSpec(
 		setLocal(id, raw)
 		return
 	}
-	const action = spec.match(/^([^=:|]+):(.*)$/)
-	if (action) {
-		const id = action[1]!
-		const name = action[2]!
+	if (runnable.kind === 'toggle') {
+		const id = runnable.point
+		const current = getLocal(id)
+		if (typeof current === 'boolean') setLocal(id, !current)
+		return
+	}
+	if (runnable.kind === 'inc' || runnable.kind === 'dec') {
+		const id = runnable.point
+		const delta = runnable.kind === 'inc' ? Math.abs(runnable.delta) : -Math.abs(runnable.delta)
 		const def = live.getDefinition(id) as AnyValuedPoint | undefined
 		if (def === undefined || !isValuedPoint(def) || def.type !== 'number') return
 		const constraints = (def.constraints ?? {}) as {
 			readonly min?: number
 			readonly max?: number
-			readonly step?: number
 		}
-		const step = constraints.step ?? 1
 		const current = getLocal(id)
 		if (typeof current !== 'number' || !Number.isFinite(current)) return
-		if (name === 'inc') {
-			const next = current + step
-			setLocal(id, constraints.max === undefined ? next : Math.min(next, constraints.max))
-			return
-		}
-		if (name === 'dec') {
-			const next = current - step
-			setLocal(id, constraints.min === undefined ? next : Math.max(next, constraints.min))
-			return
-		}
+		const next = current + delta
+		const clamped =
+			constraints.max !== undefined && next > constraints.max
+				? constraints.max
+				: constraints.min !== undefined && next < constraints.min
+					? constraints.min
+					: next
+		setLocal(id, clamped)
 		return
 	}
-	// Bare action id: absorbed — a disconnected preview runs no side effects.
+	// Bare action: absorbed — a disconnected preview runs no side effects.
 }

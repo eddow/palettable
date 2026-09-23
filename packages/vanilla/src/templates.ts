@@ -76,11 +76,10 @@ export function buttonShellTemplate(options: {
 export function selectShellTemplate(options: {
 	tone: 'neutral' | 'accent'
 	direction: 'horizontal' | 'vertical'
-	region: string
 	iconOnly: boolean
 }): string {
 	return (
-		`<div class="palette-default-select palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${options.region}">` +
+		`<div class="palette-default-select palette-default-tone-${options.tone}">` +
 		`<button type="button" class="palette-default-select-trigger" aria-haspopup="listbox" aria-expanded="false">` +
 		`<span class="palette-default-select-value${options.iconOnly ? ' is-icon-only' : ''}">` +
 		`<span class="palette-default-icon palette-default-tool-icon" hidden=""></span>` +
@@ -122,12 +121,8 @@ export function selectFilterShellTemplate(options: { placeholder?: string }): st
 	)
 }
 
-export function segmentedShellTemplate(options: {
-	tone: 'neutral' | 'accent'
-	direction: 'horizontal' | 'vertical'
-	region: string
-}): string {
-	return `<div class="palette-default-segmented palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${options.region}"></div>`
+export function segmentedShellTemplate(options: { tone: 'neutral' | 'accent' }): string {
+	return `<div class="palette-default-segmented palette-default-tone-${options.tone}"></div>`
 }
 
 export function segmentedOptionShellTemplate(options: {
@@ -146,15 +141,11 @@ export function segmentedOptionShellTemplate(options: {
 export function sliderShellTemplate(options: {
 	variant: 'inline' | 'drawer'
 	tone: 'neutral' | 'accent'
-	direction: 'horizontal' | 'vertical'
-	region: string | undefined
-	rangeAxis: string
 	iconOnly: boolean
 }): string {
-	const region = options.region ?? 'top'
 	const readout = `<span class="palette-default-slider-value${options.iconOnly ? ' is-icon-only' : ''}"><span class="palette-default-icon" hidden=""></span></span>`
 	return (
-		`<label class="palette-default-slider palette-default-slider-${options.variant} palette-default-tone-${options.tone} palette-default-layout-${options.direction} palette-default-region-${region} palette-default-range-${options.rangeAxis}">` +
+		`<label class="palette-default-slider palette-default-slider-${options.variant} palette-default-tone-${options.tone}">` +
 		(options.variant === 'drawer'
 			? `<span class="palette-default-slider-trigger">${readout}</span>`
 			: readout) +
@@ -162,42 +153,32 @@ export function sliderShellTemplate(options: {
 	)
 }
 
-export function stepperShellTemplate(options: {
-	tone: 'neutral' | 'accent'
-	direction: 'horizontal' | 'vertical'
-}): string {
+export function stepperShellTemplate(options: { tone: 'neutral' | 'accent' }): string {
 	return (
-		`<div class="palette-default-stepper palette-default-tone-${options.tone} palette-default-layout-${options.direction}">` +
+		`<div class="palette-default-stepper palette-default-tone-${options.tone}">` +
 		`<button type="button" class="palette-default-tool palette-default-tool-compact">−</button>` +
 		`<span class="palette-default-stepper-value"><span class="palette-default-icon" hidden=""></span></span>` +
 		`<button type="button" class="palette-default-tool palette-default-tool-compact">+</button></div>`
 	)
 }
 
-export function starsShellTemplate(options: {
-	tone: 'neutral' | 'accent'
-	direction: 'horizontal' | 'vertical'
-	max: number
-}): string {
+export function starsShellTemplate(options: { tone: 'neutral' | 'accent'; max: number }): string {
 	let buttons = ''
 	for (let index = 1; index <= options.max; index += 1) {
 		buttons += `<button type="button" class="palette-default-arrow" role="radio" aria-checked="false">▷</button>`
 	}
 	return (
-		`<div class="palette-default-stars palette-default-tone-${options.tone} palette-default-layout-${options.direction}">` +
+		`<div class="palette-default-stars palette-default-tone-${options.tone}">` +
 		`<span class="palette-default-icon" hidden=""></span>` +
-		`<span class="palette-default-stars-row palette-default-layout-${options.direction}" role="radiogroup">${buttons}</span></div>`
+		`<span class="palette-default-stars-row" role="radiogroup">${buttons}</span></div>`
 	)
 }
 
 export function statusShellTemplate(options: {
 	tone: 'neutral' | 'accent'
 	direction: 'horizontal' | 'vertical'
-	region: string
 }): string {
-	const base =
-		`palette-default-status palette-default-tone-${options.tone}` +
-		` palette-default-layout-${options.direction} palette-default-region-${options.region}`
+	const base = `palette-default-status palette-default-tone-${options.tone}`
 	if (options.direction === 'vertical') {
 		// Vertical time chip: icon above minutes above seconds in a pinned
 		// square. `.palette-default-status-value` is the non-time fallback
@@ -261,30 +242,27 @@ export function commandEmptyTemplate(text: string): string {
 // ── Drawer shells ───────────────────────────────────────────────────────────
 // Hierarchical drawer: trigger + popup are siblings in a `.palettable-drawer`
 // wrapper (child of the tool node). The caller renders the child track into
-// the popup and toggles `hidden` — no body portal, no JS repositioning.
-// The popup side queries the WRAPPER's `--region` (parent region, inline
-// style; the `from-{region}` class stays as the no-container-query
-// fallback). The popup stamps ONLY the child `--layout` (inner toolbars
-// query it) and inherits `--region` untouched from the wrapper — stamping
-// a child region on the popup would shadow the wrapper and make every
-// side rule match once (stacked margins, 42px instead of 40px).
+// the popup and toggles `hidden` — no body portal, no JS geometry.
+// The wrapper is purely structural (positioning anchor + flex item) and
+// carries NO region or axis: it must not stamp `from-*`, `--region`, or
+// `is-*` — classes accumulate down the tree instead of overriding, so a
+// stale parent value would leak onto nested popups (and already caused
+// real bugs). Placement queries the PARENT container's `--region`; the
+// popup stamps its own `--layout` (child axis, queried by inner toolbars)
+// and `--region` (content half, queried by inner tools).
 
 export function drawerTriggerShellTemplate(options: {
 	label: string
 	hint?: string
 	tone: 'neutral' | 'accent'
 	icon?: string
-	axis?: 'horizontal' | 'vertical'
-	region?: string
-	open?: 'click' | 'hover' | 'press'
+	open?: 'hover' | 'toggle'
 }): string {
 	const accessible = options.label !== '' ? options.label : (options.hint ?? 'More')
 	const title = options.label !== '' ? options.label : (options.hint ?? 'More')
-	const layout = options.axis !== undefined ? ` palette-default-layout-${options.axis}` : ''
-	const region = options.region !== undefined ? ` palette-default-region-${options.region}` : ''
 	// Hover-open drawers keep the attached group-field at rest (joint side
 	// square): the popup appears on hover with no click state change, so the
-	// trigger must already read as attached. Click/press drawers are
+	// trigger must already read as attached. Toggle drawers are
 	// standalone squares at rest and attach only while open (`aria-expanded`).
 	const openMode = options.open !== undefined ? ` is-open-${options.open}` : ''
 	const icon =
@@ -295,17 +273,20 @@ export function drawerTriggerShellTemplate(options: {
 	// axis); it survives as the accessible name + tooltip instead.
 	return (
 		`<button type="button" class="palette-default-tool palette-default-tone-${options.tone}` +
-		` palettable-drawer__trigger${layout}${region}${openMode}" aria-label="${escapeHtml(accessible)}"` +
+		` palettable-drawer__trigger${openMode}" aria-label="${escapeHtml(accessible)}"` +
 		` aria-expanded="false" aria-haspopup="true" title="${escapeHtml(title)}">` +
 		`${icon}` +
 		`<span class="palette-default-drawer-chevron" aria-hidden="true">▸</span></button>`
 	)
 }
 
-export function drawerPopupShellTemplate(childAxis: 'horizontal' | 'vertical'): string {
+export function drawerPopupShellTemplate(
+	childAxis: 'horizontal' | 'vertical',
+	childRegion: 'left' | 'right' | 'top' | 'bottom' = 'left'
+): string {
 	return (
-		`<div class="palettable-drawer__popup is-${childAxis}" data-placement="center"` +
-		` style="--layout: ${childAxis};"` +
+		`<div class="palettable-drawer__popup"` +
+		` style="--layout: ${childAxis}; --region: ${childRegion};"` +
 		` role="dialog" tabindex="-1" hidden=""></div>`
 	)
 }
@@ -320,17 +301,9 @@ export function drawerPopupShellTemplate(childAxis: 'horizontal' | 'vertical'): 
  * Vertical boxes size to the perpendicular var and open their overlay like a
  * drawer over the IDE (CSS-only, no portal).
  */
-export function commandBoxShellTemplate(options: {
-	hint: string
-	icon: string
-	axis?: 'horizontal' | 'vertical'
-	region?: string
-}): string {
-	const axis = options.axis ?? 'horizontal'
-	const layout = `palette-default-layout-${axis}`
-	const region = options.region !== undefined ? ` palette-default-region-${options.region}` : ''
+export function commandBoxShellTemplate(options: { hint: string; icon: string }): string {
 	return (
-		`<div class="palette-default-command-box is-floating ${layout}${region}"` +
+		`<div class="palette-default-command-box is-floating"` +
 		` data-has-text="false" data-testid="command-box-combobox">` +
 		`<div class="palette-default-command-shell" title="${escapeHtml(options.hint)}">` +
 		`<span class="palette-default-command-icon palette-default-icon">` +

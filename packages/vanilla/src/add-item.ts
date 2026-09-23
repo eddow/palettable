@@ -1,6 +1,6 @@
 /**
  * `@palettable/vanilla` — build a `ToolbarItem` from a console add-flow
- * selection (entry + variant + inline values).
+ * selection (entry + variant).
  *
  * Mirrors the svelte `paletteToolbarItemFromDerivedVariant`: `item` variants
  * become control-only items; `tool`/`action` variants become spec-bound tools
@@ -10,7 +10,7 @@
  */
 
 import {
-	type AddItemSource,
+	type AddableEntry,
 	type AnyPoint,
 	type DerivedVariant,
 	isActionPoint,
@@ -22,10 +22,8 @@ import {
 } from '@palettable/core'
 
 export type AddSelection = {
-	readonly source: AddItemSource
+	readonly source: AddableEntry
 	readonly variant: DerivedVariant
-	readonly booleanValue: string
-	readonly setValue: string
 }
 
 /** Control fallback chain for a fresh item (top surface, no explicit control). */
@@ -69,11 +67,9 @@ function humanize(id: string): string {
  * Resolve the spec string for a `set` variant: always the bare `pointId`
  * (mirrors core `paletteDerivedVariants` + svelte
  * `paletteToolbarItemFromDerivedVariant`). The tool binds the point and
- * displays the live value — no `=value` preset is carried. The inline
- * `booleanValue`/`setValue` snapshot fields are ignored (kept in the
- * `AddSelection` shape for the `ConsoleStore` contract only).
+ * displays the live value — no `=value` preset is carried.
  */
-function setSpec(pointId: string, _selection: AddSelection): string {
+function setSpec(pointId: string): string {
 	return pointId
 }
 
@@ -109,6 +105,20 @@ export function itemFromAddSelection(
 	const pointId = variant.pointId
 	const point = points.find((candidate) => candidate.id === pointId)
 	if (variant.kind === 'tool') {
+		// Action rows (`addableEntries` `activity: 'action'`) land here as
+		// `tool` variants (legacy `paletteDerivedVariants` action branch):
+		// an action binds a plain-id button.
+		if (point !== undefined && isActionPoint(point)) {
+			return {
+				point: pointId,
+				control: controlFor(point, registry, defaults),
+				config: {
+					icon: iconOf(point, variant.icon ?? source.icon),
+					label: labelOf(point, variant.label),
+					hint: variant.meta,
+				},
+			} as ToolbarItem
+		}
 		if (!point || isActionPoint(point)) return undefined
 		// Nothing-point tool: bind the point id 1:1 with its mapped control
 		// (variant carries `point.controls[0]`; `controlFor` resolves the same
@@ -155,7 +165,7 @@ export function itemFromAddSelection(
 		(variant.valueType === 'enum' && point.type === 'enum') ||
 		(variant.valueType === 'number' && point.type === 'number')
 	if (!matchesFamily) return undefined
-	const spec = setSpec(pointId, selection)
+	const spec = setSpec(pointId)
 	return {
 		point: spec,
 		control: controlFor(point, registry, defaults),

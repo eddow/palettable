@@ -20,4 +20,4 @@ When implementing features, tasks must be pulled directly from `/plans/`. Once a
 
 - `sandbox/` folder is git-ignored and should be used as temporary scripts, generated data, ... instead of `/tmp/`
 - `git` can be used but read-only - no stash, commit, checkout, add, ...
-- Always prefer generic edit tools to command-line hacks and tmp files
+- Always prefer generic edit tools to command-line hacks, tmp files and python scripts

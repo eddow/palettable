@@ -34,20 +34,19 @@ import type { ServerPointDescriptor } from './palette.js'
 import type { ActionPoint, AnyPoint, AnyValuedPoint } from './points.js'
 import { isActionPoint, isNothingPoint, isValuedPoint } from './points.js'
 import { axisForRegion, drawerChildAxis, resolveControl } from './presenters.js'
-import { canonicalPointId, canonicalSpecId, isInlineSpec, parsePointSpec } from './specs.js'
 import type { VirtualPoint } from './virtual.js'
-import { isEnumFromPoint, isStashPoint, matchEnumOption } from './virtual.js'
+import { isInlineSpec, matchEnumOption } from './virtual.js'
 
 /** Max drawer nesting depth (guards against pathological layouts). */
 export const RENDER_MAX_DEPTH = 8
 
 /** One resolved toolbar item in the render tree. */
 export type ResolvedItem = {
-	/** Canonical point id (`canonicalPointId`) — every tool is bound. */
+	/** Point id — every tool is bound. */
 	readonly pointId: string | undefined
 	/** Point descriptor (no `run` closure) — nothing-points carry descriptor only. */
 	readonly descriptor: ServerPointDescriptor | undefined
-	/** Current value / enum-from key / stash pressed-state (see below). */
+	/** Current value / enum-from key (see below). */
 	readonly value: unknown
 	/** Single resolved control id (canonical fallback chain). */
 	readonly control: string | undefined
@@ -229,8 +228,7 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 			throw new PaletteError('resolveRenderTree: drawer must bind a nothing-point by id')
 		if (context.depth >= RENDER_MAX_DEPTH)
 			throw new PaletteError(`resolveRenderTree: drawer nesting exceeds ${RENDER_MAX_DEPTH}`)
-		const drawerParsed = parsePointSpec(bound)
-		const drawerDef = context.definitions.get(drawerParsed.pointId)
+		const drawerDef = context.definitions.get(bound)
 		if (drawerDef === undefined || !isNothingPoint(drawerDef))
 			throw new PaletteError(`resolveRenderTree: drawer "${bound}" must bind a nothing-point`)
 		const { can: _drawerCan, ...drawerDescriptor } = drawerDef as Record<string, unknown>
@@ -239,12 +237,12 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 		)
 		const childSurface: SurfaceContext = { axis: childAxis, region: context.surface.region }
 		return {
-			pointId: drawerParsed.pointId,
+			pointId: bound,
 			descriptor: { ...drawerDescriptor } as ServerPointDescriptor,
 			value: undefined,
 			control: 'drawer',
 			capability: lookupCapability(context, 'item', 'drawer'),
-			keystrokes: findKeystrokesFor(context.keys, drawerParsed.pointId),
+			keystrokes: findKeystrokesFor(context.keys, bound),
 			children: item.toolbar.map((slot) => ({
 				space: slot.space,
 				toolbar: {
@@ -259,16 +257,14 @@ function resolveItem(item: ToolbarItem, context: ResolveContext): ResolvedItem {
 	if (isInlineSpec(bound)) {
 		return resolveInlineItem(item, bound, context)
 	}
-	const spec = bound as string
-	const parsed = parsePointSpec(spec)
-	const pointId = parsed.pointId
-	const virtual = context.virtuals.get(canonicalPointId(spec))
+	const pointId = bound as string
+	const virtual = context.virtuals.get(pointId)
 	if (virtual !== undefined) {
-		return resolveVirtualItem(item, virtual, parsed, context)
+		return resolveVirtualItem(item, virtual, context)
 	}
 	const def = context.definitions.get(pointId)
 	if (def === undefined) throw new PaletteError(`resolveRenderTree: unknown point "${pointId}"`)
-	return resolvePointItem(item, def, spec, context)
+	return resolvePointItem(item, def, pointId, context)
 }
 
 function resolveInlineItem(
@@ -278,15 +274,11 @@ function resolveInlineItem(
 ): ResolvedItem {
 	const source = context.definitions.get(virtual.source)
 	const sourceValue = source !== undefined ? context.values[source.id] : undefined
-	// Virtuals have no point definition — resolve the control against
-	// the family they present as (`enum` for enum-from, `action` for stash)
-	// so server/client agree on control eligibility (SSR §4.3).
-	// Family probe carries no `defaultValue` (core holds no defaults).
-	const familyPoint = (
-		isEnumFromPoint(virtual)
-			? { id: virtual.id, label: virtual.label, type: 'enum' }
-			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
-	) as AnyPoint
+	// Virtuals have no point definition — resolve the control against the
+	// `enum` family they present as, so server/client agree on control
+	// eligibility (SSR §4.3). Family probe carries no `defaultValue`
+	// (core holds no defaults).
+	const familyPoint = { id: virtual.id, label: virtual.label, type: 'enum' } as AnyPoint
 	const control = resolveControl(
 		familyPoint,
 		context.surface,
@@ -294,25 +286,13 @@ function resolveInlineItem(
 		context.input.controlDefaults,
 		(item as { control?: string }).control
 	)
-	if (isEnumFromPoint(virtual)) {
-		const key = matchEnumOption(virtual, sourceValue)?.key
-		return {
-			pointId: virtual.id,
-			descriptor: undefined,
-			value: key,
-			control,
-			capability: lookupCapability(context, 'enum', control),
-			keystrokes: findKeystrokesForTarget(context.keys, virtual),
-			children: [],
-			config: (item as { config?: Record<string, unknown> }).config,
-		}
-	}
+	const key = matchEnumOption(virtual, sourceValue)?.key
 	return {
 		pointId: virtual.id,
 		descriptor: undefined,
-		value: Object.is(sourceValue, virtual.stashedValue),
+		value: key,
 		control,
-		capability: lookupCapability(context, 'action', control),
+		capability: lookupCapability(context, 'enum', control),
 		keystrokes: findKeystrokesForTarget(context.keys, virtual),
 		children: [],
 		config: (item as { config?: Record<string, unknown> }).config,
@@ -322,18 +302,12 @@ function resolveInlineItem(
 function resolveVirtualItem(
 	item: ToolbarItem,
 	virtual: VirtualPoint,
-	parsed: ReturnType<typeof parsePointSpec>,
 	context: ResolveContext
 ): ResolvedItem {
-	const virtualId: string = virtual.id
 	const source = context.definitions.get(virtual.source)
 	const sourceValue = source !== undefined ? context.values[source.id] : undefined
 	// Same family-point trick as `resolveInlineItem` (SSR §4.3).
-	const familyPoint = (
-		isEnumFromPoint(virtual)
-			? { id: virtual.id, label: virtual.label, type: 'enum' }
-			: { id: virtual.id, label: virtual.label, type: 'action', run: () => {} }
-	) as AnyPoint
+	const familyPoint = { id: virtual.id, label: virtual.label, type: 'enum' } as AnyPoint
 	const control = resolveControl(
 		familyPoint,
 		context.surface,
@@ -341,44 +315,25 @@ function resolveVirtualItem(
 		context.input.controlDefaults,
 		(item as { control?: string }).control
 	)
-	if (isEnumFromPoint(virtual)) {
-		const key =
-			parsed.kind === 'setter'
-				? parsed.value
-				: (matchEnumOption(virtual, sourceValue)?.key ?? undefined)
-		return {
-			pointId: virtual.id,
-			descriptor: undefined,
-			value: key,
-			control,
-			capability: lookupCapability(context, 'enum', control),
-			keystrokes: findKeystrokesFor(context.keys, virtual.id),
-			children: [],
-			config: (item as { config?: Record<string, unknown> }).config,
-		}
+	const key = matchEnumOption(virtual, sourceValue)?.key ?? undefined
+	return {
+		pointId: virtual.id,
+		descriptor: undefined,
+		value: key,
+		control,
+		capability: lookupCapability(context, 'enum', control),
+		keystrokes: findKeystrokesFor(context.keys, virtual.id),
+		children: [],
+		config: (item as { config?: Record<string, unknown> }).config,
 	}
-	if (isStashPoint(virtual)) {
-		return {
-			pointId: virtual.id,
-			descriptor: undefined,
-			value: Object.is(sourceValue, virtual.stashedValue),
-			control,
-			capability: lookupCapability(context, 'action', control),
-			keystrokes: findKeystrokesFor(context.keys, virtual.id),
-			children: [],
-			config: (item as { config?: Record<string, unknown> }).config,
-		}
-	}
-	throw new PaletteError(`resolveRenderTree: unknown virtual kind "${virtualId}"`)
 }
 
 function resolvePointItem(
 	item: ToolbarItem,
 	def: AnyPoint,
-	spec: string,
+	pointId: string,
 	context: ResolveContext
 ): ResolvedItem {
-	const pointId = canonicalPointId(spec)
 	const control = resolveControl(
 		def,
 		context.surface,
@@ -616,7 +571,3 @@ export function deserializeValues(
 	}
 	return out
 }
-
-// ── Canonical spec id (re-export for render consumers) ──────────────────────
-
-export { canonicalSpecId }

@@ -152,17 +152,39 @@ Absent key = default everywhere. Adapters read via core presenters /
 | `showFilter` | `select` | hidden (`true` shows) | listbox filter input |
 | `sliderVariant` | legacy fallback only | `'inline'` | explicit `slider` → inline / `drawerSlider` → drawer control ids win; no configurator row writes the raw key |
 | `statusKey` | `status` | first non-empty string in bag | names the bag key to display |
-| `open` | `drawer` | `'click'` | `'click'` toggle / `'hover'` open + delayed close (`configuration.drawerHoverCloseMs`) / `'press'` pointerdown toggle |
+| `open` | `drawer` | `'toggle'` | `'toggle'` primary-button pointerdown toggle (+ keyboard `click` fallback) / `'hover'` open + delayed close (`configuration.drawerHoverCloseMs`); legacy `'click'`/`'press'` normalize to `'toggle'` |
+| `closeOnClick` | `drawer` | `false` (`true` closes) | opt-in: command / toggle / segmented activation inside closes ancestors — bottom-up `closeOnClick` run maxed with the highest `hover` ancestor |
 
 Enum `values`/`keywords` live on the point definition (consumer-owned), not
 per-item config; enum subsets arrive via `VirtualPoints` (`enum-from`).
 
 Control-switch cleanup (`configuratorControlCleanup`) prunes stale keys:
 sliders keep `showValue`; `select` keeps `showText` + `showFilter`;
-`segmented` keeps `showText`; `drawer` keeps `open`; `status` keeps
-`statusKey`. The vanilla configurator exposes Open mode (drawer), Status key
+`segmented` keeps `showText`; `drawer` keeps `open` + `closeOnClick`; `status` keeps
+`statusKey`. The vanilla configurator exposes Open mode + Close on click (drawer), Status key
 (status), Display number (sliders), Show text (select/segmented), Filter list
 (select).
+
+## Custom icons (vanilla)
+
+Core keeps icons opaque (`IconToken = string` — pass-through only, never
+rendered). The vanilla adapter renders every icon as `textContent`, so the
+default is emoji passthrough. Consumers own name resolution via two
+`IdeOptions` hooks (both optional; unset = identity + plain text input):
+
+- `iconResolver: (token) => glyph | undefined` — threaded into every
+  `HeadContext` and applied before `fillIcon` / `takeIcon` / `iconSpan`.
+  Return `undefined` to keep the token as-is. Convention: tokens starting
+  with `icon:` are dictionary names; everything else passes through.
+  Unknown `icon:` names fall back to the raw token (debuggable, never
+  blank). Hardcoded chrome (`🗑` parking delete, `⌘` shell fallback, `?`
+  select watermark) bypasses the resolver.
+- `iconChoices` + `renderIconField({ value, onChange, choices })` — replaces
+  the configurator Icon row's default text input when provided. The demo
+  proves the pattern with a native `input` + `datalist` (predefined values
+  selectable, free text still typable): see
+  `packages/vanilla/demo/icons.ts` (`DEMO_ICONS`, `demoIconResolver`,
+  `renderDemoIconField`) wired in `demo/main.ts` via `createIDE`.
 
 ## Minimal setup (historical svelte sample — live API is `core` + `vanilla`)
 
@@ -183,7 +205,7 @@ export const palette = new Palette({
 		},
 		emergencyProtocol: { label: 'Lockdown', get can() { return true }, run() {} }
 	},
-	keys: { N: 'autoOxygen', '1': 'alertLevel=green', '+': 'gameSpeed:inc', E: 'emergencyProtocol' },
+	keys: { N: 'autoOxygen!', '1': 'alertLevel=green', '+': 'gameSpeed+=0.5', E: 'emergencyProtocol' },
 	editable: true,
 	editors: headEditors as never,
 	editorDefaults: { run: 'button' }
@@ -220,8 +242,8 @@ export const palette = new Palette({
 Notes:
 
 - `keys` accepts a raw map (`{ E: 'emergencyProtocol' }`) — `Palette` normalizes it via
-  `createPaletteKeys`. Setter specs use `toolId=value` (`|` is legacy); actions use
-  `toolId:action` (`gameSpeed:inc`).
+  `createPaletteKeys`. Specs: `id` (action), `id=value` (pure setter),
+  `id!` (boolean toggle), `id+=x` / `id-=x` (number step by explicit amount).
 - `editorDefaults: { run: 'button' }` lets run items omit `editor`.
 - Import **both** stylesheets once: `palette.css` (core layout + edit chrome) and
   `head-default.css` (head theme). Never inject CSS at runtime.

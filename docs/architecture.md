@@ -293,8 +293,8 @@ Drawers render a popup perpendicular to their parent axis into `document.body` v
   axis without prop-drilling.
 - Perpendicular-direction contract (verbatim): child direction inverts the parent axis,
   child region follows (`vertical` → `'left'`, `horizontal` → `'top'`).
-  `open` (`click` | `hover` | `press`) and `placement` (`start` | `center` | `end`) come
-  from the item `config`, defaulting to `click` / `center`.
+  `open` (`hover` | `toggle`) and `placement` (`start` | `center` | `end`) come
+  from the item `config`, defaulting to `toggle` / `center`.
 - Collapse signal: drawers track a plain non-reactive `seenVersion` (seeds on first
   run, closes on later bumps — no `untrack` idiom). `syncPopup()` only assigns
   `popupPos` when the rect actually changed — unconditional writes re-trigger the portal
@@ -535,10 +535,9 @@ but a build guarantee:
   own `KeyboardEvent` → keystroke normalization (`normalizePaletteKeystroke`,
   `paletteKeystrokeFromEvent`). `KeyBindings` values are strings (references
   by name); inline virtual definitions live on toolbar items, never in this
-  map — a key bound to an inline stash uses the stash's `id`.
+  map — a key bound to an inline enum-from uses the virtual's `id`.
 - **Virtual points** (`virtual.ts`) are end-user-defined derived points over a
-  source point: `enum-from` (present any value as an enum / enum subset) and
-  `stash` (push-aside / pop-back toggle action, single aside slot — no stack).
+  source point: `enum-from` (present any value as an enum / enum subset).
   Matching uses `Object.is`, the same contract as `PaletteStateStore.set`.
   A spec may also carry a virtual **inline** (`PointTarget = string |
   VirtualPoint` in `specs.ts`): the definition object lives directly in
@@ -618,14 +617,14 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `drag.ts` | drag session (`GrabTarget` / `Hoverable` / `DropZone` / `PointerSample` / `SlideFrame` / `ToolbarDrag` + `createToolbarDrag`): `Hoverable` in, `DragEvent` out (`highlight` diffs + `slide` / `clearSlide` / `resize` + `structure` ops, emission order structure → highlight → slide); owns the paint baseline, the dwell timer (`configuration.stackDzHoverMs`), the slide frame + pending split, and the catalog `catalogPending` creation — delegates decisions + commits to the `layout.ts` engine via the injected `DragEngine` (no module cycle); `isWholeToolbar` / `mode` stay session-internal |
 | `editors.ts` | `PointFamily`, `EditorCapability`, `EditorChoice`, `familyOfPoint`, `editorChoicesFor` |
 | `keys.ts` | `KeyBindings`, `findKeystrokesFor`, `findKeystrokesForTarget` (headless lookup only) |
-| `virtual.ts` | `enum-from` / `stash` derived points (`StashDefinition.fallbackValue?` — third-branch restore target, `undefined` = stay skeleton; `computeStashTransition(current, stashedValue, aside, fallbackValue)`) |
+| `virtual.ts` | `enum-from` derived points (option key ↔ source value, `Object.is` matching) |
 | `errors.ts` | `PaletteError` + `PaletteWriteError` (thrown by locked-bag `set`/`setTree`; adapters catch for UI feedback) |
 | `globals.ts` | `scheduleMicrotask` + `scheduleHostTimeout` / `clearHostTimeout` + `cloneValue` — the only host globals |
-| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` one-shot SSR/hydration fill, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunAction` (step-aware bounds-checked named-action `can`, strict on skeleton), sync `run` (strict setter/named-action on skeleton; number `inc`/`dec` clamped to min/max) / `runStash` (strict source read, `fallbackValue` third branch), context registry (`setContext`/`removeContext` replace-never-append via forward map, root name throws, `getBag`/`resolveBags` accept `ROOT_CONTEXT`/`'root'` alias, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners). No `resetAll` (consumer `setMany` round-trip). |
+| `core.ts` | `PaletteCore`, `PaletteCoreOptions` (+ `initialValues` one-shot SSR/hydration fill, Phase 3), `values` (`PaletteStateStore` — the single value surface, not re-implemented), `points` / `virtualPoints` (cached arrays, invalidated on `defineVirtual` / `removeVirtual`), `resolveTargetVirtual`, `setMany`, `resolveEditablePoint`, `readActionCan` (functional-`can` read), `canRunStep` (bounds-checked step `can`, strict on skeleton), sync `run` (strict setter/toggle/step on skeleton; number steps clamped to min/max), context registry (`setContext`/`removeContext` replace-never-append via forward map, root name throws, `getBag`/`resolveBags` accept `ROOT_CONTEXT`/`'root'` alias, `evaluateCan`, `subscribeContext`, `subscribeCan` flip-only), `dispose` (drops value + layout + context listeners). No `resetAll` (consumer `setMany` round-trip). |
 | `palette.ts` | `ServerPointDescriptor` (action/valued/nothing — no `run`, no functional `can`) + `to/fromServerDescriptor` (action rebuild by name via `runners`; nothing-points round-trip), `validateInitialValues` (rejects actions + nothing-points), `readSetterValue` (headless `valueReader` port; the single setter-coercion path) (Phase 3, SSR §4.1–§4.2) |
-| `command-box.ts` | `paletteCommandEntries` (inc/dec `can` bounds-aware from values context, lenient without) / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
+| `command-box.ts` | `paletteCommandEntries` (toggle + step `can` bounds-aware from values context, lenient without) / `paletteAddItemEntries` / `paletteDerivedVariants` / `paletteEnumSubsetValues` + `tokenizeQuery` / `trimLastToken` / `filterCommandEntries` / `suggestCommandKeywords` / `parseCommandInput` / availability helpers (Phase 4; pure over descriptors, `run` = spec string, entries carry `uses`) |
 | `console.ts` | `ConsoleStore` (vanilla open/close/toggle + add-state + listener set) + `consolePointDescriptor` run-point descriptor (Phase 4; svelte wraps in `$state`) |
-| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config; skeleton-propagating: `toggle.pressed`, `select.value`, `slider.value` are `undefined` when absent — no `false`/`0`/`''` coercion), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from/stash display helpers (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
+| `presenters.ts` | `button`/`toggle`/`select`/`slider`/`status`/`configurator` presenters (pure over definitions + values + config; skeleton-propagating: `toggle.pressed`, `select.value`, `slider.value` are `undefined` when absent — no `false`/`0`/`''` coercion), `resolveEditorVariant` (single-id fallback chain), `axisForRegion` + drawer perpendicular rule, enum-from display helper (Phase 5; `BoundDisplay.bags` load-bearing in Phase 8 — `buttonPresenter` evaluates functional `can` against bound bags) |
 | `render.ts` | `resolveRenderTree` (pure definitions + virtuals + layout + values → render tree; pinned `trackGapMinGrow` floor applied to slot `space`, no `run`/`set`/timers/DOM), `snapshotPalette` (atomic layout + values + virtuals + pinned config; live layouts serialize via canonical `snapshotLayout`), `ValueCodec` registry (`register/clear/serialize/deserializeValue(s)` — custom types SSR-unsafe-by-default), `RENDER_MAX_DEPTH` (Phase 7, SSR §4.3–§4.8; import-graph rule: never imports `globals`/`umd`). Drawer children resolve to `ResolvedDrawerSlot[]` (one track, recursive, depth-bounded as `children`) |
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`ROOT_CONTEXT` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
 | `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
@@ -639,8 +638,8 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 
 - `resolveRenderTree()` — pure, synchronous, allocation-explicit resolver:
   definitions + virtuals + layout + values → `ResolvedPalette` (canonical
-  point id, descriptor without `run`/`can` closures, value / enum-from key /
-  stash pressed-state, single editor variant id + capabilities, keystrokes,
+  point id, descriptor without `run`/`can` closures, value / enum-from key,
+  single editor variant id + capabilities, keystrokes,
   drawer children recursive depth-bounded by `RENDER_MAX_DEPTH = 8`).
   Guarantees: no subscriptions, no timers, no `run()`, no `set()`, no DOM;
   same input → `JSON.stringify`-identical output (golden test).
@@ -660,8 +659,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
   hydration round-trip (server → serialize → client → identical output),
   action isolation (throwing `run` never called, descriptor has no `run`),
   config-pinning, import-graph, codecs.
-- Virtuals resolve against a family-point stand-in (`enum` for enum-from,
-  `action` for stash) so `resolveEditorVariant` agrees server/client.
+- Virtuals resolve against an `enum` family-point stand-in so `resolveEditorVariant` agrees server/client.
 
 ### Phase 8 status (context — landed 2026-09-14)
 
@@ -894,17 +892,13 @@ Ownership is no longer split between `core.values` and consumer state:
 - **Root name**: core exports `ROOT_CONTEXT` (`''` value, `'root'` alias via
   `isRootContext`); no bare `''` literals in adapters/demos.
 - **Strictness**: `get(id)` stays lenient (absent → `undefined`, the skeleton
-  probe). Strict paths throw on absent: `run` setter, `applyNamedAction`
-  (`id:action`), `namedActionCan` (via `canRunAction`), `runStash` source
-  read. New `require(id)` helper for those.
+  probe). Strict paths throw on absent: `run` setter / toggle / step.
+  New `require(id)` helper for those.
 - **Skeleton**: `resolveRenderTree({ points, values: {} })` renders every tool
   (descriptor + editor + keystrokes, `value: undefined`). Presenters propagate
   `undefined` (`toggle.pressed`, `select.value`, `slider.value`) instead of
   coercing (`false` / `0` / `''`); vanilla head/IDE render the unset state
   (`aria-pressed="mixed"`, empty select, `min`-parked slider).
-- **Stash fallback**: `StashDefinition.fallbackValue?` replaces the source
-  `defaultValue` third branch (`undefined` = stay skeleton);
-  `computeStashTransition(current, stashedValue, aside, fallbackValue)`.
 - **`initialValues` / `setMany`** keep `validateInitialValues` strictness
   (unknown id / action / nothing id throw); docs no longer say "applied after
   defaults". `initialValues` stays the one-shot SSR/hydration constructor

@@ -17,9 +17,12 @@
  */
 
 import {
-	type AddItemSource,
+	type ActionableEntry,
+	type AddableEntry,
 	type AnyPoint,
+	actionableEntries,
 	actualTrackSpaceAt,
+	addableEntries,
 	axisForRegion,
 	type Border,
 	buttonPresenter,
@@ -42,10 +45,7 @@ import {
 	type LayoutOp,
 	type PaletteCore,
 	type PaletteRegion,
-	paletteAddItemEntries,
-	paletteCommandEntries,
 	paletteDerivedVariants,
-	parsePointSpec,
 	type SlideFrame,
 	type SurfaceContext,
 	selectClosedLabel,
@@ -62,16 +62,19 @@ import {
 	validateSerializedLayout,
 } from '@palettable/core'
 // Side-effect import: wires `PaletteLayoutTree.prototype.createDrag`.
+// TODO: understand what is happening with this wireing
 import '@palettable/core'
 import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
 import {
 	createPreviewCore,
+	type IconResolver,
 	liveValue,
 	PREVIEW_SURFACE,
 	type PreviewCore,
 	readThemeSetting,
 	renderHeadItem,
+	resolveIcon,
 	selectWatermark,
 	surfaceForRegion,
 	syncStatusValue,
@@ -96,7 +99,33 @@ export type IdeOptions = {
 	/** Control-only item ids for the console add-box (`controls.item` keys). */
 	readonly itemControls?: readonly string[]
 	readonly paletteId?: string
+	/** Optional string-glyph icon resolver (consumer-owned, e.g. the demo
+	 * maps `icon:moon` via a hard-coded dictionary). Threaded into every
+	 * `HeadContext`; absent = identity (emoji passthrough). */
+	readonly iconResolver?: IconResolver
+	/** Predefined icon choices offered by the configurator Icon row
+	 * (combo suggestions — free text always stays allowed). */
+	readonly iconChoices?: readonly string[]
+	/** Custom Icon-row field factory: replaces the default text input when
+	 * provided (demo combo + free text). Receives the current value, an
+	 * `onChange` writer, and the `iconChoices` above. */
+	readonly renderIconField?: IconFieldFactory
+	/** Test-only geometry override for the drawer center-seeking flip
+	 * (jsdom reports zero rects). Threaded into every `HeadContext` as
+	 * `ideRect` / `triggerRect`. */
+	readonly headContext?: {
+		readonly ideRect?: { left: number; top: number; width: number; height: number }
+		readonly triggerRect?: { left: number; top: number; width: number; height: number }
+	}
 }
+
+/** Factory for the configurator Icon row: current value + writer +
+ * predefined choices → field element. Free text must stay possible. */
+export type IconFieldFactory = (options: {
+	readonly value: string
+	readonly onChange: (next: string) => void
+	readonly choices: readonly string[]
+}) => HTMLElement
 
 export type IdeHandle = {
 	/** Re-render borders + console (after demo-driven layout/flag changes). */
@@ -124,7 +153,8 @@ type ToolBinding = readonly Unsubscribe[]
 function reconcileSelectRows(
 	core: PaletteCore | PreviewCore,
 	list: HTMLElement,
-	view: ReturnType<typeof selectPresenter>
+	view: ReturnType<typeof selectPresenter>,
+	resolver?: IconResolver
 ): void {
 	const wanted = new Set(view.listOptions.map((option) => option.value))
 	for (const row of [...list.querySelectorAll('.palette-default-select-option')]) {
@@ -151,7 +181,7 @@ function reconcileSelectRows(
 			if (option.icon === undefined) icon.remove()
 			else {
 				icon.hidden = false
-				icon.textContent = option.icon
+				icon.textContent = resolveIcon(option.icon, resolver) ?? ''
 			}
 		}
 		if (text instanceof HTMLElement) text.textContent = option.label
@@ -192,7 +222,8 @@ function reconcileSelectRows(
 function reconcileSegmentedButtons(
 	core: PaletteCore | PreviewCore,
 	group: HTMLElement,
-	view: ReturnType<typeof selectPresenter>
+	view: ReturnType<typeof selectPresenter>,
+	resolver?: IconResolver
 ): void {
 	const wanted = new Set(view.options.map((option) => option.value))
 	for (const button of [...group.querySelectorAll('button')]) {
@@ -220,7 +251,7 @@ function reconcileSegmentedButtons(
 			if (option.icon === undefined) icon.remove()
 			else {
 				icon.hidden = false
-				icon.textContent = option.icon
+				icon.textContent = resolveIcon(option.icon, resolver) ?? ''
 			}
 		}
 		const label = view.showText
@@ -240,7 +271,7 @@ function reconcileSegmentedButtons(
 	}
 }
 
-/** Resolve the point id a tool item binds (spec prefix before `=`/`:`/`|`). */
+/** Resolve the point id a tool item binds (canonical spec id). */
 function pointIdOf(item: ToolbarItem): string | undefined {
 	const id = canonicalItemPoint(item)
 	return id === '' ? undefined : id
@@ -251,7 +282,8 @@ function updateToolNode(
 	core: PaletteCore | PreviewCore,
 	item: ToolbarItem,
 	surface: SurfaceContext,
-	node: HTMLElement
+	node: HTMLElement,
+	resolver?: IconResolver
 ): void {
 	const control = (item as { control?: unknown }).control
 	const pointId = pointIdOf(item)
@@ -287,26 +319,29 @@ function updateToolNode(
 				view.direction === 'vertical' && trigger instanceof HTMLButtonElement ? trigger : chip
 			if (chip) {
 				chip.classList.toggle('is-icon-only', closedLabel === undefined && !view.isSkeleton)
+				const resolvedToolIcon = resolveIcon(view.toolIcon, resolver)
+				const resolvedValueIcon = resolveIcon(view.icon, resolver)
 				const toolIconNode = chip.querySelector('.palette-default-tool-icon')
-				if (view.toolIcon === undefined) {
+				if (resolvedToolIcon === undefined) {
 					toolIconNode?.remove()
 				} else if (toolIconNode) {
-					if (toolIconNode.textContent !== view.toolIcon) toolIconNode.textContent = view.toolIcon
+					if (toolIconNode.textContent !== resolvedToolIcon)
+						toolIconNode.textContent = resolvedToolIcon
 				} else {
 					const toolIcon = el('span', 'palette-default-icon palette-default-tool-icon')
-					toolIcon.textContent = view.toolIcon
+					toolIcon.textContent = resolvedToolIcon
 					chip.prepend(toolIcon)
 				}
 				// Value icon mirrors the tool-icon remove/re-create pattern:
 				// absent means the node goes away (no reserved space).
 				const iconNode = chip.querySelector('.palette-default-value-icon')
-				if (view.icon === undefined) {
+				if (resolvedValueIcon === undefined) {
 					iconNode?.remove()
 				} else if (iconNode) {
-					if (iconNode.textContent !== view.icon) iconNode.textContent = view.icon
+					if (iconNode.textContent !== resolvedValueIcon) iconNode.textContent = resolvedValueIcon
 				} else {
 					const valueIcon = el('span', 'palette-default-icon palette-default-value-icon')
-					valueIcon.textContent = view.icon
+					valueIcon.textContent = resolvedValueIcon
 					chip.append(valueIcon)
 				}
 				const labelScope = labelParent ?? chip
@@ -341,7 +376,7 @@ function updateToolNode(
 			const list = node.querySelector('.palette-default-select-list')
 			if (list instanceof HTMLElement && trigger instanceof HTMLButtonElement) {
 				const wasOpen = !list.hidden
-				reconcileSelectRows(core, list, view)
+				reconcileSelectRows(core, list, view, resolver)
 				for (const row of list.querySelectorAll('.palette-default-select-option')) {
 					const spec = view.listOptions.find(
 						(entry) => entry.value === (row as HTMLElement).dataset.value
@@ -365,7 +400,7 @@ function updateToolNode(
 				node.classList.contains('palette-default-segmented') && node instanceof HTMLElement
 					? node
 					: (node.querySelector('.palette-default-segmented') as HTMLElement | null)
-			if (group) reconcileSegmentedButtons(core, group, view)
+			if (group) reconcileSegmentedButtons(core, group, view, resolver)
 			const buttons = node.querySelectorAll('button')
 			buttons.forEach((button) => {
 				// Match on `data-value` (stable identity), not rendered text:
@@ -455,12 +490,14 @@ function updateToolNode(
 			return
 		}
 		case 'button': {
-			const spec =
-				typeof (item as { point?: unknown }).point === 'string'
-					? ((item as { point?: string }).point ?? '')
-					: ''
+			const pointId = pointIdOf(item) ?? ''
 			const can = point !== undefined && isActionPoint(point) ? core.evaluateCan(point.id) : true
-			const view = buttonPresenter(item, { point, value: undefined, bags }, spec, can)
+			const view = buttonPresenter(
+				item,
+				{ point, value: undefined, bags },
+				{ kind: 'action', point: pointId },
+				can
+			)
 			const button = node.querySelector('button')
 			if (!(button instanceof HTMLButtonElement)) return
 			button.disabled = !view.can
@@ -474,11 +511,12 @@ function updateToolNode(
 				button.title = view.title
 				button.disabled = point === undefined
 				const icon = button.querySelector('.palette-default-icon')
+				const resolvedValueIcon = resolveIcon(view.valueIcon, resolver)
 				if (icon instanceof HTMLElement) {
-					if (view.valueIcon === undefined) icon.hidden = true
+					if (resolvedValueIcon === undefined) icon.hidden = true
 					else {
 						icon.hidden = false
-						if (icon.textContent !== view.valueIcon) icon.textContent = view.valueIcon
+						if (icon.textContent !== resolvedValueIcon) icon.textContent = resolvedValueIcon
 					}
 				}
 			}
@@ -573,34 +611,22 @@ function defaultControlFor(point: AnyPoint | undefined): string | undefined {
 	return 'slider'
 }
 
-/** Case-insensitive substring filter for add-item sources (no core helper). */
+/** Free-text filter for addable rows — same scorer as run rows (`filterCommandEntries`). */
 function filterAddSources(
-	sources: readonly AddItemSource[],
+	sources: readonly AddableEntry[],
 	query: string
-): readonly AddItemSource[] {
-	const term = query.trim().toLowerCase()
-	if (term === '') return sources
-	return sources.filter((source) => {
-		const haystack = [
-			source.id,
-			source.label,
-			source.meta,
-			...(source.keywords ?? []),
-			...(source.categories ?? []),
-		]
-			.join(' ')
-			.toLowerCase()
-		return term
-			.split(/\s+/)
-			.filter((part) => part.length > 0)
-			.every((part) => haystack.includes(part))
-	})
+): readonly AddableEntry[] {
+	return filterCommandEntries(sources, { free: query })
 }
 
 export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandle {
 	const { core, consoleStore } = options
 	const paletteId = options.paletteId ?? 'demo'
 	const itemControls = options.itemControls ?? ['commandBox', 'drawer', 'status', 'theme']
+	const iconResolver = options.iconResolver
+	const iconChoices = options.iconChoices ?? []
+	const renderIconField = options.renderIconField
+	const headGeometry = options.headContext
 	const keys = createVanillaKeys(core.keys)
 	const nodes = new NodeRegistry()
 	/**
@@ -640,7 +666,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const control = (item as { control?: unknown }).control
 		const pointId = pointIdOf(item)
 		const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
-		const update = () => updateToolNode(core, item, surface, content)
+		const update = () => updateToolNode(core, item, surface, content, iconResolver)
 		const unsubs: Unsubscribe[] = []
 		if (point !== undefined && isValuedPoint(point)) {
 			unsubs.push(core.values.subscribe(point.id, () => update()))
@@ -709,14 +735,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	let addDraftPointId: string | undefined
 	/**
 	 * Last console add selection the details panel rendered for
-	 * (`selectedEntryId` + `selectedVariantId`). Inline value inputs
-	 * (`booleanValue`/`setValue`) never invalidate the draft, so patches
-	 * that leave this pair unchanged skip the details re-render (keeps
-	 * configurator focus + preview identity while typing).
+	 * (`selectedEntryId`). Patches that leave it unchanged skip the details
+	 * re-render (keeps configurator focus + preview identity while typing).
 	 */
-	let lastAddSelection:
-		| { readonly entryId: string | undefined; readonly variantId: string | undefined }
-		| undefined
+	let lastAddSelection: { readonly entryId: string | undefined } | undefined
 	let disposed = false
 	/** Last applied editing flag — drives the no-rebuild chrome pass. */
 	let lastEditing: boolean | undefined
@@ -914,9 +936,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	}
 
 	/**
-	 * Drawer hover-open for a drag move: resolve the drawer item under the
-	 * cursor and dispatch the bubbling drag-hover event its wrapper listens
-	 * for.
+	 * Drawer hover-open for a pointer move: resolve the drawer item under
+	 * the cursor and dispatch the bubbling drag-hover event its wrapper
+	 * listens for. Owns BOTH cases: mid-drag (session live) and rest
+	 * hover (no session) — the guard covers the trigger in both, so the
+	 * coordinate hit-test + wrapper dispatch is the single path.
 	 *
 	 * The drawer tool's own guard covers the trigger (`inset: -3px`), so
 	 * `elementFromPoint` at the trigger center hits the drawer's OWN guard
@@ -936,14 +960,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 */
 	function maybeOpenDrawerAt(event: PointerEvent): HTMLElement | null {
 		if (!computeEditing()) return null
-		if (dragSession === undefined) return null
 		const doc =
 			(event.currentTarget instanceof HTMLElement
 				? event.currentTarget.ownerDocument
 				: undefined) ?? document
 		const under =
 			event.clientX !== undefined && event.clientY !== undefined
-				? doc.elementFromPoint(event.clientX, event.clientY)
+				? typeof doc.elementFromPoint === 'function'
+					? doc.elementFromPoint(event.clientX, event.clientY)
+					: null
 				: null
 		const candidates: HTMLElement[] = []
 		if (under instanceof HTMLElement) candidates.push(under)
@@ -1011,6 +1036,25 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (!(wrapper instanceof HTMLElement)) continue
 			if (spare !== undefined && wrapper === spare) continue
 			if (wrapper.contains(target)) continue
+			// Trigger hover: the guard covers the trigger (`inset: -3px`)
+			// and is a SIBLING of the drawer content (both children of
+			// the `.toolbar-item` wrapper), so the retargeted target
+			// (guard) lies OUTSIDE `.palettable-drawer` — the contains
+			// check above misses and hierarchy close would shut the
+			// drawer just opened on the same bubbling `pointerover`
+			// (bar opens with spare, then the ancestor wrap handler
+			// closes without one). Spare when the target sits inside the
+			// drawer's own item wrapper (trigger/guard/content).
+			const itemWrapper = wrapper.closest('[data-item-index]')
+			if (itemWrapper instanceof HTMLElement && itemWrapper.contains(target)) continue
+			// Close through the head state (expando) so `open` stays in
+			// sync — falling back to the direct `hidden` + chrome toggle
+			// when the head never rendered one (e.g. preview DOM).
+			const close = (wrapper as unknown as { __closeDrawer?: () => void }).__closeDrawer
+			if (typeof close === 'function') {
+				close()
+				continue
+			}
 			// The popup toggles `hidden` in `head.ts` — mirror that contract
 			// here (plus the trigger chrome) so hierarchy close needs no
 			// per-drawer handle.
@@ -1814,6 +1858,31 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	center.append(consoleHost)
 
 	/**
+	 * Build one edit-mode drag guard for a tool wrapper: `pointerdown`
+	 * starts the tool drag (inspect + session). Rest hover-open needs NO
+	 * guard listener: the bar-level `pointerover` (coordinate hit-test +
+	 * wrapper dispatch in `maybeOpenDrawerAt`) owns BOTH cases (rest and
+	 * mid-drag) — the guard covers the trigger in both. Single factory
+	 * so render-time and `applyEditing` guards behave identically.
+	 */
+	function makeGuard(
+		wrapper: HTMLElement,
+		resolve: () => { toolbar: Toolbar; item: ToolbarItem } | undefined
+	): HTMLElement {
+		const guard = el('div', 'toolbar-item-guard')
+		guard.dataset.paletteId = paletteId
+		guard.setAttribute('aria-hidden', 'true')
+		guard.addEventListener('pointerdown', (event) => {
+			const found = resolve()
+			if (found === undefined) return
+			setInspecting(found.item)
+			startToolDrag(event, found.toolbar, found.item)
+		})
+		void wrapper
+		return guard
+	}
+
+	/**
 	 * Phase 6 mask affordance (mirrors svelte `Ide` `maskHover`): while
 	 * editing + dragging, a pointer over the dimmed work zone / overlay
 	 * background (the center, but not over a border and not inside the
@@ -2010,8 +2079,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					readonly region: PaletteRegion
 					readonly trackIndex: number
 					readonly slotIndex: number
+					readonly ideRect?: { left: number; top: number; width: number; height: number }
+					readonly triggerRect?: { left: number; top: number; width: number; height: number }
 			  }
-			| { readonly container: 'parking'; readonly toolbarIndex: number },
+			| {
+					readonly container: 'parking'
+					readonly toolbarIndex: number
+					readonly ideRect?: { left: number; top: number; width: number; height: number }
+					readonly triggerRect?: { left: number; top: number; width: number; height: number }
+			  },
 		dragTarget?: {
 			readonly track: Track
 			readonly border: import('@palettable/core').Border
@@ -2038,6 +2114,29 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		// so an `if (editing)` gate here would leave pre-edit bars with no
 		// paint handlers. The handler itself gates on `dragging` (+ editing
 		// inside `paintItemSpaces`), so hover alone stays dark.
+		// Rest hover-open (no drag) + hierarchy close live here: the
+		// guard covers the trigger, so the coordinate hit-test +
+		// wrapper dispatch in `maybeOpenDrawerAt` is the single path
+		// (mid-drag AND rest) — `pointermove` never fires on first entry,
+		// so `pointerover` (bubbles, unlike `pointerenter`) owns both.
+		bar.addEventListener('pointerover', (event) => {
+			// Popup-inner hovers bubble through the outer bar too — skip
+			// those (the popup's own `pointerover` keeps its drawer open;
+			// closing here would shut the drawer just entered).
+			const target = event.target
+			if (target instanceof HTMLElement && target.closest('.palettable-drawer__popup')) {
+				return
+			}
+			// Drawer hover-open FIRST (before hierarchy close): hovering a
+			// drawer trigger must open it, and hierarchy close would shut a
+			// drawer whose wrapper doesn't contain the retargeted event
+			// target. Open first (spared below because the wrapper contains
+			// the drawer guard/content), then close only drawers outside
+			// the hovered drawer + target chain.
+			const openedDrawer = maybeOpenDrawerAt(event)
+			closeDrawersOutside(event.target, openedDrawer ?? undefined)
+			return
+		})
 		bar.addEventListener('pointermove', (event) => {
 			const session = dragSession
 			if (!session) return
@@ -2059,7 +2158,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// pointer owns the hover, wherever this listener is attached.
 			const under =
 				event.clientX !== undefined && event.clientY !== undefined
-					? bar.ownerDocument.elementFromPoint(event.clientX, event.clientY)
+					? typeof bar.ownerDocument.elementFromPoint === 'function'
+						? bar.ownerDocument.elementFromPoint(event.clientX, event.clientY)
+						: null
 					: null
 			const target = under instanceof HTMLElement ? under : event.target
 			if (!(target instanceof HTMLElement)) return
@@ -2174,7 +2275,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (typeof control === 'string') wrapper.dataset.control = control
 			if (inspecting === item) wrapper.dataset.inspected = 'true'
 			const content = el('div', 'toolbar-item-content')
-			if (editing) {
+			// Drawer items are exempt from the inert shield: the popup
+			// renders INSIDE the content (inline, not body-portaled like
+			// svelte), and an inert ancestor removes the whole subtree
+			// from hit-testing — `elementFromPoint` would pass through
+			// the open popup to the center behind it, so drawer-child
+			// gaps could never highlight. The trigger stays covered by
+			// its sibling guard, so edit behavior is unchanged.
+			if (editing && control !== 'drawer') {
 				;(content as HTMLElement & { inert?: boolean }).inert = true
 				content.setAttribute('inert', '')
 			}
@@ -2184,11 +2292,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				item,
 				surface,
 				region,
+				iconResolver,
 				onOpenConsole: (mode) => consoleStore.open(mode),
 				onInspect: () => setInspecting(item),
 				isEditing: () => computeEditing(),
 				isDragging: () => dragSession !== undefined,
 				closeUnrelatedDrawers: (target) => closeDrawersOutside(target),
+				ideRect: _basePath.ideRect ?? headGeometry?.ideRect,
+				triggerRect: _basePath.triggerRect ?? headGeometry?.triggerRect,
 				renderToolbar: (childTrack: Track, childAxis, childRegion) =>
 					renderDrawerTrack(childTrack, childAxis, childRegion, editing),
 			})
@@ -2196,14 +2307,12 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			bindTool(content, item, surface)
 			wrapper.append(content)
 			if (editing) {
-				const guard = el('div', 'toolbar-item-guard')
-				guard.dataset.paletteId = paletteId
-				guard.setAttribute('aria-hidden', 'true')
-				guard.addEventListener('pointerdown', (event) => {
-					setInspecting(item)
-					startToolDrag(event, toolbar, item)
-				})
-				wrapper.append(guard)
+				wrapper.append(
+					makeGuard(wrapper, () => {
+						setInspecting(item)
+						return { toolbar, item }
+					})
+				)
 			}
 			bar.append(wrapper)
 			appendSpace(itemIndex + 1)
@@ -2217,9 +2326,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * no stack gaps — the popup holds bare toolbars whose item-spaces are
 	 * live DZs during a drag (same `item-gap` session path as borders).
 	 * Tagged `data-drawer-track` to keep border-scoped queries (drag
-	 * hit-testing, e2e locators) on the real border toolbars. Empty drawer
-	 * toolbars persist (core never prunes them), so a zero-item toolbar
-	 * still renders its bar with a single DZ. */
+	 * hit-testing, e2e locators) on the real border toolbars. Child bars
+	 * render with the popup's own axis/region (perpendicular to the
+	 * parent) so edit handles follow the child axis. Empty child tracks
+	 * never render (core keeps one empty bar behind — the drop target). */
 	function renderDrawerTrack(
 		track: Track,
 		axis: 'horizontal' | 'vertical',
@@ -2230,11 +2340,36 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		wrap.dataset.drawerTrack = 'true'
 		// Drawer hover routes into the drag session (item-gap paint +
 		// commit, same as border bars) and applies hierarchy close: only
-		// drawers outside the hovered ancestor chain close.
+		// drawers outside the hovered ancestor chain close. Child bars
+		// render with the popup's own axis/region (perpendicular to the
+		// parent) so edit handles follow the child axis.
+		//
+		// NOTE: `event.target` here is the element under the cursor — the
+		// drawer-child guards do NOT retarget (each drawer tool owns its
+		// guard, and `renderToolbarElement` wires `pointerdown` →
+		// `startToolDrag` on every one, so grabs start inside the drawer).
+		// The bar-level coordinate hit-test is unnecessary here: the wrap
+		// listener fires for the bar actually hovered.
 		wrap.addEventListener('pointermove', (event) => {
-			closeDrawersOutside(event.target)
 			const session = dragSession
-			if (!session) return
+			if (!session) {
+				// Rest (no drag): no DZ paint exists — only hierarchy
+				// close, and only when the hover is OUTSIDE every popup
+				// (popup-inner moves bubble through this wrap; closing
+				// here would shut the drawer just entered — the guard
+				// hover that opened it included).
+				const target = event.target
+				if (target instanceof HTMLElement && target.closest('.palettable-drawer__popup')) {
+					return
+				}
+				closeDrawersOutside(event.target)
+				return
+			}
+			// Mid-drag: hierarchy close FIRST (drawers outside the
+			// hovered chain close), then DZ paint. The close spares the
+			// hovered chain via `contains` (popup-inner targets sit
+			// inside their wrapper), so paint targets survive it.
+			closeDrawersOutside(event.target)
 			if (!computeEditing()) return
 			const target = event.target
 			if (!(target instanceof HTMLElement)) return
@@ -2242,6 +2377,24 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (!(liveBar instanceof HTMLElement) || !wrap.contains(liveBar)) return
 			const liveToolbar = toolbarOfBar(liveBar)
 			if (liveToolbar === undefined) return
+			// Guard hover is a tool hover on the wrapped item (same pattern
+			// as the border bar handler — the guard carries no
+			// `data-item-index` itself).
+			const guardItem = target.closest('.toolbar-item-guard')
+			if (guardItem instanceof HTMLElement) {
+				const wrapper = guardItem.closest('[data-item-index]')
+				const active =
+					wrapper && liveBar.contains(wrapper)
+						? Number((wrapper as HTMLElement).dataset.itemIndex)
+						: undefined
+				if (Number.isInteger(active)) {
+					const item = liveToolbar[active as number]
+					if (item !== undefined) {
+						paintItemSpaces(liveBar, liveToolbar, active, undefined, event)
+						return
+					}
+				}
+			}
 			const spaceEl = target.closest('[data-item-space-index]')
 			if (spaceEl instanceof HTMLElement && liveBar.contains(spaceEl)) {
 				const gap = Number(spaceEl.dataset.itemSpaceIndex)
@@ -2264,6 +2417,19 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		})
 		// No `pointerleave` close in edit mode: drawers close only when
 		// hover moves outside their ancestor chain (hierarchy close).
+		// Rest hover-open (no drag): `pointermove` never fires on first
+		// entry, so the wrapper's bubbling `pointerover` owns opening —
+		// the drawer's own `pointerover` listener opens the popup, and
+		// this only applies hierarchy close (no session needed). Skip
+		// popup-inner hovers: they bubble through the outer bar AND this
+		// wrap, and closing here would shut the drawer just entered.
+		wrap.addEventListener('pointerover', (event) => {
+			const target = event.target
+			if (target instanceof HTMLElement && target.closest('.palettable-drawer__popup')) {
+				return
+			}
+			closeDrawersOutside(event.target)
+		})
 		track.forEach((slot, slotIndex) => {
 			const slotEl = el('div', 'toolbar-track-slot')
 			slotEl.dataset.toolbarSlotIndex = String(slotIndex)
@@ -2273,6 +2439,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 					region,
 					trackIndex: 0,
 					slotIndex,
+					ideRect: headGeometry?.ideRect,
+					triggerRect: headGeometry?.triggerRect,
 				})
 			)
 			wrap.append(slotEl)
@@ -2285,10 +2453,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		host.textContent = ''
 		const direction = directionFor(region)
 		const inverse = region === 'right' || region === 'bottom'
-		const borderEl = el(
-			'div',
-			`toolbar-border palette-${direction} ${direction === 'horizontal' ? 'stack-vertical' : 'stack-horizontal'}`
-		)
+		const borderEl = el('div', 'toolbar-border')
+		borderEl.style.setProperty('--layout', direction)
+		borderEl.style.setProperty('--region', region)
 		borderEl.dataset.paletteId = paletteId
 		borderEl.dataset.region = region
 		const live = core.layout.getLayout()
@@ -2298,7 +2465,40 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		borderEl.addEventListener('pointerleave', (event) => {
 			dragSession?.over(null, pointerSample(event))
 		})
+		borderEl.addEventListener('pointerover', (event) => {
+			// Rest hierarchy close on ENTRY (no drag): `pointermove` never
+			// fires on first entry, so a track/stack-gap hover elsewhere
+			// must close on `pointerover` (bubbles, unlike `pointerenter`).
+			// Popup-inner hovers bubble through here too — skip those (the
+			// popup's own `pointerover` keeps its drawer open). ALSO skip
+			// hovers inside ANY toolbar: the bar `pointerover` above owns
+			// those (open-first-then-close with spare) — closing here
+			// first would shut the drawer before the bar handler opens it
+			// (both fire on the same bubbling `pointerover`, border
+			// listener first as the ancestor).
+			if (dragSession !== undefined) return
+			const target = event.target
+			if (target instanceof HTMLElement) {
+				if (target.closest('.palettable-drawer__popup')) return
+				if (target.closest('.toolbar')) return
+			}
+			closeDrawersOutside(event.target)
+		})
 		borderEl.addEventListener('pointermove', (event) => {
+			// Rest hierarchy close (no drag): `pointermove` never fires on
+			// first entry, but it DOES fire on every move after — so an
+			// open drawer closes as soon as the pointer moves over a
+			// track/stack gap elsewhere. (Bar-background moves are owned
+			// by the bar `pointerover` above; popup-inner moves return
+			// early in the wrap handler below.)
+			if (dragSession === undefined) {
+				const target = event.target
+				if (target instanceof HTMLElement && target.closest('.palettable-drawer__popup')) {
+					return
+				}
+				closeDrawersOutside(event.target)
+				return
+			}
 			const session = dragSession
 			if (!session) return
 			const target = event.target
@@ -2367,6 +2567,16 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// Mirrors svelte `ToolbarTrack`: inside a toolbar the toolbar
 			// owns the DZs (memo kept).
 			trackEl.addEventListener('pointermove', (event) => {
+				// Rest hierarchy close (no drag): moving over a track gap
+				// elsewhere closes drawers outside the hovered chain.
+				if (dragSession === undefined) {
+					const target = event.target
+					if (target instanceof HTMLElement && target.closest('.palettable-drawer__popup')) {
+						return
+					}
+					closeDrawersOutside(event.target)
+					return
+				}
 				const session = dragSession
 				if (!session) return
 				const target = event.target
@@ -2430,6 +2640,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 							region,
 							trackIndex,
 							slotIndex,
+							ideRect: headGeometry?.ideRect,
+							triggerRect: headGeometry?.triggerRect,
 						},
 						{ track, border }
 					)
@@ -2449,7 +2661,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		host.textContent = ''
 		const live = core.layout.getLayout()
 		const parking = live.parking
-		const stack = el('div', 'palette-parking palette-horizontal stack-vertical')
+		const stack = el('div', 'palette-parking')
+		stack.style.setProperty('--layout', 'horizontal')
+		stack.style.setProperty('--region', 'top')
 		stack.dataset.paletteId = paletteId
 		stack.dataset.container = 'parking'
 		// Leaving the stack is a null hover (all lit DZs flip `off`); the
@@ -2467,7 +2681,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			// check below would then bail out forever.
 			const under =
 				event.clientX !== undefined && event.clientY !== undefined
-					? stack.ownerDocument.elementFromPoint(event.clientX, event.clientY)
+					? typeof stack.ownerDocument.elementFromPoint === 'function'
+						? stack.ownerDocument.elementFromPoint(event.clientX, event.clientY)
+						: null
 					: null
 			const target = under instanceof HTMLElement ? under : event.target
 			if (!(target instanceof HTMLElement)) return
@@ -2594,10 +2810,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		// The console preview is a live tool, not a toolbar child: it
 		// must never go inert (its inputs stay interactive) and never
 		// grow a drag guard (it owns its own pointerdown → catalog drag).
+		// Drawer contents are exempt too (see `renderToolbarElement`):
+		// the popup renders inline inside the content, and an inert
+		// ancestor would remove it from hit-testing.
 		for (const content of container.querySelectorAll(
 			'.toolbar-item-content:not(.palette-default-add-preview-content)'
 		)) {
 			if (!(content instanceof HTMLElement)) continue
+			if (content.querySelector('.palettable-drawer')) continue
 			if (editing) {
 				;(content as HTMLElement & { inert?: boolean }).inert = true
 				content.setAttribute('inert', '')
@@ -2610,19 +2830,16 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (!(wrapper instanceof HTMLElement)) continue
 			const guard = wrapper.querySelector(':scope > .toolbar-item-guard')
 			if (editing && !guard) {
-				const node = el('div', 'toolbar-item-guard')
-				node.dataset.paletteId = paletteId
-				node.setAttribute('aria-hidden', 'true')
-				node.addEventListener('pointerdown', (event) => {
-					const item = itemOfWrapper(wrapper)
-					if (item) {
-						setInspecting(item)
+				wrapper.append(
+					makeGuard(wrapper, () => {
+						const item = itemOfWrapper(wrapper)
+						if (item === undefined) return undefined
 						const live = core.layout.getLayout()
 						const toolbar = findToolbarOf(live, item)
-						if (toolbar) startToolDrag(event, toolbar, item)
-					}
-				})
-				wrapper.append(node)
+						if (toolbar === undefined) return undefined
+						return { toolbar, item }
+					})
+				)
 			} else if (!editing && guard) {
 				guard.remove()
 			}
@@ -2846,7 +3063,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			consoleQuery = input.value
 			results.textContent = ''
 			if (isEditing) {
-				const sources = paletteAddItemEntries(
+				// Edit surface: one addable row per point (valued + action
+				// + nothing) — SSR-safe, no `can` / `uses`.
+				const sources = addableEntries(
 					core.points,
 					{ itemControls },
 					{ excludePoints: ['console'] }
@@ -2872,12 +3091,12 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 						addDraft = undefined
 						addDraftPointId = undefined
 						addDraftValue = undefined
-						consoleStore.patch({ selectedEntryId: source.id, selectedVariantId: undefined })
+						consoleStore.patch({ selectedEntryId: source.id })
 					})
 					const copy = el('span', 'palette-default-command-result-copy')
 					const label = el('span', 'palette-default-command-result-label')
 					if (typeof source.icon === 'string') {
-						const entryIcon = iconSpan(source.icon)
+						const entryIcon = iconSpan(resolveIcon(source.icon, iconResolver))
 						if (entryIcon) label.append(entryIcon)
 					}
 					label.append(document.createTextNode(source.label))
@@ -2889,7 +3108,8 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				}
 				return
 			}
-			const all = paletteCommandEntries(
+			// Run surface: concrete executable rows with live `can` + `uses`.
+			const all: readonly ActionableEntry[] = actionableEntries(
 				core.points,
 				{ keys: core.keys, values: core.values.asObject(), actionCan: actionCan() },
 				{ excludePoints: ['console'] }
@@ -2914,7 +3134,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				const copy = el('span', 'palette-default-command-result-copy')
 				const label = el('span', 'palette-default-command-result-label')
 				if (typeof entry.icon === 'string') {
-					const entryIcon = iconSpan(entry.icon)
+					const entryIcon = iconSpan(resolveIcon(entry.icon, iconResolver))
 					if (entryIcon) label.append(entryIcon)
 				}
 				label.append(document.createTextNode(entry.label))
@@ -2930,7 +3150,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (event.key === 'Enter') {
 				event.preventDefault()
 				if (isEditing) {
-					const sources = paletteAddItemEntries(
+					const sources = addableEntries(
 						core.points,
 						{ itemControls },
 						{ excludePoints: ['console'] }
@@ -2941,10 +3161,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 						addDraft = undefined
 						addDraftPointId = undefined
 						addDraftValue = undefined
-						consoleStore.patch({ selectedEntryId: first.id, selectedVariantId: undefined })
+						consoleStore.patch({ selectedEntryId: first.id })
 					}
 				} else {
-					const all = paletteCommandEntries(
+					const all: readonly ActionableEntry[] = actionableEntries(
 						core.points,
 						{ keys: core.keys, values: core.values.asObject(), actionCan: actionCan() },
 						{ excludePoints: ['console'] }
@@ -2962,12 +3182,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		queueMicrotask(() => input.focus())
 
 		lastAddSelection =
-			snapshot.selectedEntryId !== undefined || snapshot.selectedVariantId !== undefined
-				? {
-						entryId: snapshot.selectedEntryId,
-						variantId: snapshot.selectedVariantId,
-					}
-				: undefined
+			snapshot.selectedEntryId !== undefined ? { entryId: snapshot.selectedEntryId } : undefined
 		renderConsoleDetailsInto(bottom)
 		consoleHost.append(overlay)
 	}
@@ -3009,7 +3224,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			details.append(renderConfigurator(inspectingItem.item, inspecting!))
 		} else {
 			const selected = snapshot.selectedEntryId
-				? paletteAddItemEntries(core.points, { itemControls }, { excludePoints: ['console'] }).find(
+				? addableEntries(core.points, { itemControls }, { excludePoints: ['console'] }).find(
 						(entry) => entry.id === snapshot.selectedEntryId
 					)
 				: undefined
@@ -3045,9 +3260,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	function pointFor(item: import('@palettable/core').ToolbarItem): AnyPoint | undefined {
 		const point = (item as { point?: unknown }).point
 		if (typeof point !== 'string') return undefined
-		const cut = point.search(/[=|:]/)
-		const id = cut < 0 ? point : point.slice(0, cut)
-		return core.getDefinition(id)
+		// `getDefinition` canonicalizes (`=` / `!` / `+=x` / `-=x`
+		// stripped), so a bare `+`/`-` inside an id is never a suffix.
+		return core.getDefinition(point)
 	}
 
 	/**
@@ -3056,14 +3271,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * preview-local value seeds from the live store (dual-source read —
 	 * context bag wins, else root). Control-only items bind no point
 	 * (`addDraftPointId` stays `undefined`). Unbuildable selections
-	 * clear the draft (no preview, no drag). The inline
-	 * `booleanValue`/`setValue` snapshot fields are ignored — the draft
-	 * binds the point and displays the live value (no `=value` preset).
+	 * clear the draft (no preview, no drag).
 	 */
-	function rebuildAddDraft(source: AddItemSource, variant: DerivedVariant): void {
-		const snapshot = consoleStore.snapshot
+	function rebuildAddDraft(source: AddableEntry, variant: DerivedVariant): void {
 		const draft = itemFromAddSelection(
-			{ source, variant, booleanValue: snapshot.booleanValue, setValue: snapshot.setValue },
+			{ source, variant },
 			core.points,
 			core.controls,
 			core.controlDefaults
@@ -3197,12 +3409,22 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		)
 		row(
 			'Icon',
-			textInput(typeof config.icon === 'string' ? config.icon : '', (next) =>
-				patch(item, (target) => {
-					const record = target as { config?: Record<string, unknown> }
-					record.config = { ...(record.config ?? {}), icon: next }
-				})
-			)
+			renderIconField !== undefined
+				? renderIconField({
+						value: typeof config.icon === 'string' ? config.icon : '',
+						onChange: (next) =>
+							patch(item, (target) => {
+								const record = target as { config?: Record<string, unknown> }
+								record.config = { ...(record.config ?? {}), icon: next }
+							}),
+						choices: iconChoices,
+					})
+				: textInput(typeof config.icon === 'string' ? config.icon : '', (next) =>
+						patch(item, (target) => {
+							const record = target as { config?: Record<string, unknown> }
+							record.config = { ...(record.config ?? {}), icon: next }
+						})
+					)
 		)
 		row(
 			'Hint',
@@ -3268,13 +3490,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		row('Tone', toneSelect)
 		if (currentControl === 'drawer') {
 			const openSelect = document.createElement('select')
-			for (const mode of ['click', 'hover', 'press']) {
+			for (const mode of ['hover', 'toggle']) {
 				const option = document.createElement('option')
 				option.value = mode
 				option.textContent = mode[0]!.toUpperCase() + mode.slice(1)
 				openSelect.append(option)
 			}
-			const openValue = config.open === 'hover' || config.open === 'press' ? config.open : 'click'
+			// Legacy `click` / `press` values normalize to the `toggle`
+			// default (absent key); only `hover` is written explicitly.
+			const openValue = config.open === 'hover' ? 'hover' : 'toggle'
 			openSelect.value = openValue as string
 			openSelect.dataset.testid = 'configurator-drawer-open'
 			openSelect.setAttribute('aria-label', 'Open mode')
@@ -3282,12 +3506,27 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				patch(item, (target) => {
 					const record = target as { config?: Record<string, unknown> }
 					const next = { ...(record.config ?? {}) }
-					if (openSelect.value === 'click') delete next.open
+					if (openSelect.value === 'toggle') delete next.open
 					else next.open = openSelect.value
 					record.config = next
 				})
 			})
 			row('Open mode', openSelect)
+			const closeOnClickInput = document.createElement('input')
+			closeOnClickInput.type = 'checkbox'
+			closeOnClickInput.checked = config.closeOnClick === true
+			closeOnClickInput.dataset.testid = 'configurator-drawer-close-on-click'
+			closeOnClickInput.setAttribute('aria-label', 'Close on click')
+			closeOnClickInput.addEventListener('change', () => {
+				patch(item, (target) => {
+					const record = target as { config?: Record<string, unknown> }
+					const next = { ...(record.config ?? {}) }
+					if (closeOnClickInput.checked) next.closeOnClick = true
+					else delete next.closeOnClick
+					record.config = next
+				})
+			})
+			row('Close on click', closeOnClickInput)
 		}
 		if (currentControl === 'status') {
 			row(
@@ -3382,7 +3621,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		return table
 	}
 
-	function renderAddPanel(source: AddItemSource): HTMLElement {
+	function renderAddPanel(source: AddableEntry): HTMLElement {
 		const stack = el('div', 'palette-default-config-stack')
 		stack.dataset.testid = 'console-add-panel'
 		const header = el('div', 'palette-default-config-header')
@@ -3393,10 +3632,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		header.append(strong, meta)
 		stack.append(header)
 		// One source = one variant (`paletteDerivedVariants` returns a
-		// single `set`/`tool`/`item` variant per source), so there is no
-		// variant picker: selecting the entry opens the configurator + preview
-		// directly. Adding happens only via d&d from the preview below.
-		const snapshot = consoleStore.snapshot
+		// single `set`/`tool`/`item` variant per source — action rows now
+		// flow through `addableEntries`, whose `activity: 'action'` maps to
+		// the legacy action branch), so there is no variant picker:
+		// selecting the entry opens the configurator + preview directly.
+		// Adding happens only via d&d from the preview below.
 		const selected = paletteDerivedVariants(source, core.points)[0]
 		if (selected === undefined) {
 			const empty = el('div', 'palette-default-config-empty')
@@ -3407,10 +3647,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		// The selected variant's draft: full configurator (Label/Icon/Hint/
 		// Control/Tone/showValue/showText) bound to the detached draft via
 		// `patchDraft`, then the disconnected preview below it.
-		if (
-			addDraft === undefined ||
-			!draftMatchesSelection(source, selected, snapshot.booleanValue, snapshot.setValue)
-		) {
+		if (addDraft === undefined || !draftMatchesSelection(source, selected)) {
 			rebuildAddDraft(source, selected)
 		}
 		if (addDraft !== undefined) {
@@ -3430,18 +3667,12 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	/**
 	 * Whether the live `addDraft` still matches the console selection.
 	 * The draft binds the point (no `=value` preset), so only entry +
-	 * variant identity matter — inline `booleanValue`/`setValue` fields
-	 * never invalidate the draft (they are ignored by `setSpec`).
+	 * variant identity matter.
 	 */
-	function draftMatchesSelection(
-		source: AddItemSource,
-		variant: DerivedVariant,
-		_booleanValue: string,
-		_setValue: string
-	): boolean {
+	function draftMatchesSelection(source: AddableEntry, variant: DerivedVariant): boolean {
 		if (addDraft === undefined) return false
 		const probe = itemFromAddSelection(
-			{ source, variant, booleanValue: 'true', setValue: '' },
+			{ source, variant },
 			core.points,
 			core.controls,
 			core.controlDefaults
@@ -3485,6 +3716,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			item: draft,
 			surface: PREVIEW_SURFACE,
 			region: 'top',
+			iconResolver,
 			onOpenConsole: (mode) => consoleStore.open(mode),
 			onInspect: undefined,
 			renderToolbar: (childTrack: Track, childAxis, childRegion) =>
@@ -3530,7 +3762,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const pointId = pointIdOf(item)
 		const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
 		if (point === undefined) return
-		const update = () => updateToolNode(previewCore, item, PREVIEW_SURFACE, content)
+		const update = () => updateToolNode(previewCore, item, PREVIEW_SURFACE, content, iconResolver)
 		const unsubs: Unsubscribe[] = []
 		if (isValuedPoint(point)) {
 			unsubs.push(previewCore.values.subscribe(point.id, () => update()))
@@ -3782,8 +4014,16 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			}
 			if (childTrack === undefined) childTrack = drawerChildTrackOfPopup(popup)
 			if (childTrack === undefined) continue
-			const axis = popup.classList.contains('is-vertical') ? 'vertical' : 'horizontal'
-			const region: PaletteRegion = axis === 'vertical' ? 'left' : 'top'
+			// Rebuild axis from the popup's own `--layout` (the single
+			// source of truth — the wrapper carries no axis).
+			const layout = popup.style.getPropertyValue('--layout').trim()
+			const axis: 'horizontal' | 'vertical' = layout === 'vertical' ? 'vertical' : 'horizontal'
+			// Preserve the center-seeked content region across the rebuild
+			// (the popup's own `--region`): re-deriving from the axis
+			// would reset nested popups to the parent-region default.
+			const region =
+				(popup.style.getPropertyValue('--region').trim() as PaletteRegion | '') ||
+				(axis === 'vertical' ? 'left' : 'top')
 			dropBindingsIn(inner)
 			inner.textContent = ''
 			const fresh = renderDrawerTrack(childTrack, axis, region, editing)
@@ -3968,35 +4208,17 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			return
 		}
 		if (computeEditing()) return
-		const spec = keys.resolve(event)
-		if (!spec) return
+		const runnable = keys.resolve(event)
+		if (!runnable) return
 		try {
-			const parsed = parsePointSpec(spec)
-			const def = core.getDefinition(parsed.pointId)
-			if (
-				parsed.kind === 'point' &&
-				def !== undefined &&
-				isValuedPoint(def) &&
-				def.type === 'boolean'
-			) {
-				event.preventDefault()
-				event.stopPropagation()
-				try {
-					const current = core.readValue(def.id) as boolean | undefined
-					core.writeValue(def.id, !current)
-				} catch {
-					// Skeleton: nothing to toggle.
-				}
-				return
-			}
-			// Named actions (`id:inc` / `id:dec`) are bounds-gated: a press
-			// at the bound is a no-op (no preventDefault — the keystroke
-			// stays free for the host), mirroring the disabled stepper
-			// button. `core.run` still clamps as a backstop.
-			if (parsed.kind === 'action') {
+			// Steps are bounds-gated: a press at the bound is a no-op (no
+			// preventDefault — the keystroke stays free for the host),
+			// mirroring the disabled stepper button. `core.run` still
+			// clamps as a backstop.
+			if (runnable.kind === 'inc' || runnable.kind === 'dec') {
 				let can = true
 				try {
-					can = core.canRunAction(parsed.pointId, parsed.action)
+					can = core.can(runnable)
 				} catch {
 					return
 				}
@@ -4004,7 +4226,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			}
 			event.preventDefault()
 			event.stopPropagation()
-			core.run(spec)
+			core.run(runnable)
 		} catch {
 			// Unresolvable bindings never break typing.
 		}
@@ -4051,20 +4273,11 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			renderConsole()
 			return
 		}
-		// Inline value inputs (`booleanValue`/`setValue`) never invalidate
-		// the draft (the draft binds the point, no `=value` preset): skip
-		// the details re-render so the configurator keeps focus + the
-		// preview keeps identity while typing.
-		if (
-			state.selectedEntryId === lastAddSelection?.entryId &&
-			state.selectedVariantId === lastAddSelection?.variantId
-		) {
+		if (state.selectedEntryId === lastAddSelection?.entryId) {
 			return
 		}
 		lastAddSelection =
-			state.selectedEntryId !== undefined || state.selectedVariantId !== undefined
-				? { entryId: state.selectedEntryId, variantId: state.selectedVariantId }
-				: undefined
+			state.selectedEntryId !== undefined ? { entryId: state.selectedEntryId } : undefined
 		renderConsoleDetails()
 	})
 

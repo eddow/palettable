@@ -8,6 +8,7 @@
  */
 import { ConsoleStore, PaletteCore, PaletteStateStore, ValuesBag } from '@palettable/core'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createPreviewCore, type DrawerChainEntry, drawerCloseChainIndices } from './head.js'
 import { createIDE } from './ide.js'
 
 const hosts: HTMLElement[] = []
@@ -480,7 +481,7 @@ describe('per-tool value sync', () => {
 		document.body.append(host)
 		hosts.push(host)
 		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
-		const box = host.querySelector('.palette-default-select.palette-default-layout-vertical')
+		const box = host.querySelector('.palette-default-select')
 		expect(box).not.toBe(null)
 		const trigger = host.querySelector('.palette-default-select-trigger')
 		const chip = host.querySelector('.palette-default-select-value')
@@ -1362,9 +1363,9 @@ describe('drawer drag editing', () => {
 		const { ide, host } = drawerSetup()
 		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
 		expect(popup instanceof HTMLElement).toBe(true)
-		// Open via click (click mode default) then assert DZs exist.
+		// Open via pointerdown (toggle mode default) then assert DZs exist.
 		const trigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
-		trigger.click()
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
 		expect(popup.hidden).toBe(false)
 		const spaces = popup.querySelectorAll('[data-item-space-index]')
 		// One tool → two gaps (before + after).
@@ -1396,45 +1397,48 @@ describe('drawer drag editing', () => {
 		ide.dispose()
 	})
 
-	it('drawer trigger hover mid-drag opens the popup + paints flanking gaps', () => {
-		const { core, ide, host } = drawerSetup()
-		const live = core.layout.getLayout()
-		const borderToolbar = live.borders.top[0]?.[0]?.toolbar
-		const drawerItem = borderToolbar?.[1]
-		const item = borderToolbar?.[0]
-		if (!borderToolbar || !drawerItem || !item) throw new Error('expected toolbars')
-		// Real session (not a hand-built op): the bar-level pointermove
-		// dispatches the drag-hover event the drawer wrapper listens for.
-		const session = core.layout.createDrag({ kind: 'tool', toolbar: borderToolbar, item })
-		const events: import('@palettable/core').DragEvent[] = []
-		session.subscribe((event) => events.push(event))
+	it('drawer opens on edit hover even without a drag', () => {
+		const { ide, host } = drawerSetup()
 		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
-		// jsdom: popup starts `hidden` (shell template stamps it).
+		const wrapper = host.querySelector('.palettable-drawer') as HTMLElement
 		expect(popup.hidden).toBe(true)
-		// NOTE: this test drives the session directly (not via the
-		// adapter's `startToolDrag`), so the adapter's `dragSession` is
-		// unset and `isDragging()` reads false. The dispatch below still
-		// exercises the coordinate hit-test + event path; the open
-		// predicate itself is covered by the `isDragging` unit path.
-		// Hover the drawer trigger: resolve its coords, then dispatch a
-		// pointermove on the bar (bubbles from the trigger, like a real
-		// pointer). The coordinate hit-test (`elementFromPoint`) resolves
-		// the drawer item under the cursor even though the dragged guard
-		// retargets `event.target`.
+		// Rest hover (no drag session): bubbling `pointerover` on the
+		// wrapper opens in edit mode (`pointerenter` does NOT bubble, so
+		// a wrapper listener never fires for guard-covered trigger hits).
+		// jsdom fires it synchronously via dispatch.
+		wrapper.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
+		expect(popup.hidden).toBe(false)
+		ide.dispose()
+	})
+
+	it('drawer-child tool hover paints flanking gaps mid-drag (guard path)', () => {
+		const { ide, host } = drawerSetup()
+		// Open the drawer first (edit hover-open).
 		const trigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
-		const rect = trigger.getBoundingClientRect()
-		const move = new PointerEvent('pointermove', {
-			bubbles: true,
-			clientX: rect.left + rect.width / 2,
-			clientY: rect.top + rect.height / 2,
-		})
-		trigger.dispatchEvent(move)
-		// Adapter session unset → drawer stays closed (predicate gates on
-		// live `isDragging`), but the flanking-gap paint path is adapter-
-		// side and needs no session: dispatch proves the event reaches the
-		// wrapper without throwing.
-		expect(popup.hidden).toBe(true)
-		session.end()
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
+		expect(popup.hidden).toBe(false)
+		// Start the drag through the ADAPTER (border lamp guard
+		// pointerdown → `startToolDrag` sets the adapter `dragSession` the
+		// wrap `pointermove` handler paints through). A raw
+		// `core.layout.createDrag` leaves the adapter session unset, so the
+		// handler bails before reaching the engine.
+		const borderGuard = host.querySelector('.toolbar-border .toolbar-item-guard') as HTMLElement
+		expect(borderGuard instanceof HTMLElement).toBe(true)
+		borderGuard.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		const guard = popup.querySelector('.toolbar-item-guard') as HTMLElement
+		expect(guard instanceof HTMLElement).toBe(true)
+		// `buttons: 1` — the drag session's window move handler treats
+		// `buttons === 0` as release and ends the gesture (clearing paint),
+		// so a synthetic move must carry the pressed button like a real drag.
+		guard.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, buttons: 1 }))
+		// The engine paints the flanking item-gaps `highlighted` (same
+		// `item-gap` session path as border bars).
+		const spaces = [...popup.querySelectorAll('[data-item-space-index]')]
+		expect(spaces.length).toBe(2)
+		expect(spaces.some((node) => (node as HTMLElement).classList.contains('highlighted'))).toBe(
+			true
+		)
 		ide.dispose()
 	})
 
@@ -1461,7 +1465,7 @@ describe('drawer drag editing', () => {
 		ide.dispose()
 	})
 
-	it('dragging the last drawer tool out leaves an empty toolbar with one DZ', () => {
+	it('dragging the last drawer tool out leaves the last bar empty (drop target)', () => {
 		const { core, ide, host } = drawerSetup()
 		const live = core.layout.getLayout()
 		const borderToolbar = live.borders.top[0]?.[0]?.toolbar
@@ -1473,19 +1477,266 @@ describe('drawer drag editing', () => {
 		const session = core.layout.createDrag({ kind: 'tool', toolbar: childToolbar, item })
 		session.over({ kind: 'item-gap', toolbar: borderToolbar, gap: 0 }, { clientX: 0, clientY: 0 })
 		session.end()
-		// Emptied drawer toolbar persists (no prune).
+		// Last drawer bar persists empty (the drawer's drop target).
 		expect(childToolbar).toHaveLength(0)
 		expect(childTrack).toHaveLength(1)
 		// Open the drawer and assert the emptied toolbar renders its bar
 		// with DZs (leading + trailing collapse to one visual target via
 		// the `:only-child` CSS rule — both nodes exist, one paints large).
 		const trigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
-		trigger.click()
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
 		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
 		const bar = popup.querySelector('.toolbar') as HTMLElement
 		expect(bar instanceof HTMLElement).toBe(true)
 		const spaces = popup.querySelectorAll('[data-item-space-index]')
 		expect(spaces.length).toBeGreaterThanOrEqual(1)
+		ide.dispose()
+	})
+
+	it('toggle trigger opens on primary pointerdown, ignores right-click, toggles on keyboard click', () => {
+		const { ide, host } = drawerSetup()
+		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
+		const trigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
+		expect(popup.hidden).toBe(true)
+		// Right/middle press must not toggle.
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }))
+		expect(popup.hidden).toBe(true)
+		// Primary press opens.
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		expect(popup.hidden).toBe(false)
+		// Primary press again closes (toggle).
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		expect(popup.hidden).toBe(true)
+		// Keyboard click (`detail === 0`) opens — pointerdown never fires
+		// for Enter/Space.
+		trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+		expect(popup.hidden).toBe(false)
+		ide.dispose()
+	})
+
+	it('nested drawer opens toward the IDE center and stacks above its parent', () => {
+		// Geometry override (jsdom reports zero rects): the seek measures
+		// the WRAPPER rect (trigger + popup as laid out), so the override
+		// is the wrapper rect. Threaded through `HeadContext` — no
+		// `getBoundingClientRect` stubbing needed. NOTE: the override is
+		// shared by BOTH drawers (outer top-border drawer + nested), so
+		// pick a rect that flips the nested one correctly: nested is a
+		// horizontal child (extends sideways) right of center; its parent
+		// axis is vertical, so the content region center-seeks
+		// top/bottom → upper half → `top`.
+		let runs = 0
+		const ideRect = { left: 0, top: 0, width: 1000, height: 800 }
+		const triggerRect = { left: 600, top: 100, width: 340, height: 44 }
+		const core = new PaletteCore(
+			[
+				{
+					id: 'fire',
+					label: 'Fire',
+					type: 'action',
+					run: () => {
+						runs++
+					},
+				},
+				{ id: 'more', label: 'More', type: 'nothing' as never },
+			],
+			{
+				initialLayout: {
+					version: 2,
+					borders: {
+						top: [
+							[
+								{
+									space: 1,
+									toolbar: [
+										{
+											point: 'more',
+											control: 'drawer',
+											config: { label: 'Outer' },
+											toolbar: [
+												{
+													space: 1,
+													toolbar: [
+														{
+															point: 'more',
+															control: 'drawer',
+															config: { label: 'Inner' },
+															toolbar: [
+																{ space: 1, toolbar: [{ point: 'fire', control: 'button' }] },
+															],
+														},
+													],
+												},
+											],
+										},
+									],
+								},
+							],
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				} as never,
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, {
+			core,
+			consoleStore,
+			isEditable: () => false,
+			headContext: { ideRect, triggerRect },
+		})
+		const outerTrigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
+		outerTrigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		const popups = [...host.querySelectorAll('.palettable-drawer__popup')] as HTMLElement[]
+		expect(popups).toHaveLength(2)
+		expect(popups[0]?.hidden).toBe(false)
+		// Outer is top-level: depth 1 → z 211.
+		expect(popups[0]?.style.zIndex).toBe('211')
+		const innerTrigger = popups[0]?.querySelector(
+			'.palettable-drawer__trigger'
+		) as HTMLButtonElement
+		innerTrigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		expect(popups[1]?.hidden).toBe(false)
+		// Nested stacks above the parent.
+		expect(Number(popups[1]?.style.zIndex)).toBeGreaterThan(Number(popups[0]?.style.zIndex))
+		// Wrappers are purely structural: no region class, no `--region`.
+		for (const wrapper of host.querySelectorAll('.palettable-drawer')) {
+			expect(wrapper.className).toBe('palettable-drawer')
+			expect((wrapper as HTMLElement).style.getPropertyValue('--region')).toBe('')
+		}
+		// Outer (top border → vertical child): wrapper above IDE center
+		// (100+22 < 400) → opens down; parent axis horizontal, wrapper
+		// right of center (600+170 > 500) → content region `right`.
+		// Placement is declarative (`--region` only): the popup queries
+		// the parent container's `--region`.
+		expect(popups[0]?.style.getPropertyValue('--region')).toBe('right')
+		// Nested wrapper right of IDE center (600+170 > 500) → horizontal
+		// popup opens left; parent axis vertical + upper half → `top`.
+		expect(popups[1]?.style.getPropertyValue('--region')).toBe('top')
+		// No inline geometry: placement is declarative (`--region`), the
+		// stylesheet owns the sides.
+		expect(popups[1]?.style.right).toBe('')
+		expect(popups[1]?.style.left).toBe('')
+		expect(runs).toBe(0)
+		ide.dispose()
+	})
+
+	it('drawerCloseChainIndices closes the bottom-up run maxed with the hover extent', () => {
+		const entry = (closeOnClick: boolean, openMode: 'hover' | 'toggle'): DrawerChainEntry => ({
+			close: () => {},
+			closeOnClick,
+			openMode,
+		})
+		// No flags → nothing closes.
+		expect(drawerCloseChainIndices([entry(false, 'toggle')])).toEqual([])
+		// Leaf opt-in closes just the leaf.
+		expect(drawerCloseChainIndices([entry(true, 'toggle'), entry(false, 'toggle')])).toEqual([0])
+		// Contiguous run from the leaf closes through the run, stops at false.
+		expect(
+			drawerCloseChainIndices([
+				entry(true, 'toggle'),
+				entry(true, 'toggle'),
+				entry(false, 'toggle'),
+			])
+		).toEqual([0, 1])
+		// Hover extent wins even when nothing opts in: closes up to and
+		// including the outermost hover ancestor.
+		expect(
+			drawerCloseChainIndices([
+				entry(false, 'toggle'),
+				entry(false, 'toggle'),
+				entry(false, 'hover'),
+			])
+		).toEqual([0, 1, 2])
+		// Max of both extents: run of 1 but hover reaches the top.
+		expect(
+			drawerCloseChainIndices([
+				entry(true, 'toggle'),
+				entry(false, 'toggle'),
+				entry(false, 'hover'),
+			])
+		).toEqual([0, 1, 2])
+	})
+
+	it('command click inside a closeOnClick drawer closes it, sibling without flag stays', () => {
+		let runs = 0
+		const core = new PaletteCore(
+			[
+				{
+					id: 'fire',
+					label: 'Fire',
+					type: 'action',
+					run: () => {
+						runs++
+					},
+				},
+				{ id: 'more', label: 'More', type: 'nothing' as never },
+			],
+			{
+				initialLayout: {
+					version: 2,
+					borders: {
+						top: [
+							[
+								{
+									space: 1,
+									toolbar: [
+										{
+											point: 'more',
+											control: 'drawer',
+											config: { label: 'Closer', closeOnClick: true },
+											toolbar: [{ space: 1, toolbar: [{ point: 'fire', control: 'button' }] }],
+										},
+										{
+											point: 'more',
+											control: 'drawer',
+											config: { label: 'Stayer' },
+											toolbar: [{ space: 1, toolbar: [{ point: 'fire', control: 'button' }] }],
+										},
+									],
+								},
+							],
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				} as never,
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const triggers = [
+			...host.querySelectorAll('.palettable-drawer__trigger'),
+		] as HTMLButtonElement[]
+		expect(triggers).toHaveLength(2)
+		for (const trigger of triggers)
+			trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		const popups = [...host.querySelectorAll('.palettable-drawer__popup')] as HTMLElement[]
+		expect(popups.every((popup) => !popup.hidden)).toBe(true)
+		// Activating the command in the first drawer runs the action AND
+		// closes that drawer via the close-on-click chain (the sibling
+		// also closes, but via outside-click — the click is outside its
+		// wrapper).
+		const firstButton = popups[0]?.querySelector('button') as HTMLButtonElement
+		firstButton.click()
+		expect(runs).toBe(1)
+		expect(popups[0]?.hidden).toBe(true)
+		expect(popups[1]?.hidden).toBe(true)
+		// Reopen the opt-out drawer: its own command runs but leaves it open.
+		triggers[1]?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		expect(popups[1]?.hidden).toBe(false)
+		const secondButton = popups[1]?.querySelector('button') as HTMLButtonElement
+		secondButton.click()
+		expect(runs).toBe(2)
+		expect(popups[1]?.hidden).toBe(false)
 		ide.dispose()
 	})
 })
@@ -1634,5 +1885,154 @@ describe('contextual value sync (ship selection pattern)', () => {
 		expect(toggle.disabled).toBe(true)
 		expect((host.querySelector('input[type="range"]') as HTMLInputElement).disabled).toBe(true)
 		ide.dispose()
+	})
+})
+
+describe('spec-grammar coverage (vanilla adapter)', () => {
+	function specSetup() {
+		const core = new PaletteCore(
+			[
+				{ id: 'lamp', label: 'Lamp', type: 'boolean' },
+				{
+					id: 'speed',
+					label: 'Speed',
+					type: 'number',
+					constraints: { min: 0, max: 10, step: 1 },
+				},
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: { options: [{ value: 'light' }, { value: 'dark' }] },
+				},
+				{ id: 'save', label: 'Save', type: 'action', run: () => {} },
+			],
+			{
+				initialValues: { lamp: false, speed: 1, theme: 'light' },
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [
+							{ space: 1, toolbar: [{ point: 'lamp', control: 'toggle' }] },
+							{ space: 1, toolbar: [{ point: 'speed', control: 'stepper' }] },
+						],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		return { core, ide, host }
+	}
+
+	it('stepper clicks step the live value and gate at the bounds', () => {
+		const { core, ide, host } = specSetup()
+		const group = host.querySelector('.palette-default-stepper')
+		expect(group).not.toBe(null)
+		const buttons = [...group!.querySelectorAll('button')] as HTMLButtonElement[]
+		expect(buttons).toHaveLength(2)
+		const [minus, plus] = buttons as [HTMLButtonElement, HTMLButtonElement]
+		plus.click()
+		expect(core.values.get('speed' as never)).toBe(2)
+		minus.click()
+		expect(core.values.get('speed' as never)).toBe(1)
+		// At max the + button is disabled (bounds gate mirrors `can`).
+		core.values.set('speed' as never, 10 as never)
+		expect(plus.disabled).toBe(true)
+		expect(minus.disabled).toBe(false)
+		core.values.set('speed' as never, 0 as never)
+		expect(minus.disabled).toBe(true)
+		expect(plus.disabled).toBe(false)
+		ide.dispose()
+	})
+
+	it('key bindings run toggle/step runnables and gate steps at the bound', () => {
+		const core = new PaletteCore(
+			[
+				{ id: 'lamp', label: 'Lamp', type: 'boolean' },
+				{ id: 'speed', label: 'Speed', type: 'number', constraints: { min: 0, max: 10, step: 1 } },
+			],
+			{
+				keys: {
+					L: { kind: 'toggle', point: 'lamp' },
+					'+': { kind: 'inc', point: 'speed', delta: 1 },
+					'-': { kind: 'dec', point: 'speed', delta: 1 },
+				},
+				initialValues: { lamp: false, speed: 10 },
+				initialLayout: { version: 1, borders: { top: [], right: [], bottom: [], left: [] } },
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const keyWindow = host.ownerDocument.defaultView ?? window
+		// Toggle via key.
+		keyWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true }))
+		expect(core.values.get('lamp' as never)).toBe(true)
+		// Step at max is a no-op (bounds gate, no preventDefault side effect on value).
+		keyWindow.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true }))
+		expect(core.values.get('speed' as never)).toBe(10)
+		// Step down works.
+		keyWindow.dispatchEvent(new KeyboardEvent('keydown', { key: '-', bubbles: true }))
+		expect(core.values.get('speed' as never)).toBe(9)
+		ide.dispose()
+	})
+
+	it('preview core applies setter/toggle/step runnables locally, never live', () => {
+		const live = new PaletteCore(
+			[
+				{ id: 'lamp', label: 'Lamp', type: 'boolean' },
+				{ id: 'speed', label: 'Speed', type: 'number', constraints: { min: 0, max: 10, step: 1 } },
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'enum',
+					constraints: { options: [{ value: 'light' }, { value: 'dark' }] },
+				},
+				{ id: 'save', label: 'Save', type: 'action', run: () => {} },
+			],
+			{ initialValues: { lamp: false, speed: 1, theme: 'light' } }
+		)
+		const { core: preview, setLocal } = createPreviewCore(
+			live,
+			{ point: 'lamp', control: 'toggle' },
+			{ lamp: false, speed: 1, theme: 'light' }
+		)
+		// Setter forms.
+		preview.run({ kind: 'set', point: 'lamp', value: true })
+		expect(preview.values.get('lamp')).toBe(true)
+		expect(live.values.get('lamp' as never)).toBe(false)
+		preview.run({ kind: 'set', point: 'speed', value: 7 })
+		expect(preview.values.get('speed')).toBe(7)
+		preview.run({ kind: 'set', point: 'theme', value: 'dark' })
+		expect(preview.values.get('theme')).toBe('dark')
+		// Toggle form.
+		preview.run({ kind: 'toggle', point: 'lamp' })
+		expect(preview.values.get('lamp')).toBe(false)
+		// Step forms (clamped at bounds).
+		preview.run({ kind: 'inc', point: 'speed', delta: 2 })
+		expect(preview.values.get('speed')).toBe(9)
+		preview.run({ kind: 'inc', point: 'speed', delta: 5 })
+		expect(preview.values.get('speed')).toBe(10)
+		preview.run({ kind: 'dec', point: 'speed', delta: 20 })
+		expect(preview.values.get('speed')).toBe(0)
+		// Invalid runnables are absorbed (never throw, never touch live).
+		preview.run({ kind: 'action', point: 'save' })
+		preview.run({ kind: 'set', point: 'speed', value: 'abc' })
+		preview.run({ kind: 'set', point: 'lamp', value: 'maybe' })
+		expect(live.values.get('speed' as never)).toBe(1)
+		expect(live.values.get('theme' as never)).toBe('light')
+		// values.set writes locally too.
+		setLocal('lamp', true)
+		expect(preview.values.get('lamp')).toBe(true)
+		expect(live.values.get('lamp' as never)).toBe(false)
 	})
 })

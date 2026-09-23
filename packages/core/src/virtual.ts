@@ -2,17 +2,12 @@
  * `@palettable/core` — virtual points (end-user-defined derived points).
  *
  * Virtual points bind no layout and hold no value in the store. They are
- * computed views / actions over a **source** valued point:
+ * computed views over a **source** valued point:
  *
  * - **`enum-from`** — present any valued point (a number, a string, a custom
  *   `color`, …) as an enum: a fixed option list where each option carries the
  *   source value to write. Also covers enum subsets (source is an `enum`
  *   point, options are an allow-list).
- * - **`stash`** — a run-action about one specific value (e.g. `gameSpeed=0`
- *   for "pause"): if the source is *not* at the stashed value, the current
- *   value is pushed aside (single slot — there is no stack) and the source is
- *   set to it; if the source *is* at the stashed value, the aside value pops
- *   back, or `fallbackValue` (`undefined` = stay skeleton) when nothing was saved.
  *
  * Matching uses `Object.is` (same contract as `PaletteStateStore.set`).
  * All helpers here are pure (values in → values out); `PaletteCore` wires
@@ -38,7 +33,6 @@ export type VirtualPointBase = {
 	readonly id: string
 	readonly label: string
 	readonly description?: string
-	readonly categories?: readonly string[]
 	readonly keywords?: readonly string[]
 	readonly icon?: IconToken
 	/** Source valued-point id this virtual point derives from. */
@@ -58,21 +52,7 @@ export type EnumFromDefinition<V = unknown> = VirtualPointBase & {
 	readonly options: readonly VirtualEnumOption<V>[]
 }
 
-/**
- * Virtual stash action over one valued point.
- *
- * @example pause — `{ id: 'pause', kind: 'stash', source: 'gameSpeed', stashedValue: 0 }`
- * `fallbackValue` is the third-branch restore target (written when the
- * source is already at `stashedValue` with nothing aside); `undefined`
- * (omitted) = stay skeleton.
- */
-export type StashDefinition<V = unknown> = VirtualPointBase & {
-	readonly kind: 'stash'
-	readonly stashedValue: V
-	readonly fallbackValue?: V
-}
-
-export type VirtualPoint<V = unknown> = EnumFromDefinition<V> | StashDefinition<V>
+export type VirtualPoint<V = unknown> = EnumFromDefinition<V>
 
 export function isEnumFromPoint(
 	point: VirtualPoint | null | undefined
@@ -80,8 +60,11 @@ export function isEnumFromPoint(
 	return point != null && point.kind === 'enum-from'
 }
 
-export function isStashPoint(point: VirtualPoint | null | undefined): point is StashDefinition {
-	return point != null && point.kind === 'stash'
+/** Narrow guard: an inline virtual definition (vs a point id string). */
+export function isInlineSpec(spec: unknown): spec is VirtualPoint {
+	return (
+		typeof spec === 'object' && spec !== null && (spec as { kind?: unknown }).kind === 'enum-from'
+	)
 }
 
 /**
@@ -137,34 +120,6 @@ export function resolveEnumSourceValue<V>(virtual: EnumFromDefinition<V>, key: s
 	if (option === undefined)
 		throw new PaletteError(`virtual "${virtual.id}": unknown option "${key}"`)
 	return option.value
-}
-
-export type StashAside = { readonly has: boolean; readonly value?: unknown }
-
-export type StashTransition = {
-	/** Value to write to the source. */
-	readonly next: unknown
-	/** Aside slot state after the transition. */
-	readonly asideAfter: StashAside
-}
-
-/**
- * Pure stash toggle:
- * - `current !== stashedValue` → push `current` aside, write `stashedValue`.
- * - `current === stashedValue` + aside → pop the aside value, clear the slot.
- * - `current === stashedValue` + no aside → write `fallbackValue` (`undefined` = stay skeleton).
- */
-export function computeStashTransition(
-	current: unknown,
-	stashedValue: unknown,
-	aside: StashAside,
-	fallbackValue: unknown
-): StashTransition {
-	if (!Object.is(current, stashedValue)) {
-		return { next: stashedValue, asideAfter: { has: true, value: current } }
-	}
-	if (aside.has) return { next: aside.value, asideAfter: { has: false } }
-	return { next: fallbackValue, asideAfter: { has: false } }
 }
 
 /** Resolve + narrow the source definition of a virtual point (throws on misuse). */

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-	availableEntryCategories,
 	availableEntryKeywords,
 	type CommandBoxEntry,
 	enumValueKeywords,
@@ -22,7 +21,6 @@ function points(): AnyPoint[] {
 			id: 'notifications',
 			label: 'Notifications',
 			type: 'boolean',
-			categories: ['settings'],
 			keywords: ['alerts'],
 		},
 		{
@@ -47,37 +45,53 @@ function points(): AnyPoint[] {
 }
 
 describe('paletteCommandEntries', () => {
-	it('derives run/setter/action entries with shortcut metas', () => {
+	it('derives run/setter/toggle/step entries with shortcut metas', () => {
 		const entries = paletteCommandEntries(points(), {
-			keys: { R: 'reset', T: 'theme=light', '+': 'fontSize:inc' },
+			keys: {
+				R: { kind: 'action', point: 'reset' },
+				T: { kind: 'set', point: 'theme', value: 'light' },
+				'+': { kind: 'inc', point: 'fontSize', delta: 1 },
+			},
 			values: { theme: 'dark', notifications: true },
 		})
-		expect(entries.find((entry) => entry.id === 'reset')?.label).toBe('Reset Defaults')
-		expect(entries.find((entry) => entry.id === 'theme=light')?.label).toBe('Set Theme to Light')
-		expect(entries.find((entry) => entry.id === 'theme=light')?.meta).toBe('T')
-		expect(entries.find((entry) => entry.id === 'fontSize:inc')?.label).toBe('Increase Font Size')
-		expect(entries.find((entry) => entry.id === 'notifications=false')?.label).toBe(
+		expect(entries.find((entry) => entry.id === 'reset:action')?.label).toBe('Reset Defaults')
+		expect(entries.find((entry) => entry.id === 'theme:set:"light"')?.label).toBe(
+			'Set Theme to Light'
+		)
+		expect(entries.find((entry) => entry.id === 'theme:set:"light"')?.meta).toBe('T')
+		expect(entries.find((entry) => entry.id === 'fontSize:inc:1')?.label).toBe(
+			'Increase Font Size'
+		)
+		expect(entries.find((entry) => entry.id === 'notifications:toggle')?.label).toBe(
+			'Toggle Notifications'
+		)
+		expect(entries.find((entry) => entry.id === 'notifications:set:false')?.label).toBe(
 			'Disable Notifications'
 		)
-		expect(entries.find((entry) => entry.id === 'theme=light')?.keywords).toContain('day')
-		// `run` is a spec string, never a closure (SSR-safe).
-		expect(entries.find((entry) => entry.id === 'reset')?.run).toBe('reset')
+		expect(entries.find((entry) => entry.id === 'theme:set:"light"')?.keywords).toContain('day')
+		// `run` is a runnable object, never a closure (SSR-safe).
+		expect(entries.find((entry) => entry.id === 'reset:action')?.run).toEqual({
+			kind: 'action',
+			point: 'reset',
+		})
 	})
 
 	it('disables the current value; unknown values stay enabled', () => {
 		const entries = paletteCommandEntries(points(), { values: { theme: 'dark' } })
-		expect(entries.find((entry) => entry.id === 'theme=dark')?.can).toBe(false)
-		expect(entries.find((entry) => entry.id === 'theme=light')?.can).toBe(true)
+		expect(entries.find((entry) => entry.id === 'theme:set:"dark"')?.can).toBe(false)
+		expect(entries.find((entry) => entry.id === 'theme:set:"light"')?.can).toBe(true)
 		const noValues = paletteCommandEntries(points())
-		expect(noValues.find((entry) => entry.id === 'theme=dark')?.can).toBe(true)
+		expect(noValues.find((entry) => entry.id === 'theme:set:"dark"')?.can).toBe(true)
 	})
 
 	it('uses execute phrasing in run mode and preset labels in catalog mode', () => {
 		const runEntries = paletteCommandEntries(points())
 		const catalog = paletteCommandEntries(points(), {}, { mode: 'catalog' })
-		expect(runEntries.find((entry) => entry.id === 'theme=light')?.label).toBe('Set Theme to Light')
+		expect(runEntries.find((entry) => entry.id === 'theme:set:"light"')?.label).toBe(
+			'Set Theme to Light'
+		)
 		expect(catalog.find((entry) => entry.id === 'theme:catalog-enum')?.label).toBe('Theme')
-		expect(catalog.find((entry) => entry.id === 'notifications=true')?.label).toBe(
+		expect(catalog.find((entry) => entry.id === 'notifications:set:true')?.label).toBe(
 			'Notifications → On (preset)'
 		)
 	})
@@ -90,26 +104,27 @@ describe('paletteCommandEntries', () => {
 		expect(entries[0]?.uses).toEqual(['activeFile'])
 	})
 
-	it('bounds-checks inc/dec entries when values context is present', () => {
+	it('bounds-checks step entries when values context is present', () => {
 		const atMin = paletteCommandEntries(points(), { values: { fontSize: 10 } })
-		expect(atMin.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(false)
-		expect(atMin.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(true)
+		expect(atMin.find((entry) => entry.id === 'fontSize:dec:1')?.can).toBe(false)
+		expect(atMin.find((entry) => entry.id === 'fontSize:inc:1')?.can).toBe(true)
 		const atMax = paletteCommandEntries(points(), { values: { fontSize: 20 } })
-		expect(atMax.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(false)
-		expect(atMax.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(true)
-		// No values context = enabled (adapters refine via `canRunAction`).
+		expect(atMax.find((entry) => entry.id === 'fontSize:inc:1')?.can).toBe(false)
+		expect(atMax.find((entry) => entry.id === 'fontSize:dec:1')?.can).toBe(true)
+		// No values context = enabled (adapters refine via `can`).
 		const noValues = paletteCommandEntries(points())
-		expect(noValues.find((entry) => entry.id === 'fontSize:inc')?.can).toBe(true)
-		expect(noValues.find((entry) => entry.id === 'fontSize:dec')?.can).toBe(true)
+		expect(noValues.find((entry) => entry.id === 'fontSize:inc:1')?.can).toBe(true)
+		expect(noValues.find((entry) => entry.id === 'fontSize:dec:1')?.can).toBe(true)
 	})
 })
 
 describe('paletteAddItemEntries / paletteDerivedVariants', () => {
-	it('lists editable tools + nothing-points by name, skipping actions only', () => {
+	it('lists valued + action + nothing points by name (actions are addable)', () => {
 		const entries = paletteAddItemEntries(points(), { itemControls: ['commandBox'] })
 		expect(entries.some((entry) => entry.id === 'tool:fontSize')).toBe(true)
 		expect(entries.some((entry) => entry.id === 'tool:theme')).toBe(true)
-		expect(entries.some((entry) => entry.id === 'tool:reset')).toBe(false)
+		// Actions flow through `addableEntries`, so a Save button can be added.
+		expect(entries.some((entry) => entry.id === 'tool:reset')).toBe(true)
 		expect(entries.find((entry) => entry.id === 'item:commandBox')?.meta).toBe(
 			'Add control-only item'
 		)
@@ -154,6 +169,8 @@ describe('paletteAddItemEntries / paletteDerivedVariants', () => {
 				control: 'commandBox',
 				label: 'Command Box',
 				meta: 'Add control-only item',
+				keywords: [],
+				activity: 'item',
 			},
 			points()
 		)
@@ -192,16 +209,14 @@ describe('query model (tokenize/filter/rank/suggest/parse)', () => {
 			label: 'Theme Dark',
 			meta: '',
 			keywords: ['theme', 'dark'],
-			categories: ['appearance'],
-			run: 'theme=dark',
+			run: { kind: 'set', point: 'theme', value: 'dark' },
 		},
 		{
 			id: 'mode-command',
 			label: 'Mode Command',
 			meta: '',
 			keywords: ['mode', 'command'],
-			categories: ['workspace'],
-			run: 'mode',
+			run: { kind: 'action', point: 'mode' },
 		},
 	]
 
@@ -210,12 +225,7 @@ describe('query model (tokenize/filter/rank/suggest/parse)', () => {
 		expect(trimLastToken('a b c')).toBe('a b')
 	})
 
-	it('filters by free text + categories + keywords', () => {
-		expect(
-			filterCommandEntries(entries, { free: 'theme', categories: ['appearance'] }).map(
-				(entry) => entry.id
-			)
-		).toEqual(['theme-dark'])
+	it('filters by free text + keywords', () => {
 		expect(
 			filterCommandEntries(entries, { free: 'theme', keywords: ['dark'] }).map((entry) => entry.id)
 		).toEqual(['theme-dark'])
@@ -223,10 +233,16 @@ describe('query model (tokenize/filter/rank/suggest/parse)', () => {
 
 	it('excludes can:false entries and ranks exact > prefix > contains', () => {
 		const ranked: CommandBoxEntry[] = [
-			{ id: 'contains', label: 'Beta Alpha', meta: '', run: 'a' },
-			{ id: 'exact', label: 'Alpha', meta: '', run: 'b' },
-			{ id: 'prefix', label: 'Alpha Beta', meta: '', run: 'c' },
-			{ id: 'off', label: 'Alpha Off', meta: '', can: false, run: 'd' },
+			{ id: 'contains', label: 'Beta Alpha', meta: '', run: { kind: 'action', point: 'a' } },
+			{ id: 'exact', label: 'Alpha', meta: '', run: { kind: 'action', point: 'b' } },
+			{ id: 'prefix', label: 'Alpha Beta', meta: '', run: { kind: 'action', point: 'c' } },
+			{
+				id: 'off',
+				label: 'Alpha Off',
+				meta: '',
+				can: false,
+				run: { kind: 'action', point: 'd' },
+			},
 		]
 		expect(filterCommandEntries(ranked, { free: 'alpha' }).map((entry) => entry.id)).toEqual([
 			'exact',
@@ -239,19 +255,16 @@ describe('query model (tokenize/filter/rank/suggest/parse)', () => {
 		expect(suggestCommandKeywords(entries, 'da').map((suggestion) => suggestion.keyword)).toEqual([
 			'dark',
 		])
-		expect(suggestCommandKeywords(entries, '#da')).toEqual([])
 	})
 
-	it('parses #categories, known keywords, and free text', () => {
-		expect(parseCommandInput('LIGHT #appearance accent light', ['appearance'], ['light'])).toEqual({
-			categories: ['appearance'],
+	it('parses known keywords and free text', () => {
+		expect(parseCommandInput('LIGHT accent light', ['light'])).toEqual({
 			keywords: ['light'],
 			text: 'accent',
 		})
 	})
 
-	it('lists available categories/keywords sorted and de-duplicated', () => {
-		expect(availableEntryCategories(entries)).toEqual(['appearance', 'workspace'])
+	it('lists available keywords sorted and de-duplicated', () => {
 		expect(availableEntryKeywords(entries)).toEqual(['command', 'dark', 'mode', 'theme'])
 	})
 })

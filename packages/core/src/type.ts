@@ -17,8 +17,7 @@ export type EnumOption<T extends string = string> = {
 	readonly value: T
 	readonly label?: string
 	readonly icon?: IconToken
-	/** Categories for grouping (e.g. `['flex', 'grid']`) — both group filtering and keyword search. */
-	readonly categories?: readonly string[]
+	/** Search aliases for future use (command-box keyword search). */
 	readonly keywords?: readonly string[]
 	readonly can?: boolean
 }

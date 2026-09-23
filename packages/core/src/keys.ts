@@ -1,33 +1,32 @@
 /**
- * `@palettable/core` — key bindings as normalized strings (no `KeyboardEvent`).
+ * `@palettable/core` — key bindings as runnables (no `KeyboardEvent`).
  *
  * Adapters normalize platform events into `"Ctrl+Shift+S"`-form keystrokes
- * before touching this module. Values are string specs (references by name);
- * inline virtual definitions live on toolbar items (`ToolToolbarItem.tool`),
- * never in this map — a key bound to an inline stash uses the stash's `id`
- * as its spec string, resolved via `canonicalSpecId`.
+ * before touching this module. Values are `Runnable` objects (structured,
+ * JSON-safe); a key bound to a virtual names its `id` as the runnable point.
  */
 import type { Keystroke } from './identifiers.js'
-import { canonicalPointId, canonicalSpecId, type PointTarget } from './specs.js'
+import type { Runnable } from './runnable.js'
+import type { VirtualPoint } from './virtual.js'
 
-export type KeyBindings = Record<Keystroke, string>
+export type KeyBindings = Record<Keystroke, Runnable>
 
-/** Find keystrokes bound to a point id (spec-prefix match, so setters/actions match too). */
+/** Find keystrokes bound to a point id (runnable point match). */
 export function findKeystrokesFor(bindings: KeyBindings, pointId: string): readonly Keystroke[] {
 	return Object.entries(bindings)
-		.filter(([, spec]) => canonicalPointId(spec) === pointId)
+		.filter(([, runnable]) => runnable.point === pointId)
 		.map(([keystroke]) => keystroke)
 }
 
 /**
- * Find keystrokes bound to a point target: string specs match by canonical
- * id, inline virtual definitions match by their own `id`. Lets a key-shortcut
- * stay associated with an action point (even a derived one) regardless of
- * which spec form names it.
+ * Find keystrokes bound to a runnable or a virtual definition
+ * (matched by `point` / `id`).
  */
 export function findKeystrokesForTarget(
 	bindings: KeyBindings,
-	target: PointTarget<string, unknown>
+	target: Runnable | VirtualPoint
 ): readonly Keystroke[] {
-	return findKeystrokesFor(bindings, canonicalSpecId(target))
+	if ('point' in target && typeof (target as Runnable).point === 'string')
+		return findKeystrokesFor(bindings, (target as Runnable).point)
+	return findKeystrokesFor(bindings, (target as VirtualPoint).id)
 }

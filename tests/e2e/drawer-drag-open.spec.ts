@@ -25,7 +25,7 @@ async function openConsole(page: import('@playwright/test').Page) {
 test('dragging a tool over a drawer trigger opens the drawer', async ({ page }) => {
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
-	// The left border hosts the `More` drawer (open: hover in the demo, but
+	// The left border hosts the `More` drawer (toggle in the demo, but
 	// hover-open must work for any mode mid-drag — the bar dispatch covers
 	// all modes).
 	const drawerTrigger = page.getByRole('button', { name: 'More' }).first()
@@ -48,8 +48,7 @@ test('dragging a tool over a drawer trigger opens the drawer', async ({ page }) 
 			const x =
 				guardBox!.x +
 				guardBox!.width / 2 +
-				((triggerBox!.x + triggerBox!.width / 2 - (guardBox!.x + guardBox!.width / 2)) * i) /
-					steps
+				((triggerBox!.x + triggerBox!.width / 2 - (guardBox!.x + guardBox!.width / 2)) * i) / steps
 			const y =
 				guardBox!.y +
 				guardBox!.height / 2 +

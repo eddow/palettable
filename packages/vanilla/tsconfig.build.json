@@ -12,5 +12,5 @@
 		"paths": {}
 	},
 	"include": ["src/**/*.ts"],
-	"exclude": ["src/umd.ts", "dist", "node_modules"]
+	"exclude": ["src/**/*.test.ts", "src/umd.ts", "dist", "node_modules"]
 }

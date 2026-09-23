@@ -1,5 +1,6 @@
 import { ConsoleStore, PaletteCore, ValuesBag, validateSerializedLayout } from '@palettable/core'
 import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
+import { DEMO_ICON_CHOICES, demoIconResolver, renderDemoIconField } from './icons.js'
 import '../../core/styles/palette.css'
 import '../../core/styles/head-default.css'
 import '../../core/styles/head-dark.css'
@@ -232,6 +233,9 @@ const ide = createIDE(ideHost, {
 	isEditable: () => editable,
 	itemControls: ['commandBox', 'drawer', 'status', 'theme'],
 	paletteId: 'demo',
+	iconResolver: demoIconResolver,
+	iconChoices: DEMO_ICON_CHOICES,
+	renderIconField: renderDemoIconField,
 })
 
 // Per-tool DOM updates are owned by the IDE's own bindings; chrome

@@ -7,9 +7,9 @@
  * `keys.ts` normalization (which stays adapter-owned until Phase 12).
  */
 
-import type { KeyBindings, Keystroke } from '@palettable/core'
+import type { KeyBindings, Keystroke, Runnable } from '@palettable/core'
 
-export type { KeyBindings, Keystroke }
+export type { KeyBindings, Keystroke, Runnable }
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const
 
@@ -138,14 +138,14 @@ export function keystrokeFromEvent(event: KeyboardEvent): Keystroke {
 	return [...modifiers, key].join('+')
 }
 
-/** Normalized keyboard binding registry for palette command specs. */
+/** Normalized keyboard binding registry for palette runnables. */
 export type VanillaKeys = {
 	readonly bindings: KeyBindings
 	findByTool(toolId: string): readonly Keystroke[]
-	resolve(event: KeyboardEvent): string | undefined
+	resolve(event: KeyboardEvent): Runnable | undefined
 }
 
-/** Build a normalized binding registry (raw `{ keystroke: spec }` map in). */
+/** Build a normalized binding registry (raw `{ keystroke: runnable }` map in). */
 export function createVanillaKeys(bindings: KeyBindings = {}): VanillaKeys {
 	const normalizedBindings: KeyBindings = {}
 	for (const [keystroke, spec] of Object.entries(bindings)) {
@@ -157,7 +157,7 @@ export function createVanillaKeys(bindings: KeyBindings = {}): VanillaKeys {
 		},
 		findByTool(toolId: string) {
 			return Object.entries(normalizedBindings)
-				.filter(([, bindingSpec]) => bindingSpec === toolId)
+				.filter(([, binding]) => binding.point === toolId)
 				.map(([keystroke]) => keystroke)
 		},
 		resolve(event: KeyboardEvent) {
