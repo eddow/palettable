@@ -1,0 +1,41 @@
+{
+	"name": "@palettable/demo-core",
+	"version": "0.0.1",
+	"description": "Palettable shared demo definitions — Stellar Outpost points, layouts, ships, locales (framework-agnostic, no DOM)",
+	"private": true,
+	"author": "François Marie De Mey <eeddow@gmail.com>",
+	"license": "AGPL-3.0-only",
+	"homepage": "https://github.com/eddow/palettable#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/eddow/palettable.git",
+		"directory": "packages/demo-core"
+	},
+	"bugs": {
+		"url": "https://github.com/eddow/palettable/issues"
+	},
+	"keywords": [
+		"palette",
+		"demo"
+	],
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"import": "./src/index.ts"
+		}
+	},
+	"files": [
+		"src"
+	],
+	"scripts": {
+		"check": "tsc --noEmit -p ./tsconfig.json"
+	},
+	"dependencies": {
+		"@palettable/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0",
+		"typescript": "^6.0.3"
+	}
+}

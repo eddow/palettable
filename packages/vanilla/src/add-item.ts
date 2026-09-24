@@ -55,11 +55,6 @@ function iconOf(point: AnyPoint | undefined, fallback: string | undefined): stri
 	return typeof icon === 'string' ? icon : fallback
 }
 
-/** Shared id → words fallback (single implementation lives in core). */
-function humanize(id: string): string {
-	return humanizeId(id)
-}
-
 /**
  * Resolve the spec string for a `set` variant: always the bare `pointId`
  * (matching core `paletteDerivedVariants`). The tool binds the point and
@@ -167,7 +162,7 @@ export function itemFromAddSelection(
 		control: controlFor(point, registry, defaults),
 		config: {
 			icon: iconOf(point, source.icon),
-			label: labelOf(point, humanize(pointId)),
+			label: labelOf(point, humanizeId(pointId)),
 			hint: variant.meta,
 		},
 	} as ToolbarItem

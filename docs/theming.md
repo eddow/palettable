@@ -1,13 +1,13 @@
 # Theming
 
-Three stylesheets, all imported once by the app — never injected at runtime,
+Four stylesheets, all imported once by the app — never injected at runtime,
 never duplicated per instance:
 
 | File | Owner | Contents |
 | ---- | ----- | -------- |
-| `core/styles/palette.css` | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell layout (`.palettable-drawer__*`) |
+| `core/styles/palette.css` | core (headless) | layout (`palette-ide`, borders, tracks, toolbars, spaces), edit-mode hover/active chrome, drawer popup shell layout (`.palettable-drawer__*` — paint via `--pd-drawer-*` tokens with dark fallbacks) |
 | `core/styles/head-default.css` | head (default theme) | structural chrome (§§1–12: buttons, panels, command box, controls, vertical, joined-box, configurator) — no raw colors, tokens referenced only |
-| `core/styles/head-dark.css` / `core/styles/head-light.css` | head themes | `--pd-*` tokens (§0) + light drawer-popup paint; import the base plus **one** theme (dark is the default when neither class applies) |
+| `core/styles/head-dark.css` / `core/styles/head-light.css` | head themes | `--pd-*` tokens (§0, incl. `--pd-drawer-*` popup paint); import the base plus **one** theme (dark is the default when neither class applies) |
 
 ## Rules
 
@@ -99,12 +99,6 @@ All paint lives in `--pd-*` custom properties: dark tokens on `:root` in
 token. Adding a new paint value means adding a token in both theme files,
 not a light-override selector.
 
-All paint lives in `--pd-*` custom properties declared once on `:root`
-(dark base) and re-set under `.palette-default-theme-light`. No raw color
-appears below §0 — every `background` / `border-color` / `box-shadow` /
-`color` rule references a token. Adding a new paint value means adding a
-token, not a light-override selector.
-
 | Token family | Dark | Light |
 | ------------ | ---- | ----- |
 | `--pd-border*` (chrome, panel, faint, field) | slate `71,85,105` | `148,163,184,0.9` |
@@ -114,6 +108,7 @@ token, not a light-override selector.
 | `--pd-muted` / `--pd-faint` / `--pd-icon` / `--pd-status-fg` | `#94a3b8` / `#64748b` / `#93c5fd` / `#bfdbfe` | `#475569` / `#64748b` / `#475569` / `#1d4ed8` |
 | `--pd-accent*` / `--pd-selected-*` / `--pd-option-ring` | blue `#3b82f6` + outer glow | deep blue `#1d4ed8` + glow |
 | `--pd-star*` / `--pd-drag-border` | `#facc15` / `#f59e0b` / accent dashed | unchanged |
+| `--pd-drawer-*` (popup border/bg/shadow) | dark slate / near-black / black shadow | border → `--pd-border`, bg → `--pd-surface`, same shadow |
 | `--pd-r-*` / `--pd-ease` / `--pd-slide` | `9/10/12/14/18px`, `120/140ms` | unchanged |
 
 The `theme` tool (an enum-shaped nothing-point tool, like `status` but presenting `light`/`dark`/`system` options) applies the resolved theme itself: the vanilla renderer
@@ -124,9 +119,9 @@ own `applyTheme` — it just imports all three stylesheets and lets the tool
 sync the class. `system` follows `matchMedia('(prefers-color-scheme: light)')`.
 
 The demo syncs `.palette-default-theme-light` onto `<html>` (not `<main>`)
-so it also covers body-portaled drawer popups, which live outside the IDE
-subtree. The drawer popup shell is split: layout in `palette.css`, paint in
-the head theme (light rule at the end of `head-light.css`).
+so it covers the whole IDE subtree plus demo chrome. The drawer popup shell
+is split: layout in `palette.css`, paint via `--pd-drawer-*` tokens in the
+head themes.
 
 ## Section map (`head-default.css`)
 
@@ -176,7 +171,7 @@ on `rgba(15,23,42,…)`.
 - `dataset.theme = resolved` (demo chrome selectors: `:global(html[data-theme='light']) …`)
 - `style.colorScheme = resolved` (native form controls)
 
-Syncing onto `<html>` (not `<main>`) also covers body-portaled drawer popups,
-which live outside the IDE subtree. Demo chrome light variants follow the same
+Syncing onto `<html>` (not `<main>`) covers the whole IDE subtree plus demo
+chrome. Demo chrome light variants follow the same
 pattern — base rule first, `:global(html[data-theme='light'])` override after
 (Biome `noDescendingSpecificity` requires ascending order).

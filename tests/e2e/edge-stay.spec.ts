@@ -27,7 +27,7 @@ async function openConsole(page: import('@playwright/test').Page) {
 // has D dragged, the TB-gap after D stays dark and the candidate moves out
 // to the track gap after the toolbar (core `trackSpaceHighlight` fallback);
 // symmetrically, dragging A paints the track gap before the toolbar. Uses the left
-// border (4 tools: slider, select, segmented, drawer) to stay clear of the
+// border (5 tools: slider, select, segmented, button, drawer) to stay clear of the
 // centered console overlay.
 async function dragOntoTool(page: import('@playwright/test').Page, index: number): Promise<void> {
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
@@ -68,20 +68,21 @@ test('dragging the last tool highlights the track gap after the toolbar', async 
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
 	const bar = border.locator('> .toolbar-track > .toolbar-track-slot > .toolbar').first()
 	// Border-scoped guards (drawer popup carries its own hierarchical set).
+	// Last tool is the drawer (index 4 of 5).
 	await expect(
 		border
 			.locator(
 				'> .toolbar-track > .toolbar-track-slot > .toolbar > .toolbar-item > .toolbar-item-guard'
 			)
-			.nth(3)
+			.nth(4)
 	).toBeVisible()
 	try {
-		await dragOntoTool(page, 3)
+		await dragOntoTool(page, 4)
 		// The TB-gap after the dragged tool stays dark (a DZ beside a
 		// dragged tool is never highlighted) …
 		expect(
 			await bar
-				.locator('.toolbar-item-space.toolbar-drop-zone[data-item-space-index="4"].highlighted')
+				.locator('.toolbar-item-space.toolbar-drop-zone[data-item-space-index="5"].highlighted')
 				.count()
 		).toBe(0)
 		// … and the track gap after the toolbar paints instead.

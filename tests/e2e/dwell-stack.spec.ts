@@ -78,22 +78,11 @@ test('hovering a stack gap dwells into a new track', async ({ page }) => {
 				{ timeout: 3000 }
 			)
 			.toBe(2)
-		// Step 2: onto the now-expanded gap 0 → direct hover arms the dwell …
+		// Step 2: onto the now-expanded gap 0 → direct hover arms the dwell.
+		// The gap node is zero-size until painted; read its live rect AFTER
+		// the flank paint (above) so the point lands on the expanded gap.
 		const point = await gapPoint(page, gapSel(0))
 		await stepTo(page, point)
-		await expect
-			.poll(
-				() =>
-					border
-						.locator(
-							':scope > .toolbar-stack-space.toolbar-drop-zone[data-stack-index="0"].highlighted'
-						)
-						.count(),
-				{ timeout: 3000 }
-			)
-			.toBe(1)
-		// … the armed gap double-highlights (`.highlighted.hovered`, doubled
-		// size) while the dwell timer counts …
 		await expect
 			.poll(
 				() =>

@@ -29,14 +29,12 @@ export default [
 	},
 	{
 		input: 'src/umd.ts',
-		external: ['@palettable/core'],
 		output: [
 			{
 				file: 'dist/index.js',
 				format: 'umd',
 				name: 'palettableVanilla',
 				sourcemap: true,
-				globals: { '@palettable/core': 'palettable' },
 			},
 		],
 		plugins: [nodeResolve(), ts({ tsconfig: './tsconfig.umd.json' })],

@@ -1,18 +1,21 @@
 /**
- * Vanilla Stellar Outpost demo — EN/FR dictionaries (intl demo).
+ * Shared EN/FR dictionaries for the Stellar Outpost demo (intl demo).
  *
  * Consumer-owned locale tables: the demo is the only place that knows
- * French. Core ships `defaultCatalogStrings` (English), vanilla ships
- * `defaultIdeStrings` (English); this module holds the FR overrides plus
- * per-point label/hint/option text keyed by point id.
+ * French. Core ships `defaultCatalogStrings` (English); each adapter ships
+ * its own chrome strings (English). This module holds the FR overrides
+ * plus per-point label/hint/option text keyed by point id.
  *
- * Switching is reactive via the `locale` valued point (see `demoPoints`):
- * `main.ts` subscribes to `core.values` and re-resolves both tables per
- * render through `IdeOptions.stringsForLocale` + `core.strings` override
- * maps. `document.documentElement.lang` follows as a side effect.
+ * Switching is reactive via the `locale` valued point: adapters subscribe
+ * to `core.values` and re-resolve both tables per render through their
+ * `stringsForLocale` seam + `core.strings` override maps.
+ * `document.documentElement.lang` follows as a side effect.
+ *
+ * The bundle shape is adapter-agnostic: `ide` is a plain record of chrome
+ * strings (each adapter types it against its own `IdeStrings`), while
+ * `catalog` + the point dictionaries follow the core `LocaleBundle` shape.
  */
-import type { CatalogStrings } from '@palettable/core'
-import type { IdeStrings, VanillaLocaleBundle } from '@palettable/vanilla'
+import type { CatalogStrings, LocaleBundle } from '@palettable/core'
 
 export type DemoLocale = 'en' | 'fr'
 
@@ -20,6 +23,11 @@ export const DEMO_LOCALES: readonly DemoLocale[] = ['en', 'fr']
 
 export function isDemoLocale(value: unknown): value is DemoLocale {
 	return value === 'en' || value === 'fr'
+}
+
+/** Per-locale bundle: adapter chrome + core catalog + point dictionaries. */
+export type DemoLocaleBundle = LocaleBundle & {
+	readonly ide?: Partial<DemoIdeStrings>
 }
 
 /** FR catalog sentence templates + keyword families (core seam). */
@@ -71,8 +79,57 @@ export const FR_CATALOG_STRINGS: Partial<CatalogStrings> = {
 	pointLabels: { console: 'Console' },
 }
 
-/** FR adapter chrome (vanilla seam). */
-export const FR_IDE_STRINGS: Partial<IdeStrings> = {
+/** FR adapter chrome (per-adapter seam: each adapter casts to its own strings type).
+ *
+ * Structural mirror of the vanilla `IdeStrings` table (all fields optional):
+ * demo-core cannot import the adapter type without inverting the dependency,
+ * so adapters cast (`as Partial<IdeStrings>`) — safe because the shapes match.
+ */
+export type DemoIdeStrings = {
+	readonly commandPlaceholder?: string
+	readonly addPlaceholder?: string
+	readonly runPlaceholder?: string
+	readonly consoleTitle?: string
+	readonly searchHint?: string
+	readonly filterPlaceholder?: string
+	readonly filterAriaLabel?: string
+	readonly noMatches?: string
+	readonly noMatchingCommands?: string
+	readonly emptyDropZone?: string
+	readonly editToolbars?: string
+	readonly doneEditing?: string
+	readonly consoleAriaLabel?: string
+	readonly closeConsole?: string
+	readonly moreFallback?: string
+	readonly inspectTitle?: string
+	readonly addToToolbarTitle?: string
+	readonly detailsTitle?: string
+	readonly configureTitle?: string
+	readonly previewTitle?: string
+	readonly detailsEmpty?: string
+	readonly cannotAdd?: string
+	readonly labelKey?: string
+	readonly iconKey?: string
+	readonly hintKey?: string
+	readonly controlKey?: string
+	readonly toneKey?: string
+	readonly openModeKey?: string
+	readonly closeOnClickKey?: string
+	readonly statusKeyKey?: string
+	readonly displayNumberKey?: string
+	readonly showTextKey?: string
+	readonly filterListKey?: string
+	readonly deleteKey?: string
+	readonly deleteTool?: string
+	readonly deleteToolbar?: string
+	readonly toneNeutral?: string
+	readonly toneAccent?: string
+	readonly openHover?: string
+	readonly openToggle?: string
+	readonly controlNames?: Readonly<Record<string, string>>
+}
+
+export const FR_IDE_STRINGS: DemoIdeStrings = {
 	commandPlaceholder: 'Commande…',
 	addPlaceholder: 'Ajouter à la barre…',
 	runPlaceholder: 'Commande…',
@@ -207,7 +264,7 @@ export const FR_OPTION_LABELS: Record<string, Record<string, string>> = {
  * `catalog.pointLabels` / `catalog.optionLabels` are kept as a legacy
  * alias until `LocaleBundle` collapses the duplication.
  */
-export function localeBundleForLocale(locale: DemoLocale): VanillaLocaleBundle | undefined {
+export function localeBundleForLocale(locale: DemoLocale): DemoLocaleBundle | undefined {
 	if (locale !== 'fr') return undefined
 	return {
 		ide: FR_IDE_STRINGS,
@@ -221,9 +278,4 @@ export function localeBundleForLocale(locale: DemoLocale): VanillaLocaleBundle |
 /** Resolve the catalog override for a locale (`undefined` = English default). */
 export function catalogStringsForLocale(locale: DemoLocale): Partial<CatalogStrings> | undefined {
 	return localeBundleForLocale(locale)?.catalog
-}
-
-/** Resolve the IDE chrome override for a locale (`undefined` = English default). */
-export function ideStringsForLocale(locale: DemoLocale): Partial<IdeStrings> | undefined {
-	return localeBundleForLocale(locale)?.ide
 }

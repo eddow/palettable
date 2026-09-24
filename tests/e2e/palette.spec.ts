@@ -41,8 +41,11 @@ test('drawer opens with axis inversion and closes on Escape', async ({ page }) =
 	await page.getByRole('button', { name: 'More' }).first().click()
 	const popup = page.locator('.palettable-drawer__popup').first()
 	await expect(popup).toBeVisible()
-	// Left drawer inverts to a horizontal popup.
-	await expect(popup).toHaveClass(/is-horizontal/)
+	// Left drawer inverts to a horizontal popup: the popup stamps the
+	// child `--layout` (no per-tool layout classes — see templates.ts).
+	await expect
+		.poll(() => popup.evaluate((node) => node.style.getPropertyValue('--layout')))
+		.toBe('horizontal')
 	await page.keyboard.press('Escape')
 	// Hierarchical drawer: popup stays in the DOM, toggled hidden.
 	await expect(popup).toBeHidden()

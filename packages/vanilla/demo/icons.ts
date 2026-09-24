@@ -1,44 +1,14 @@
 /**
- * Vanilla demo icon customization: proves a consumer can own icon
- * resolution + the configurator Icon field without touching the adapter.
+ * Vanilla demo icon field: proves a consumer can own the configurator Icon
+ * field without touching the adapter.
  *
- * - `DEMO_ICONS`: hard-coded `icon:<name>` → glyph dictionary (a few icons
- *   the demo uses a lot).
- * - `demoIconResolver`: strips the `icon:` prefix, dict lookup, passthrough
- *   otherwise (emoji + unknown `icon:` names render as-is).
- * - `renderDemoIconField`: combo + free text — a native `input` + `datalist`
- *   bound to `DEMO_ICON_CHOICES`, so predefined values are selectable and
- *   arbitrary text stays typable. Calls `onChange` exactly like the default
- *   text input, so `patchLive`/`patchDraft` keep working.
+ * The shared dictionary + resolver live in `@palettable/demo-core`; only
+ * this DOM-specific field renderer stays adapter-owned: combo + free text
+ * (a native `input` + `datalist` bound to `DEMO_ICON_CHOICES`, so
+ * predefined values are selectable and arbitrary text stays typable). It
+ * calls `onChange` exactly like the default text input, so
+ * `patchLive`/`patchDraft` keep working.
  */
-
-export const DEMO_ICONS: Record<string, string> = {
-	moon: '🌙',
-	sun: '☀️',
-	rocket: '🚀',
-	planet: '🪐',
-	command: '⌘',
-	alert: '⚠️',
-	shield: '🛡️',
-	bolt: '⚡',
-	save: '💾',
-	reset: '🔄',
-	terminal: '💻',
-	theme: '🎨',
-	'flag-en': '🇬🇧',
-	'flag-fr': '🇫🇷',
-}
-
-export const DEMO_ICON_CHOICES: readonly string[] = Object.keys(DEMO_ICONS).map(
-	(name) => `icon:${name}`
-)
-
-/** Demo resolver for `IdeOptions.iconResolver`: `icon:<name>` → dict glyph,
- * everything else passes through untouched. */
-export function demoIconResolver(token: string): string | undefined {
-	if (!token.startsWith('icon:')) return token
-	return DEMO_ICONS[token.slice('icon:'.length)] ?? token
-}
 
 let demoIconDatalistSeq = 0
 

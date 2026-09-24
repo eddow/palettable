@@ -66,23 +66,23 @@ async function dragOnto(
 }
 
 // Conformance: same-toolbar forward moves land between, not after. The left
-// border holds [slider, select, segmented, drawer]: dragging the second tool
-// (select) onto the gap between the third and fourth must reorder to
+// border holds [slider, select, segmented, button, drawer]: dragging the second
+// tool (select) onto the gap between the third and fourth must reorder to
 test('dragging a tool forward lands between, not after', async ({ page }) => {
 	await openConsole(page)
 	await expect(page.locator('.palette-ide.editing').first()).toBeVisible()
 	const border = page.locator('.toolbar-border[data-region="left"]').first()
 	await expect(border.locator('.toolbar-item-guard').nth(1)).toBeVisible()
 	const before = await toolOrder(page)
-	expect(before).toHaveLength(4)
-	// Gap 3 sits between tool 2 (segmented) and tool 3 (drawer): the
+	expect(before).toHaveLength(5)
+	// Gap 3 sits between tool 2 (segmented) and tool 3 (button): the
 	// advancing target for the dragged tool 1 (select).
 	const gap = border.locator('.toolbar-item-space.toolbar-drop-zone[data-item-space-index="3"]')
 	try {
 		await dragOnto(page, 1, gap)
 		await expect
 			.poll(() => toolOrder(page), { timeout: 3000 })
-			.toEqual([before[0], before[2], before[1], before[3]])
+			.toEqual([before[0], before[2], before[1], before[3], before[4]])
 	} finally {
 		await page.mouse.up()
 	}

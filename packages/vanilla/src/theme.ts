@@ -4,8 +4,8 @@
  * The `theme` tool binds the enum-shaped `theme` nothing-point: it writes a
  * system value — the resolved theme — directly onto the document root, the
  * standard `<html>` class toggle. `head-light.css` keys off
- * `.palette-default-theme-light`, so body-portaled drawer popups (outside
- * the IDE subtree) follow the same switch.
+ * `.palette-default-theme-light`, so drawer popups (hierarchical siblings
+ * inside the IDE subtree) follow the same switch.
  */
 
 import type { ThemeValue } from '@palettable/core'

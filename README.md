@@ -4,9 +4,12 @@
 
 Headless palette primitives + heads — editable toolbars for any app.
 
-The palette owns state, a11y semantics, tool resolution, editing, and drag/drop — **not** styling. Adapters own markup and CSS. Define **points** (what is controlled), bind them to toolbars as **tools** (controls), and configure each tool with a **configurator** (config panel) choosing its **control** (front-end).
+The palette owns state, a11y semantics, tool resolution, editing, drag/drop,
+the HTML end-result contract, and all CSS files under `packages/core/styles/`.
+Adapters own only the rendering mechanism (plain-DOM templates vs framework
+components) — different production, byte-equivalent DOM. Define **points** (what is controlled), bind them to toolbars as **tools** (controls), and configure each tool with a **configurator** (config panel) choosing its **control** (front-end).
 
-- Framework-agnostic core (`@palettable/core`): vanilla TS, zero DOM, SSR-safe.
+- Framework-agnostic core (`@palettable/core`): vanilla TS, no DOM runtime, SSR-safe.
 - Thin adapters render the core: vanilla DOM (`@palettable/vanilla`), Vue planned.
 - Ships a default head (minimal presentation), a command-box (Ctrl-Shift-P style), a developer console for live editing, drawers, drag/drop reorganisation, persistence, and theming.
 
@@ -26,8 +29,8 @@ Tool specs: `pointId` (resolve), `pointId=value` (setter runner, e.g. `alertLeve
 
 | Package | Description |
 | ------- | ----------- |
-| `packages/core` (`@palettable/core`) | Headless primitives: points, store, layout tree, keys, command-box builders, console store, presenters/view-models, SSR render model, `palette.css` + `theme/head-default.css`. Zero DOM. |
-| `packages/vanilla` (`@palettable/vanilla`) | Vanilla-DOM adapter + demo + default head. Owns DOM rendering, pointer math, drag sessions, head components — never core. |
+| `packages/core` (`@palettable/core`) | Headless primitives: points, store, layout tree, keys, command-box builders, console store, presenters/view-models, SSR render model, `palette.css` + `head-default.css` + `head-dark.css`/`head-light.css`. No DOM runtime. |
+| `packages/vanilla` (`@palettable/vanilla`) | Vanilla-DOM adapter + demo + default head. Owns the rendering mechanism (DOM rendering, pointer math, drag sessions, head components) — never core, never the DOM contract. |
 | `packages/vue` | Planned second reactive adapter. |
 
 ## Prerequisites
@@ -94,11 +97,11 @@ The demo renders the **Stellar Outpost** space-colony sim — all four borders p
 - **Drag/drop**: preview-is-moving sessions (`slide` vs `restructure`), toolbar moves, tool→track singleton creation, tool→toolbar merge, gap dwell, parking drops. Pointer math lives in adapters; commits go through structural methods (`moveItem`, `moveToolbar`, …).
 - **Command-box**: real combobox running commands inline (Ctrl-Shift-P style). Entry builders (`paletteCommandEntries`, `paletteAddItemEntries`, `paletteDerivedVariants`, `paletteCatalogEntries`) + scored search model (`free`/`keywords`/`categories`, `#cat` prefix).
 - **Console**: quake-style modal for edition + command-first fallback. Opens in edit mode when a command-box is toolbar-bound, else command-first with an edit toggle (R/W only).
-- **Drawers**: nested toolbars in axis-inverted popups (`mount` portal, `open`/`placement` from item `config`, global collapse signal).
+- **Drawers**: nested toolbars in axis-inverted popups (hierarchical sibling, `open`/`placement` from item `config`, global collapse signal).
 - **Virtual points**: end-user-derived `enum-from` (any value as enum/subset) and `stash` (push-aside/pop-back toggle) — registered or inline per item.
 - **Context tools**: `uses` bags (`ValuesBag`), functional `can`, `evaluateCan`/`subscribeCan` (flips only), `subscribeContext` — root bag is core-owned, context bags are host-owned.
 - **SSR**: pure sync render model (definitions + virtuals + layout + values → render tree), atomic snapshots, config pinning, value codecs, JSON-stable output, no `run`/`set`/DOM/timers on the render path.
-- **Theming**: two global stylesheets, imported once — `palette.css` (core layout + edit chrome) and `head-default.css` (default head, dark base + `.palette-default-theme-light` override synced onto `<html>`).
+- **Theming**: four global stylesheets, imported once — `palette.css` (core layout + edit chrome, drawer paint via `--pd-drawer-*` tokens) + `head-default.css` (default-head structure) + `head-dark.css`/`head-light.css` (one theme; `.palette-default-theme-light` synced onto `<html>`).
 - **Persistence**: `serialize` → JSON → `validate` → `hydrate` round-trips (layout + parking + inline virtuals).
 - **Keys**: normalized keystroke map (`Ctrl`/`Alt`/`Shift`/`Meta` order, `cmd`→`Meta`, `escape`→`Esc`), spec-prefix matching, IDE-root `keydown` resolution.
 
@@ -113,7 +116,7 @@ Start with `docs/getting-started.md` (setup, demo tour, first palette), then:
 - `docs/command-box.md` — entries, model, add/catalog flows
 - `docs/using-the-default-head.md` — shipped head, extension/override patterns
 - `docs/creating-a-head.md` — presenter contract, custom tools
-- `docs/theming.md` — stylesheets, light override, demo wiring
+- `docs/theming.md` — stylesheets, tokens, demo wiring
 - `docs/testing.md` — unit + e2e inventory, gotchas
 
 Active work lives in `plans/` (`extraction.md`, `clarifications.md`). Per

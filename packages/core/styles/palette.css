@@ -105,7 +105,16 @@
 	background: transparent;
 }
 
-/* Directly mouse-hovered DZ (parallel stacks only): double the size. */
+/* Directly mouse-hovered DZ (parallel stacks only): double the size.
+ * Highlighted stack gaps must hit-test everywhere they paint, like item
+ * separators above: the neighbouring item guards (`inset: -3px`,
+ * `z-index: 1`) overlap the gap edges, and a highlighted item-space
+ * (`z-index: 2`) otherwise covers the stack gap beside it — the colored
+ * gap then reports the item-space as its target and the dwell never arms. */
+.toolbar-stack-space.toolbar-drop-zone.highlighted {
+	z-index: 3;
+}
+
 .toolbar-stack-space.toolbar-drop-zone.highlighted.hovered {
 	min-width: calc(var(--palette-dz-size) * 2);
 	min-height: calc(var(--palette-dz-size) * 2);
@@ -188,12 +197,15 @@
 }
 
 /* While dragging, the grabbed toolbar follows the pointer via `transform`
- * (compositor only — gaps stay untouched until release). Hint the layer on
- * the dragged toolbar and keep transform off any transition so it tracks
- * the pointer 1:1. */
-.palette-ide.dragging .toolbar {
-	will-change: transform;
-}
+ * (compositor only — gaps stay untouched until release). The layer hint is
+ * applied INLINE by the adapter on the one toolbar that actually receives a
+ * transform (`armSlide` / `slideCleanup`), never as a blanket
+ * `.palette-ide.dragging .toolbar` rule: `will-change: transform` creates a
+ * stacking context, so hinting EVERY toolbar trapped each drawer popup's
+ * `z-index: 211` inside its own bar — the popup then painted (and
+ * hit-tested) BELOW `.palette-ide-center`, so a drag into a drawer DZ read
+ * as "the drawer closed". `.toolbar`'s own transition list has no
+ * `transform`, so the follow already tracks the pointer 1:1. */
 
 .toolbar-track-space {
 	display: flex;
@@ -613,11 +625,72 @@
  * is the content half for inner tools, never placement. Attached (no
  * gap): the trigger and the popup read as one group-field — the trigger
  * keeps its toolbar-outer rounding, the popup takes the workspace-side
- * half (mirrors the slider-drawer input group). */
+ * half (mirrors the slider-drawer input group). Placement rules live after
+ * the base popup rule below: same specificity, so they must come later —
+ * otherwise the base `border-radius` / `padding` shorthands would clobber
+ * the joint-side squaring. */
+
+.palettable-drawer {
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 auto;
+	min-width: 0;
+	min-height: 0;
+}
+
+/* Drawer overlay shell — kept for adapters that portal the popup
+ * instead of toggling it in place (the vanilla adapter renders
+ * hierarchical siblings; a portaled adapter reuses this shell). */
+.palettable-drawer__overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 210;
+}
+
+.palettable-drawer__trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	justify-content: flex-start;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.palettable-drawer__popup {
+	position: absolute;
+	/* Base stacking (211); the head bumps it per nesting depth
+	 * (`style.zIndex = 210 + depth`) so each nested popup paints above
+	 * the popup hosting it. */
+	z-index: 211;
+	/* Attached group-field: joint-side padding only (per-side rules below),
+	 * so the cross size matches the trigger exactly. */
+	padding: 0;
+	box-sizing: border-box;
+	border: 1px solid var(--pd-drawer-border, rgba(148, 163, 184, 0.38));
+	border-radius: 10px;
+	background: var(--pd-drawer-bg, rgba(15, 23, 42, 0.95));
+	box-shadow: var(--pd-drawer-shadow, 0 4px 16px rgba(0, 0, 0, 0.3));
+	max-width: min(80vw, 28rem);
+	/* Overflow stays visible so nested popouts (select listbox, nested
+	 * drawers) float above like they do in border tracks. A scroll
+	 * container here would clip them and force a drawer scrollbar. */
+	overflow: visible;
+	/* Hierarchical: inside `.palette-ide`, so the sizing var inherits.
+	/* Fallback keeps the var defined if an adapter portals the popup
+	/* outside the IDE subtree. */
+	--palette-toolbar-perpendicular: 2.5rem;
+}
+
+.palettable-drawer__popup[hidden] {
+	display: none;
+}
 
 /* Popup side: four parent-region rules, one per side. The popup's nearest
- * `palette` container is its parent (border/parking/popup), so these query
- * the parent region; the popup's own `--region` stays the content half. */
+ * `palette` container is its parent (border/parking/popup — the wrapper
+ * stamps nothing), so these query the parent region; the popup's own
+ * `--region` stays the content half. AFTER the base rule: same
+ * specificity, so placement must come later or the base `border-radius` /
+ * `padding` shorthands clobber the joint-side squaring. */
 @container palette style(--region: left) {
 	.palettable-drawer__popup {
 		left: 100%;
@@ -660,59 +733,6 @@
 		padding: 0;
 		padding-bottom: 0.25rem;
 	}
-}
-
-.palettable-drawer {
-	position: relative;
-	display: inline-flex;
-	flex: 0 0 auto;
-	min-width: 0;
-	min-height: 0;
-}
-
-/* Body-portal overlay shell — kept for adapters that portal the popup
- * instead of toggling it in place. */
-.palettable-drawer__overlay {
-	position: fixed;
-	inset: 0;
-	z-index: 210;
-}
-
-.palettable-drawer__trigger {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.25rem;
-	justify-content: flex-start;
-	cursor: pointer;
-	white-space: nowrap;
-}
-
-.palettable-drawer__popup {
-	position: absolute;
-	/* Base stacking (211); the head bumps it per nesting depth
-	 * (`style.zIndex = 210 + depth`) so each nested popup paints above
-	 * the popup hosting it. */
-	z-index: 211;
-	/* Attached group-field: joint-side padding only (per-side rules below),
-	 * so the cross size matches the trigger exactly. */
-	padding: 0;
-	box-sizing: border-box;
-	border: 1px solid rgba(148, 163, 184, 0.38);
-	border-radius: 10px;
-	background: rgba(15, 23, 42, 0.95);
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-	max-width: min(80vw, 28rem);
-	/* Overflow stays visible so nested popouts (select listbox, nested
-	 * drawers) float above like they do in border tracks. A scroll
-	 * container here would clip them and force a drawer scrollbar. */
-	overflow: visible;
-	/* Hierarchical: inside `.palette-ide`, so the sizing var inherits.
-	/* Kept as a fallback for body-portaled popups. */
-	--palette-toolbar-perpendicular: 2.5rem;
-}
-
-.palettable-drawer__popup[hidden] {
-	display: none;
 }
 
 /* Trigger keeps the toolbar-outer half — but only while open (attached

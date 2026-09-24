@@ -133,15 +133,21 @@ export type HeadContext = {
 	readonly triggerRect?: { left: number; top: number; width: number; height: number }
 }
 
-/** Fill a shelled icon node: show + set glyph, or hide when absent.
- * An empty string is treated as absent (dev-time warn): it would unhide an
+/** Empty-string icon check shared by `fillIcon`/`takeIcon`: an empty string
+ * is treated as absent (dev-time warn) — it would unhide an
  * empty-but-space-reserving node (`width: 1rem` + parent gap). */
+function emptyIcon(icon: string | undefined): boolean {
+	if (icon === '' && typeof console !== 'undefined') {
+		console.warn('[palettable] empty-string icon received; treating as absent')
+		return true
+	}
+	return false
+}
+
+/** Fill a shelled icon node: show + set glyph, or hide when absent. */
 function fillIcon(node: HTMLElement | undefined, icon: string | undefined): void {
 	if (node === undefined) return
-	if (icon === undefined || icon === '') {
-		if (icon === '' && typeof console !== 'undefined') {
-			console.warn('[palettable] fillIcon received empty-string icon; treating as absent')
-		}
+	if (icon === undefined || emptyIcon(icon)) {
 		node.hidden = true
 		return
 	}
@@ -156,10 +162,7 @@ function takeIcon(
 	icon: string | undefined
 ): HTMLElement | undefined {
 	if (node === undefined) return undefined
-	if (icon === undefined || icon === '') {
-		if (icon === '' && typeof console !== 'undefined') {
-			console.warn('[palettable] takeIcon received empty-string icon; removing node')
-		}
+	if (icon === undefined || emptyIcon(icon)) {
 		node.remove()
 		return undefined
 	}
@@ -714,8 +717,8 @@ function nextCycleValue(cycle: Runnable): 'light' | 'dark' | 'system' {
  * `palette-default-theme-light` class, `system` default) and writes go
  * through `applyThemeSetting` — never through `core.values`.
  * Applies the resolved theme to the document root on render + every click
- * (`head-light.css` keys off `.palette-default-theme-light`, so
- * body-portaled drawer popups follow the same switch). Icon-value only
+ * (`head-light.css` keys off `.palette-default-theme-light`, so drawer
+ * popups follow the same switch). Icon-value only
  * (current option icon, no text — like the toggle): the button is a compact
  * icon square. Skeleton renders the tool icon only. */
 export function renderTheme(context: HeadContext): HTMLElement {

@@ -1038,125 +1038,6 @@
 	}
 }
 
-@container palette style(--layout: horizontal) {
-	.palette-default-slider-drawer.palette-default-layout-horizontal {
-		flex-direction: column;
-		align-items: stretch;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-horizontal
-		> .palette-default-slider-trigger {
-		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
-		justify-content: center;
-		min-block-size: var(--palette-toolbar-perpendicular);
-		box-sizing: border-box;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-horizontal
-		> .palette-default-slider-track {
-		top: 100%;
-		bottom: auto;
-		left: 0;
-		right: 0;
-		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
-		width: 100%;
-		height: 6.5rem;
-		padding: 0.72rem 0;
-		box-sizing: border-box;
-		transform: translateY(-0.4rem);
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-horizontal
-		> .palette-default-slider-track
-		> input[type='range'] {
-		writing-mode: vertical-lr;
-		direction: rtl;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-horizontal:hover
-		> .palette-default-slider-track,
-	.palette-default-slider-drawer.palette-default-layout-horizontal:focus-within
-		> .palette-default-slider-track {
-		transform: translateY(0);
-	}
-}
-
-@container palette style(--region: bottom) {
-	.palette-default-slider-drawer.palette-default-layout-horizontal
-		> .palette-default-slider-trigger {
-		border-radius: 0 0 var(--pd-r-l) var(--pd-r-l);
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-horizontal
-		> .palette-default-slider-track {
-		top: auto;
-		bottom: 100%;
-		border-radius: var(--pd-r-l) var(--pd-r-l) 0 0;
-		transform: translateY(0.4rem);
-	}
-}
-
-@container palette style(--layout: vertical) {
-	.palette-default-slider-drawer.palette-default-layout-vertical {
-		flex-direction: row;
-		block-size: var(--palette-toolbar-perpendicular);
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-vertical
-		> .palette-default-slider-trigger {
-		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-		inline-size: var(--palette-toolbar-perpendicular);
-		block-size: var(--palette-toolbar-perpendicular);
-		box-sizing: border-box;
-		flex-direction: column;
-		gap: 1px;
-		padding: 0.3rem 0;
-		justify-content: center;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-vertical
-		> .palette-default-slider-track {
-		inset-block: 0;
-		inset-inline-start: 100%;
-		inset-inline-end: auto;
-		inline-size: 6.5rem;
-		block-size: 100%;
-		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-		padding: 0 0.72rem 0 0.9rem;
-		box-sizing: border-box;
-		transform: translateX(-0.4rem);
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-vertical
-		> .palette-default-slider-track
-		> input[type='range'] {
-		writing-mode: horizontal-tb;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-vertical:hover
-		> .palette-default-slider-track,
-	.palette-default-slider-drawer.palette-default-layout-vertical:focus-within
-		> .palette-default-slider-track {
-		transform: translateX(0);
-	}
-}
-
-@container palette style(--region: right) {
-	.palette-default-slider-drawer.palette-default-layout-vertical
-		> .palette-default-slider-trigger {
-		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
-	}
-
-	.palette-default-slider-drawer.palette-default-layout-vertical
-		> .palette-default-slider-track {
-		inset-inline-start: auto;
-		inset-inline-end: 100%;
-		border-radius: var(--pd-r-l) 0 0 var(--pd-r-l);
-		padding: 0 0.9rem 0 0.72rem;
-		transform: translateX(0.4rem);
-	}
-}
-
 /* Vertical toolbar: trigger inline-start, range beside it, horizontal track. */
 @container palette style(--layout: vertical) {
 	.palette-default-slider-drawer {
@@ -1419,81 +1300,6 @@
 	}
 }
 
-@container palette style(--layout: vertical) {
-	.palette-default-command-box.palette-default-layout-vertical {
-		inline-size: var(--palette-toolbar-perpendicular);
-		max-inline-size: none;
-		block-size: var(--palette-toolbar-perpendicular);
-		position: relative;
-		overflow: visible;
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical
-		.palette-default-command-shell {
-		position: absolute;
-		inset-block: 0;
-		inset-inline-start: 0;
-		inline-size: var(--palette-toolbar-perpendicular);
-		padding: 0;
-		justify-content: center;
-		overflow: hidden;
-		z-index: 1;
-		transition:
-			inline-size var(--pd-slide),
-			box-shadow var(--pd-ease);
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical:hover
-		.palette-default-command-shell,
-	.palette-default-command-box.palette-default-layout-vertical:focus-within
-		.palette-default-command-shell {
-		inline-size: 14rem;
-		background: var(--pd-panel);
-		border-color: var(--pd-accent);
-		box-shadow: var(--pd-pop-shadow);
-		justify-content: flex-start;
-		padding-inline: 0.6rem;
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical
-		.palette-default-command-tokens {
-		flex-wrap: nowrap;
-		overflow: hidden;
-		opacity: 0;
-		transition: opacity var(--pd-ease);
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical:hover
-		.palette-default-command-tokens,
-	.palette-default-command-box.palette-default-layout-vertical:focus-within
-		.palette-default-command-tokens {
-		opacity: 1;
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical
-		.palette-default-command-popover {
-		position: absolute;
-		inset-inline-start: 0;
-		top: calc(100% + 6px);
-		inline-size: 18rem;
-		z-index: 6;
-	}
-}
-
-@container palette style(--region: right) {
-	.palette-default-command-box.palette-default-layout-vertical
-		.palette-default-command-shell {
-		inset-inline-start: auto;
-		inset-inline-end: 0;
-	}
-
-	.palette-default-command-box.palette-default-layout-vertical
-		.palette-default-command-popover {
-		inset-inline-start: auto;
-		inset-inline-end: 0;
-	}
-}
-
 /* Inline slider grows along the toolbar; range runs vertically below chip. */
 @container palette style(--layout: vertical) {
 	.palette-default-slider-inline {
@@ -1742,6 +1548,29 @@
 		inset-inline-start: calc(100% + 1px);
 		border-radius: 0 var(--pd-r-l) var(--pd-r-l) 0;
 		transform: translateX(-0.4rem);
+	}
+}
+
+/* Text on board: the button squares its joint side to meet the overlay,
+ * exterior stays round. Default overlay opens left (joint = inline-start);
+ * `left` mirrors (joint = inline-end). Gate mirrors the overlay. */
+@container palette style(--layout: vertical) {
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		) {
+		border-top-left-radius: 0;
+		border-bottom-left-radius: 0;
+	}
+}
+
+@container palette style(--region: left) {
+	.palette-default-tool:has(> .palette-default-icon:not([hidden])):has(
+			> .palette-default-choice
+		) {
+		border-top-left-radius: var(--pd-r-m);
+		border-bottom-left-radius: var(--pd-r-m);
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
 	}
 }
 

@@ -71,6 +71,21 @@ participants in edit mode:
   moves) calls `closeDrawersOutside(target)`, which closes only popups whose
   wrapper does NOT contain the hovered element. Ancestors stay open,
   siblings close. Run mode keeps click/Escape/outside-click close.
+  A drawer therefore closes **iff the target DZ is not inside it**; a commit
+  that lands on a DZ *inside* an open drawer must not close that drawer, even
+  though the commit re-renders (and thus recreates) its popup node:
+  - Open drawers are tracked by live `ToolbarItem` identity
+    (`openDrawerItems`, fed by `HeadContext.onOpenDrawer`/`onCloseDrawer`)
+    and re-opened after every structural rebuild (`reopenTrackedDrawers()`),
+    because a fresh popup starts hidden.
+  - `closeDrawersOutside` ignores **detached** targets: the commit destroys
+    the node the pointer was over, so containment is unanswerable — the next
+    live-target move decides instead of closing blindly.
+  - The drag layer hint (`will-change: transform`) is applied inline by the
+    adapter to the single toolbar that actually moves, never as
+    `.palette-ide.dragging .toolbar` — that rule created a stacking context on
+    every bar, trapping the popup's `z-index` inside its own toolbar so it
+    painted (and hit-tested) below `.palette-ide-center`.
 - **Gap highlight**: drawer item-spaces route through the same `item-gap`
   session path as borders (`renderDrawerTrack` `pointermove` →
   `session.over({ kind: 'item-gap', ... })`); the session resolves the

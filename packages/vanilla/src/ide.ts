@@ -64,9 +64,6 @@ import {
 	type Unsubscribe,
 	validateSerializedLayout,
 } from '@palettable/core'
-// Side-effect import: wires `PaletteLayoutTree.prototype.createDrag`.
-// TODO: understand what is happening with this wireing
-import '@palettable/core'
 import { itemFromAddSelection } from './add-item.js'
 import { startDragSession } from './drag-session.js'
 import {
@@ -970,6 +967,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (!(live instanceof HTMLElement) || !live.isConnected) return
 			const delta = slideDelta
 			if (delta === undefined) return
+			// Layer hint on the ONE toolbar that actually receives a
+			// transform (never a blanket `.dragging .toolbar` rule):
+			// `will-change: transform` creates a stacking context, so
+			// hinting every bar trapped each drawer popup's `z-index`
+			// inside its own toolbar — the popup then painted and
+			// hit-tested below `.palette-ide-center`, and a drag into a
+			// drawer DZ read as "the drawer closed".
+			live.style.willChange = 'transform'
 			live.style.transform =
 				delta === 0
 					? ''
@@ -986,7 +991,10 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 		slideCleanup = () => {
 			const live = slideToolbar !== undefined ? nodes.get(slideToolbar) : undefined
-			if (live instanceof HTMLElement) live.style.transform = ''
+			if (live instanceof HTMLElement) {
+				live.style.transform = ''
+				live.style.willChange = ''
+			}
 			slideToolbar = undefined
 			slideDelta = undefined
 			slideQueued = false
@@ -1128,6 +1136,14 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	function closeDrawersOutside(target: EventTarget | null, spare?: HTMLElement): void {
 		if (!computeEditing()) return
 		if (!(target instanceof HTMLElement)) return
+		// A detached target carries no positional information: a structural
+		// commit destroys the DZ node the pointer was over, so the event that
+		// triggered the commit may still bubble with that dead node as
+		// `target` (the browser falls back to `elementFromPoint`, but that
+		// hit-test is unavailable in jsdom). "Is the hover inside this popup"
+		// is then unanswerable — the safe answer is to leave drawers alone and
+		// let the next live-target move decide.
+		if (!target.isConnected) return
 		const midDrag = dragSession !== undefined
 		for (const popup of document.querySelectorAll('.palettable-drawer__popup')) {
 			if (!(popup instanceof HTMLElement) || popup.hidden) continue
@@ -2406,7 +2422,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (inspecting === item) wrapper.dataset.inspected = 'true'
 			const content = el('div', 'toolbar-item-content')
 			// Drawer items are exempt from the inert shield: the popup
-			// renders INSIDE the content (inline, not body-portaled), and
+			// renders INSIDE the content (hierarchical sibling), and
 			// an inert ancestor removes the whole subtree
 			// from hit-testing — `elementFromPoint` would pass through
 			// the open popup to the center behind it, so drawer-child
@@ -2937,6 +2953,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		}
 		host.append(stack)
 		clearGapClasses(stack)
+		reopenTrackedDrawers()
 	}
 
 	function closeConsole(): void {
@@ -4192,6 +4209,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * gaps light up in the same pass.
 	 */
 	function reopenTrackedDrawers(): void {
+		// TODO! Remaining but when d&d in a sub-drawer, this hack has become useless: drawers collapse and/or have no more highlighted DZ
 		if (openDrawerItems.size === 0) return
 		for (const item of [...openDrawerItems]) {
 			const wrapper = nodes.get(item)

@@ -72,7 +72,7 @@ Notes:
 - The `theme` tool is a **nothing-point cycle button** presenting the `light` / `dark` / `system` options with adapter get/set on the document root
   point with adapter get/set on the document root (`readThemeSetting` / `applyThemeSetting`): each click applies the next value
   (`.palette-default-theme-light` class + `data-theme` + `color-scheme`), so
-  body-portaled drawer popups follow the same switch. It renders icon-value
+  drawer popups follow the same switch. It renders icon-value
   only (the current option's icon — ☀️/🌙/💻 — no text, like the toggle), so
   it sits as a compact square on the top bar's single track. `system` follows
   the OS `prefers-color-scheme` media query.

@@ -1,36 +1,34 @@
 import { ConsoleStore, PaletteCore, ValuesBag, validateSerializedLayout } from '@palettable/core'
-import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
 import {
-	catalogStringsForLocale,
-	type DemoLocale,
-	isDemoLocale,
-	localeBundleForLocale,
-} from './i18n.js'
-import { DEMO_ICON_CHOICES, demoIconResolver, renderDemoIconField } from './icons.js'
-import '../../core/styles/palette.css'
-import '../../core/styles/head-default.css'
-import '../../core/styles/head-dark.css'
-import '../../core/styles/head-light.css'
-import {
-	bindConsoleToggle,
-	bindDemoLens,
-	bindResetViaCore,
 	COLONY_VALUE_KEYS,
 	CONSUMER_DEFAULTS,
+	catalogStringsForLocale,
+	createDemoState,
+	DEMO_ICON_CHOICES,
+	type DemoLens,
+	type DemoLocale,
 	type DemoMode,
 	type DemoState,
+	demoIconResolver,
 	demoKeys,
 	demoLayoutFor,
 	demoPoints,
-	demoState,
+	isDemoLocale,
+	LAYOUT_STORAGE_KEY,
+	localeBundleForLocale,
 	resetColonyValues,
 	SHIP_ROSTER,
 	SHIP_VALUES,
 	type ShipId,
 	shipById,
-} from './palette.js'
-
-const LAYOUT_STORAGE_KEY = 'palettable-demo-layout-v1'
+} from '@palettable/demo-core'
+import type { VanillaLocaleBundle } from '@palettable/vanilla'
+import { applyThemeSetting, createIDE, createValueProxy } from '@palettable/vanilla'
+import { renderDemoIconField } from './icons.js'
+import '../../core/styles/palette.css'
+import '../../core/styles/head-default.css'
+import '../../core/styles/head-dark.css'
+import '../../core/styles/head-light.css'
 
 function qs<T extends HTMLElement>(selector: string): T {
 	const el = document.querySelector(selector)
@@ -54,21 +52,53 @@ function renderLastAction(): void {
 let editable = true
 const consoleStore = new ConsoleStore()
 
+/** Backing state object (passed to the lens below; bag = single source). */
+const demoState: DemoState = createDemoState()
+
+/** Live lens: actions read through it, writes go via core. */
+let demoLens: DemoLens = { alertLevel: 'green', lastAction: 'Ready' }
+
 const initial = demoLayoutFor('rw-combobox')
 // Single source: core starts empty (skeleton), then the consumer hydrates
 // via live `setMany` (never `initialValues` — that path stays the one-shot
 // SSR/hydration constructor fill). `demoState` is only the backing object;
 // all reads/writes go through the `demo` proxy below.
-const core = new PaletteCore(demoPoints(), {
-	keys: demoKeys,
-	// Preset layouts are live `Borders` (tracks preserved): pass them
-	// directly — never via `.flat()`/serialized, which drops track
-	// boundaries (each slot would reload as its own single-slot track).
-	// `demoLayoutFor` returns a fresh clone and the tree clones again,
-	// so no extra copy is needed here.
-	initialLayout: { borders: initial.borders, parking: initial.parking },
-	strings: catalogStringsForLocale('en') ?? {},
-})
+const core = new PaletteCore(
+	demoPoints({
+		getAlertLevel: () => String(demoLens.alertLevel),
+		getColonyValues: () => demoLens as unknown as Record<string, unknown>,
+		setLastAction: (message) => {
+			demoLens.lastAction = message
+		},
+		resetColony: () => {
+			core.setMany(resetColonyValues())
+			demoLens.lastAction = 'Colony reset to defaults'
+		},
+		toggleConsole: () => {
+			if (consoleStore.snapshot.open) consoleStore.close()
+			else consoleStore.open(!editable || hasCommandBoxTool() ? 'edit' : 'run')
+		},
+		saveColony: (snapshot) => {
+			try {
+				localStorage.setItem('stellar-outpost-save', JSON.stringify({ ...snapshot }))
+				return true
+			} catch {
+				return false
+			}
+		},
+		getColonySnapshot: () => ({ ...demoLens }),
+	}),
+	{
+		keys: demoKeys,
+		// Preset layouts are live `Borders` (tracks preserved): pass them
+		// directly — never via `.flat()`/serialized, which drops track
+		// boundaries (each slot would reload as its own single-slot track).
+		// `demoLayoutFor` returns a fresh clone and the tree clones again,
+		// so no extra copy is needed here.
+		initialLayout: { borders: initial.borders, parking: initial.parking },
+		strings: catalogStringsForLocale('en') ?? {},
+	}
+)
 
 function hasCommandBoxTool(): boolean {
 	const layout = core.layout.getLayout()
@@ -83,14 +113,6 @@ function hasCommandBoxTool(): boolean {
 	}
 	return false
 }
-
-bindConsoleToggle(() => {
-	if (consoleStore.snapshot.open) consoleStore.close()
-	else {
-		const hasCommandBox = hasCommandBoxTool()
-		consoleStore.open(!editable || hasCommandBox ? 'edit' : 'run')
-	}
-})
 
 function renderChrome(): void {
 	renderLastAction()
@@ -111,14 +133,10 @@ const valueLens = createValueProxy<DemoState>(
 		isBagKey: (key) => bagKeys.has(key),
 	}
 )
-bindDemoLens(valueLens.proxy)
 const demo = valueLens.proxy
+demoLens = valueLens.proxy
 // `locale` seed happens below (after `applyLocale` is defined) via
 // `applyLocaleSeed()` — hydration order matters (before `createIDE`).
-bindResetViaCore(() => {
-	core.setMany(resetColonyValues())
-	demo.lastAction = 'Colony reset to defaults'
-})
 
 // Host-owned context bag for the `missionTime` nothing-point status
 // (`uses: ['mission']`). Single key — the presenter reads the first string
@@ -272,7 +290,10 @@ const ide = createIDE(ideHost, {
 	iconChoices: DEMO_ICON_CHOICES,
 	renderIconField: renderDemoIconField,
 	localePointId: 'locale',
-	stringsForLocale: (locale) => (isDemoLocale(locale) ? localeBundleForLocale(locale) : undefined),
+	stringsForLocale: (locale) =>
+		isDemoLocale(locale)
+			? (localeBundleForLocale(locale) as VanillaLocaleBundle | undefined)
+			: undefined,
 })
 
 // Per-tool DOM updates are owned by the IDE's own bindings; chrome
@@ -406,7 +427,18 @@ window.setInterval(() => {
 	missionBag.set('elapsed', formatted)
 }, 1000)
 
-// Demo always boots on "R/W + command box" (`initial` above): a stored
-// layout never auto-applies (explicit Load only), so every configuration
-// ships its right-most top toolbar — the `theme` tool — on first paint.
+// A stored layout auto-applies on boot (validated): reload restores the
+// saved arrangement and shows the "restored" badge; explicit Load
+// re-applies it after a preset switch. Every configuration still boots
+// deterministically when nothing is stored.
+const stored = readStoredLayout()
+if (stored !== undefined) {
+	try {
+		core.layout.setLayout(stored)
+		restoredBadge.hidden = false
+		ide.refresh()
+	} catch {
+		restoredBadge.hidden = true
+	}
+}
 renderChrome()

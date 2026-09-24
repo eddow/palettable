@@ -1449,6 +1449,58 @@ describe('drawer drag editing', () => {
 		ide.dispose()
 	})
 
+	it('a commit landing on a drawer DZ keeps the drawer open (reopen pass)', () => {
+		const { core, ide, host } = drawerSetup()
+		// Capture the live drawer item + its child toolbar BEFORE the drag
+		// (structural commits reuse both objects, but the drawer's index in
+		// the parent toolbar changes once the dragged tool merges in).
+		const live = core.layout.getLayout()
+		const borderToolbar = live.borders.top[0]?.[0]?.toolbar
+		const drawerItem = borderToolbar?.[1]
+		const childToolbar = (drawerItem as { toolbar: { toolbar: unknown[] }[] }).toolbar[0]
+			?.toolbar as import('@palettable/core').Toolbar
+		if (!borderToolbar || !childToolbar) throw new Error('expected toolbars')
+		// Open the drawer through the real toggle path (pointerdown), so the
+		// adapter's `onOpenDrawer` tracking sees it — the expando
+		// (`__openDrawer`) bypasses that callback.
+		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement
+		const trigger = host.querySelector('.palettable-drawer__trigger') as HTMLButtonElement
+		expect(popup.hidden).toBe(true)
+		trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		expect(popup.hidden).toBe(false)
+		// Start the drag through the ADAPTER (border guard pointerdown →
+		// `startToolDrag` subscribes the session to `applyOp`). A raw
+		// `core.layout.createDrag` leaves the adapter unsubscribed, so no
+		// rebuild happens and the reopen pass is never exercised.
+		const borderGuard = host.querySelector('.toolbar-border .toolbar-item-guard') as HTMLElement
+		expect(borderGuard instanceof HTMLElement).toBe(true)
+		borderGuard.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+		// Hover the drawer's trailing item-space DZ (after the single child
+		// tool): the commit merges the dragged border tool into the drawer.
+		// `buttons: 1` — the session's window move handler treats
+		// `buttons === 0` as release and ends the gesture.
+		const spaces = [...popup.querySelectorAll('[data-item-space-index]')]
+		const target = spaces[spaces.length - 1] as HTMLElement
+		expect(target instanceof HTMLElement).toBe(true)
+		target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, buttons: 1 }))
+		// The commit landed: the border tool moved into the drawer's child
+		// toolbar.
+		expect(childToolbar.map((entry) => (entry as { point?: unknown }).point)).toEqual([
+			'speed',
+			'lamp',
+		])
+		// The drawer is still open after the commit. The rebuild recreates
+		// the wrapper + popup, and a fresh popup starts hidden — without the
+		// reopen pass the drawer would close under the cursor.
+		const freshPopup = host.querySelector('.palettable-drawer__popup') as HTMLElement
+		expect(freshPopup instanceof HTMLElement).toBe(true)
+		expect(freshPopup.hidden).toBe(false)
+		expect(host.querySelector('.palettable-drawer__trigger')?.getAttribute('aria-expanded')).toBe(
+			'true'
+		)
+		ide.dispose()
+	})
+
 	it('drawer opens on edit hover even without a drag', () => {
 		const { ide, host } = drawerSetup()
 		const popup = host.querySelector('.palettable-drawer__popup') as HTMLElement

@@ -12,6 +12,7 @@
 		"noEmit": true,
 		"paths": {
 			"@palettable/core": ["../core/src/index.ts"],
+			"@palettable/demo-core": ["../demo-core/src/index.ts"],
 			"@palettable/vanilla": ["./src/index.ts"]
 		}
 	},

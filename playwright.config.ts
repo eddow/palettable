@@ -13,18 +13,18 @@ export default defineConfig({
 	use: {
 		trace: 'on-first-retry',
 	},
-	// Vanilla demo on :4174, plus a `vanilla-smoke` project for the
-	// vanilla-only spec.
+	// Vanilla demo on :4174, plus a `default-head` project for the
+	// default-head visual spec (head presentation, not core semantics).
 	projects: [
 		{
 			name: 'vanilla',
 			use: { baseURL: 'http://localhost:4174' },
-			testIgnore: /vanilla\.spec\.ts/,
+			testIgnore: /default-head\.spec\.ts/,
 		},
 		{
-			name: 'vanilla-smoke',
+			name: 'default-head',
 			use: { baseURL: 'http://localhost:4174' },
-			testMatch: /vanilla\.spec\.ts/,
+			testMatch: /default-head\.spec\.ts/,
 		},
 	],
 	webServer: [

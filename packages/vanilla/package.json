@@ -2,7 +2,6 @@
 	"name": "@palettable/vanilla",
 	"version": "0.0.1",
 	"description": "Palettable vanilla-DOM adapter — headless core with plain DOM rendering (rolled-up)",
-	"private": true,
 	"author": "François Marie De Mey <eeddow@gmail.com>",
 	"license": "AGPL-3.0-only",
 	"homepage": "https://github.com/eddow/palettable#readme",
@@ -22,6 +21,7 @@
 		"vanilla"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.mjs",
 	"unpkg": "./dist/index.js",
@@ -39,6 +39,7 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "rollup -c",
+		"prepack": "rollup -c",
 		"check": "tsc --noEmit -p ./tsconfig.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
@@ -49,6 +50,7 @@
 		"@palettable/core": "workspace:*"
 	},
 	"devDependencies": {
+		"@palettable/demo-core": "workspace:*",
 		"@rollup/plugin-node-resolve": "^15.3.1",
 		"@rollup/plugin-typescript": "^11.1.6",
 		"@types/node": "^24.0.0",

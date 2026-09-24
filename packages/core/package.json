@@ -2,7 +2,6 @@
 	"name": "@palettable/core",
 	"version": "0.0.1",
 	"description": "Palettable core — headless palette primitives (vanilla TS, framework-agnostic, rolled-up)",
-	"private": true,
 	"author": "François Marie De Mey <eeddow@gmail.com>",
 	"license": "AGPL-3.0-only",
 	"homepage": "https://github.com/eddow/palettable#readme",
@@ -22,9 +21,9 @@
 		"vanilla"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.mjs",
-	"unpkg": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
@@ -40,6 +39,7 @@
 	],
 	"scripts": {
 		"build": "rollup -c",
+		"prepack": "rollup -c",
 		"check": "tsc --noEmit -p ./tsconfig.json",
 		"test": "vitest run",
 		"test:watch": "vitest",

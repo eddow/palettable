@@ -32,6 +32,9 @@
 	--pd-star: #facc15;
 	--pd-star-on: #f59e0b;
 	--pd-drag-border: rgba(96, 165, 250, 0.55);
+	--pd-drawer-border: rgba(148, 163, 184, 0.38);
+	--pd-drawer-bg: rgba(15, 23, 42, 0.95);
+	--pd-drawer-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 	--pd-r-s: 9px;
 	--pd-r-m: 10px;
 	--pd-r-l: 12px;

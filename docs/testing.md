@@ -50,7 +50,7 @@ Run: `pnpm --filter @palettable/vanilla test`. Config:
 ## E2E (Playwright)
 
 Run: `pnpm test:e2e`. `playwright.config.ts` serves the vanilla demo
-(vite dev on `:4174`) — plus a `vanilla-smoke` project for the vanilla-only spec.
+(vite dev on `:4174`) — plus a `default-head` project for the default-head visual spec.
 `test.beforeEach` clears `localStorage` and reloads. The suite is the
 **adapter conformance contract**: every adapter (vue, svelte — see
 `plans/extraction.md`) must satisfy the same specs — new highlight/commit
@@ -109,8 +109,8 @@ behaviour lands with its spec first, core unit anchors second.
   paint/commit single-decision rule (vanilla reads the painted
   `highlighted` class; core commits reject dark gaps), so future adapters
   can never move tools under a dark gap.
-- `e2e/vanilla.spec.ts` (1, `vanilla-smoke`): vanilla demo first paint
-  (heading + IDE chrome + combobox + work-zone).
+- `e2e/default-head.spec.ts` (14, `default-head`): default-head visual details
+  (axis-aware overlays, radii, sliders, selects, theme tool — `palette-default-*`).
 - `e2e/track-drop.spec.ts` (1, conformance): dragging a tool onto a track
   gap extracts a new toolbar — guard → leading track gap commits a fresh
   singleton and the session promotes to a whole-toolbar slide.
@@ -118,6 +118,18 @@ behaviour lands with its spec first, core unit anchors second.
   track background highlights the flanking stack gaps (core `dragOver`
   `{ kind: 'track' }` active-track fallback, no commit — the dwell commit
   stays adapter-owned).
+- `e2e/drawer-dz-stay-open.spec.ts` (1, conformance): a drawer closes **iff
+  the target DZ is not inside it** — dragging a border tool onto a drawer
+  trigger opens the drawer, then continuing into the drawer's own
+  item-space DZ keeps it open AND highlights that DZ. Regression guard: the
+  commit that lands on the drawer DZ re-renders (and recreates) the popup
+  subtree, and a fresh popup starts hidden — the drawer used to "suddenly
+  close" exactly when the user aimed at a DZ inside it. The vanilla adapter
+  now tracks open drawers by live item identity and re-opens them after each
+  rebuild. Unit anchors in `vanilla/src/value-sync.test.ts` "drawer drag
+  editing": "a commit landing on a drawer DZ keeps the drawer open (reopen
+  pass)" (drives the ADAPTER path, since a raw `core.layout.createDrag`
+  never subscribes `applyOp`).
 
 E2E lessons (see `docs/architecture.md` §19–§20):
 

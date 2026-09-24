@@ -1,0 +1,49 @@
+/**
+ * `@palettable/vue` — theme application (document-root class toggle).
+ *
+ * Same contract as the vanilla adapter's `theme.ts`: the `theme` tool binds
+ * the enum-shaped `theme` nothing-point — it writes the resolved theme
+ * directly onto the document root, the standard `<html>` class toggle.
+ * `head-light.css` keys off `.palette-default-theme-light`, so
+ * body-portaled drawer popups (outside the IDE subtree) follow the same
+ * switch.
+ */
+
+import type { ThemeValue } from '@palettable/core'
+
+/** Resolve a theme setting to what renders (`system` follows the OS). */
+export function resolveTheme(
+	setting: ThemeValue | undefined,
+	prefersLight: boolean
+): 'light' | 'dark' {
+	if (setting === 'light') return 'light'
+	if (setting === 'dark') return 'dark'
+	return prefersLight ? 'light' : 'dark'
+}
+
+/** Read the OS preference (safe default `false` when `matchMedia` is absent). */
+export function systemPrefersLight(): boolean {
+	return (
+		typeof window !== 'undefined' &&
+		typeof window.matchMedia === 'function' &&
+		window.matchMedia('(prefers-color-scheme: light)').matches
+	)
+}
+
+/**
+ * Apply a theme setting to the document root: class toggle + `data-theme`
+ * + `colorScheme` (native form controls). Idempotent. `system` resolves via
+ * the OS preference for paint but is preserved as the stored setting, so
+ * the cycle (light → dark → system) keeps working.
+ */
+export function applyThemeSetting(
+	root: HTMLElement,
+	setting: ThemeValue | undefined,
+	prefersLight: boolean = systemPrefersLight()
+): 'light' | 'dark' {
+	const resolved = resolveTheme(setting, prefersLight)
+	root.classList.toggle('palette-default-theme-light', resolved === 'light')
+	root.dataset.theme = setting ?? resolved
+	root.style.colorScheme = resolved
+	return resolved
+}

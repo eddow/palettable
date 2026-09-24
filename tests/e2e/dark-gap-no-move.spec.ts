@@ -53,7 +53,8 @@ test('hovering a dark gap never re-organises tools', async ({ page }) => {
 	const guard = border.locator('.toolbar-item-guard').first()
 	await expect(guard).toBeVisible()
 	const before = await toolOrder(page)
-	expect(before).toHaveLength(4)
+	// Left border toolbar: slider, select, segmented, button, drawer.
+	expect(before).toHaveLength(5)
 	// Gap 1 sits right after the dragged tool 0: dark by the
 	// never-beside-a-dragged-tool rule. Hover it directly (gaps are
 	// zero-size until highlighted, so step onto its centre via bounding

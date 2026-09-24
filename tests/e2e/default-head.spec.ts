@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-// Vanilla demo smoke: heading, IDE chrome, and the
+// Default-head visual spec: heading, IDE chrome, and the
 // toolbar command-box combobox render on first paint.
-test('vanilla demo renders the Stellar Outpost IDE', async ({ page }) => {
+// Runs against the vanilla demo, but asserts head presentation
+// (`palette-default-*`), not adapter identity — custom heads are exempt.
+test('default head renders the Stellar Outpost IDE', async ({ page }) => {
 	await page.goto('/')
 	await expect(page.getByRole('heading', { name: 'Stellar Outpost' })).toBeVisible()
 	await expect(page.locator('.palette-ide').first()).toBeVisible()
@@ -27,7 +29,9 @@ function verticalCommandBox(page: import('@playwright/test').Page) {
 test('vertical command box is icon-only and does not widen its toolbar', async ({ page }) => {
 	const box = verticalCommandBox(page)
 	await expect(box).toBeVisible()
-	await expect(box).toHaveClass(/palette-default-layout-vertical/)
+	// Orientation comes from the border container's `--layout` var
+	// (no per-tool layout classes — see templates.ts contract).
+	await expect(page.locator('.toolbar-border[data-region="right"]')).toBeVisible()
 
 	const bar = page.locator('.toolbar-border[data-region="right"] .toolbar').first()
 	const before = await bar.evaluate((node) => node.getBoundingClientRect().width)
@@ -56,9 +60,9 @@ test('vertical command box overlay opens over the IDE and runs a command', async
 
 test('vertical segmented reveals option text on hover without resizing', async ({ page }) => {
 	// The left border hosts the `powerPriority` segmented (enum).
-	const group = page.locator(
-		'.toolbar-border[data-region="left"] .palette-default-segmented.palette-default-layout-vertical'
-	)
+	// Orientation comes from the border container's `--layout` var
+	// (no per-tool layout classes — see templates.ts contract).
+	const group = page.locator('.toolbar-border[data-region="left"] .palette-default-segmented')
 	await expect(group).toBeVisible()
 	const labels = group.locator('.palette-default-choice')
 
@@ -85,7 +89,7 @@ test('vertical groups round their visual ends, not their DOM ends', async ({ pag
 	// overlay), so this asserts the EXTERIOR (toolbar-outer, left on this
 	// left-docked bar) corners.
 	const buttons = page.locator(
-		'.toolbar-border[data-region="left"] .palette-default-segmented.palette-default-layout-vertical button'
+		'.toolbar-border[data-region="left"] .palette-default-segmented button'
 	)
 	const first = await buttons.first().evaluate((node) => {
 		const cs = getComputedStyle(node)
@@ -222,11 +226,12 @@ test('horizontal select shows icon + label and opens a full-text list on click',
 	page,
 }) => {
 	// The left drawer's nested popup hosts a `colonyTheme` select (enum) on a
-	// horizontal toolbar — open the drawer first.
-	await page.getByRole('button', { name: 'More' }).click()
-	const popup = page.locator('.palettable-drawer__popup')
+	// horizontal toolbar — open the drawer first. Two popups exist in the
+	// DOM (outer + nested hidden one), so scope to the first visible.
+	await page.getByRole('button', { name: 'More' }).first().click()
+	const popup = page.locator('.palettable-drawer__popup').first()
 	await expect(popup).toBeVisible()
-	const box = popup.locator('.palette-default-select.palette-default-layout-horizontal')
+	const box = popup.locator('.palette-default-select')
 	await expect(box).toBeVisible()
 	const trigger = box.locator('.palette-default-select-trigger')
 	// Closed box mirrors the slider trigger: tool icon + value icon + label.
@@ -256,10 +261,10 @@ test('horizontal select shows icon + label and opens a full-text list on click',
 test('select filter narrows rows and Enter picks the first match', async ({ page }) => {
 	// The left drawer's nested popup hosts the `colonyTheme` select with
 	// `showFilter: true` — open the drawer first.
-	await page.getByRole('button', { name: 'More' }).click()
-	const popup = page.locator('.palettable-drawer__popup')
+	await page.getByRole('button', { name: 'More' }).first().click()
+	const popup = page.locator('.palettable-drawer__popup').first()
 	await expect(popup).toBeVisible()
-	const box = popup.locator('.palette-default-select.palette-default-layout-horizontal')
+	const box = popup.locator('.palette-default-select')
 	await expect(box).toBeVisible()
 	const trigger = box.locator('.palette-default-select-trigger')
 	await trigger.click()
@@ -280,8 +285,10 @@ test('select filter narrows rows and Enter picks the first match', async ({ page
 
 test('vertical select stacks tool + value icons and extends to text on hover', async ({ page }) => {
 	// The left border hosts the `colonyTheme` select (enum, tool icon 🪐).
+	// Two selects share the left border subtree (border + nested drawer
+	// popup), so scope to the border-level one by its title.
 	const box = page.locator(
-		'.toolbar-border[data-region="left"] .palette-default-select.palette-default-layout-vertical'
+		'.toolbar-border[data-region="left"] .palette-default-select[title^="Atmosphere · Head select"]'
 	)
 	await expect(box).toBeVisible()
 	const trigger = box.locator('.palette-default-select-trigger')

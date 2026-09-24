@@ -312,7 +312,7 @@ div, and renders the tool stacks around it — `createIDE(container, options)`
       `draggable=` in `src`) were replaced with click-to-select assertions.
 - [x] **One `playwright.config.ts` project per demo, all running the same
       `tests/e2e/*.spec.ts`.** — landed: a `vanilla` project plus a
-      `vanilla-smoke` project for the vanilla-only spec. Ports are per-adapter;
+      `default-head` project for the default-head visual spec. Ports are per-adapter;
       each new adapter (Phases 11–12) adds its own project on its own port.
 - [x] Gate: `tests/e2e/` green. — landed 2026-09-14 (33 passed).
 

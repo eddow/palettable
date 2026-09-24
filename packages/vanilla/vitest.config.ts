@@ -6,6 +6,7 @@ export default defineConfig({
 		alias: {
 			// Tests import the published barrels; in dev they resolve to source.
 			'@palettable/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),
+			'@palettable/demo-core': fileURLToPath(new URL('../demo-core/src/index.ts', import.meta.url)),
 			'@palettable/vanilla': fileURLToPath(new URL('./src/index.ts', import.meta.url)),
 		},
 	},

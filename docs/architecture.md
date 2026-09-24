@@ -15,14 +15,17 @@ phase history.
   adapter + demo), `@palettable/vue` and `@palettable/svelte` (created in
   `plans/extraction.md` Phases 11–12). Each imports `core` only — never the
   reverse, never each other.
-- **Headless** contract: the palette owns state, a11y semantics, tool
-  resolution, editing, and drag/drop — **not** styling. Adapters own markup and
-  CSS.
+- **Headless** contract: core owns state, a11y semantics, tool
+  resolution, editing, and drag/drop — plus the HTML end-result contract
+  (hierarchy, classes, `data-*` indices, testids, `--layout`/`--region` vars)
+  and all CSS files under `packages/core/styles/`. Adapters own only the
+  rendering mechanism (plain-DOM templates vs framework components) —
+  different production, byte-equivalent DOM. `headless` means no DOM runtime
+  in core (compiler-enforced `lib: ["ES2022"]`, see §21), not no CSS and not
+  no markup contract.
 - The original reference UI (a Sursaut-based implementation) has been retired;
   it is no longer available to consult. What was extracted from it is recorded
   below — treat **this document + `packages/core`** as the spec.
-- Read-only reference source lives in `ui/` (symlink) where the original
-  upstream is still present. Never edit it.
 - **Out of scope:** the rest of the original reference UI — the `*Model` functions
   (button/checkbox/select/…), directives, and the `uiComponent` variant factory
   (styled variants + dot-syntax accessors). The palette has no model layer and
@@ -59,7 +62,7 @@ into adapters.
 | `JSX.Element` | core: `IconToken = string`; adapter: its own renderer |
 | `options.iconFactory` | adapter-side icon resolution (`resolveIcon`) |
 | directive (`use:`) | adapter-owned (`$effect` in an action, `onMounted`, …) |
-| portal latch | adapter-owned DOM portal (drawer popups into `document.body`) |
+| drawer popup | core: hierarchical sibling in `.palettable-drawer` (trigger + popup, no body portal, no JS geometry); adapter stamps `--layout`/`--region` |
 | ambient env / scope | explicit parameters (`scope`, `surface`, `HeadContext`) |
 | `componentStyle.css` | global `styles/palette.css` (no scoping, no injection) |
 | global options object | explicit options records per entry point |
@@ -67,10 +70,13 @@ into adapters.
 ## 4. Module layout
 
 - Core is **plain TypeScript** with no reactive primitives and no DOM
-  (compiler-enforced, see §21). One module = one concern — the module
+  runtime (compiler-enforced, see §21) — but core **does** ship CSS files and
+  define the DOM contract. One module = one concern — the module
   inventory is in §21.
 - Adapters mirror the same concern split in their own idiom: keys /
-  layout rendering / drag session / head renderers / strings.
+  layout rendering / drag session / head renderers / strings. They own the
+  rendering mechanism only: the emitted DOM must satisfy the end-result
+  contract (§§15–17, §19), not diverge from it.
 - Every adapter keeps the same public shape: a barrel, an IDE entry point that
   takes a container element, and a set of `render*` functions per control id.
 
@@ -86,7 +92,9 @@ library, which is out of scope.
 - No grouped-attribute objects to spread (`model.button`, `model.input`), no
   self-referential getters.
 - No `uiComponent` variant factory and no styled variants. The palette is
-  headless; any visual styling belongs to the adapter/head, never the core.
+  headless; `palette-default-*` presentation is logically head-owned but
+  physically hosted under `packages/core/styles/` for distribution (see §11).
+  Custom heads are exempt from its selectors (see `docs/creating-a-head.md` §2).
 - A registry entry holds a control id plus a configurator id — never a
   component. Adapters resolve ids to their own renderers.
 
@@ -136,14 +144,21 @@ The extraction keeps that split:
 We do **not** port `pure-glyf`; a demo can use emoji strings or register a
 factory that maps names to CSS classes.
 
-## 9. Portal pattern (drawer)
+## 9. Drawer placement (hierarchical sibling)
 
-A drawer renders a popup perpendicular to its parent axis, portaled into
-`document.body` (the adapter owns the portal). The popup re-inherits the
-context it needs — root location + region — so nested toolbars resolve their
-points and nested drawers invert their child axis correctly. `core` supplies the
+A drawer renders a popup perpendicular to its parent axis as a hierarchical
+sibling: trigger + popup inside `.palettable-drawer`, in the tool node itself
+(`packages/vanilla/src/templates.ts`: "no body portal, no JS geometry").
+The popup stamps `--layout`/`--region` so nested toolbars resolve their points
+and nested drawers invert their child axis correctly. `core` supplies the
 geometry decisions (`drawerChildAxis` / `drawerChildRegion`, §21 Phase 5) and the
-placements; the adapter only moves nodes.
+placements; the adapter only toggles `hidden` and positions via CSS.
+
+> Historical note: earlier docs described a `document.body` portal with
+> root-location re-inheritance. The code retired that — drawers die with their
+> trigger (`ide.ts`: "Hierarchical drawers die with their trigger (no body
+> portal)"). Do not reintroduce a portal without updating templates, head,
+> theme, and the e2e drawer specs.
 
 ## 10. Serialization
 
@@ -157,16 +172,24 @@ placements; the adapter only moves nodes.
   wrap it in their own reactivity at the call site, during init (never from a
   late handler).
 
-## 11. Styling — global CSS, never scoped or injected
+## 11. Styling — core-owned files, global, never injected
 
-- CSS is **always global** unless true component scoping is required. Palette
-  styles live in `packages/core/styles/`:
-  - `palette.css` — layout + edit chrome + drawer shell (core-owned selectors).
-  - `head-default.css` — the default visual theme (dark base + light override),
-    plus `head-dark.css` / `head-light.css` token sheets.
-  All are imported once by the host app (the reference demo imports all four in
-  `packages/vanilla/demo/main.ts`) — never injected at runtime, never duplicated
-  per instance.
+- All CSS ships from `packages/core/styles/` and is imported once by the host
+  app (the vanilla demo imports all four in `packages/vanilla/demo/main.ts`)
+  — never injected at runtime, never duplicated per instance, never owned by
+  an adapter:
+  - `palette.css` — **core-owned**: layout (`palette-ide`, borders, tracks,
+    toolbars, spaces) + edit chrome + drawer shell layout
+    (`.palettable-drawer__*`, paint via `--pd-drawer-*` tokens with dark
+    fallbacks so the shell renders even without a theme sheet).
+  - `head-default.css` — **logically head-owned, physically core-hosted**:
+    default-head structural chrome (`palette-default-*`, §§1–12). Adapters may
+    override or replace it, but the default head must emit the selectors it
+    styles. No raw colors — tokens only (see `docs/theming.md`).
+  - `head-dark.css` / `head-light.css` — **head theme tokens**: `--pd-*` on
+    `:root` (dark) re-set under `.palette-default-theme-light` (light),
+    including `--pd-drawer-*` popup paint. Import the base plus **one**
+    theme (dark applies when neither class does).
 - Selectors stay specific through class hierarchy (`.palette-ide.editing .toolbar:hover::before`),
   never bare names (`.active {`). No `data-palette-id` scoping: only one palette is editable at
   a time, so per-instance `<style>` elements are pure overhead.
@@ -210,7 +233,14 @@ inventory). What matters architecturally:
 
 ## 15. Layout rendering (Phase 5 — implemented)
 
-Core owns the **decisions and commits**; adapters own the **geometry and DOM**:
+Core owns the **decisions and commits**; adapters own the **rendering mechanism
+and geometry inputs** — not markup freedom. Every adapter must emit
+byte-equivalent contract chrome: `.toolbar-border[data-region]` hierarchy,
+`data-*-space-index` / `data-point` / `data-control`, `data-testid`s,
+`highlighted` / `hidden` / `editing` / `is-dimmed` states, `--layout` /
+`--region` vars, and the a11y roles/attrs core specifies. Custom heads are
+exempt from `palette-default-*` selectors (`docs/creating-a-head.md` §2);
+the default head is not.
 
 - Core (`packages/core/src/layout.ts`): track spacing math, toolbar moves,
   the veto predicates, the gap-highlight decisions, and the structural commits
@@ -237,7 +267,10 @@ Core owns the **decisions and commits**; adapters own the **geometry and DOM**:
   presenters: `renderButton` / `renderToggle` / `renderSelect` /
   `renderSegmented` / `renderSlider` / `renderStepper` / `renderStars` /
   `renderStatus` / `renderCommandBox` / `renderDrawer` /
-  `renderTheme` in `packages/vanilla/src/head.ts`.
+  `renderTheme` in `packages/vanilla/src/head.ts`. It is the reference DOM:
+  a new adapter (or custom head in the same app) may render differently
+  internally but must produce the same end-result contract (§15) to pass
+  conformance (§19).
 - A demo can **replace** a control (same control id, richer rendering) and
   **extend** the head with a new control id — the reference demo does both for
   the `number` family.
@@ -254,22 +287,51 @@ Core owns the **decisions and commits**; adapters own the **geometry and DOM**:
   `placement` come from the item `config`, and a **close-on-click** chain closes
   the clicked tool's drawer plus its `hover` ancestors
   (`drawerCloseChainIndices`).
-- The adapter owns the portal: the popup mounts into `document.body`, re-inherits
-  the root location + region so nested toolbars resolve their points and nested
-  drawers invert correctly, and `Escape` closes it.
+- The adapter owns drawer visibility, not placement: the popup is a
+  hierarchical sibling (no `document.body` portal — see §9), `Escape` closes
+  it, and open drawers are re-opened after structural rebuilds.
 - A collapse signal (a version counter) closes all open drawers synchronously.
 - A drawer's content is **one child `Track`** — several toolbars along the
   perpendicular axis with track spaces between them — so drawer toolbars are
   full drag participants; see `docs/layout-and-drag.md`.
+- **Open-state tracking across structural rebuilds.** A commit that lands on a
+  drawer DZ re-renders the enclosing border/track, which recreates the drawer
+  wrapper + popup nodes — and a fresh popup starts hidden. The vanilla adapter
+  therefore tracks open drawers by live `ToolbarItem` identity
+  (`openDrawerItems`, fed by the head's `onOpenDrawer`/`onCloseDrawer`
+  callbacks) and re-opens them at the end of every rebuild
+  (`reopenTrackedDrawers()`, called from `renderBorder` / `syncTrack` /
+  `renderParking`). Handlers driven by a commit must not close a drawer on a
+  **detached** target: the node the pointer was over is destroyed by the
+  rebuild, so `isConnected` is false and the containment answer is unknowable —
+  `closeDrawersOutside` leaves drawers alone and the next live-target move
+  decides.
+- **Layer hints must stay per-toolbar.** `will-change: transform` creates a
+  stacking context. A blanket `.palette-ide.dragging .toolbar { will-change:
+  transform }` trapped every drawer popup's `z-index: 211` inside its own bar,
+  so the popup painted *and hit-tested* below `.palette-ide-center` and a drag
+  into a drawer DZ read as "the drawer closed". The hint is now applied inline
+  by the adapter on the single toolbar that actually receives a transform
+  (`armSlide`'s rAF `flush` / `slideCleanup`).
 
 ## 18. Demo page (Stellar Outpost — current)
 
-The demo lives in `packages/vanilla/demo/` (setup demo):
-`palette.ts` (points, keys, three configurations + live layouts, ship roster),
-`main.ts` (page, `PaletteCore` + `createIDE`, persistence), `i18n.ts` (FR
-bundle), `icons.ts`.
+Shared definitions live in `@palettable/demo-core`
+(`packages/demo-core/src/`: `state.ts` types + `CONSUMER_DEFAULTS`,
+`ships.ts` roster, `points.ts` factory + `DemoActions` seam, `layouts.ts`
+configs, `keys.ts`, `storage.ts` keys, `i18n.ts` FR bundle, `icons.ts`
+dictionary). Ownership rule: demo-core owns definitions and data; adapters
+own components and chrome (DOM rendering, custom editors, configurator
+fields). Each adapter demo consumes demo-core via dev-dependencies and
+binds the `DemoActions` seam to its own reactivity. The vanilla demo
+imports demo-core directly (`demo/main.ts`); the only adapter-owned demo
+module left is `demo/icons.ts` (the DOM icon field renderer).
 
-- `palette.ts` defines the **Stellar Outpost** space-colony sim: colony values
+The vanilla demo lives in `packages/vanilla/demo/` (setup demo):
+`main.ts` (page, `PaletteCore` + `createIDE`, persistence — imports
+`@palettable/demo-core` directly), `icons.ts` (DOM icon field).
+
+- `points.ts` (demo-core) defines the **Stellar Outpost** space-colony sim: colony values
   (`autoOxygen`, `shieldGenerator`, `fastMode`, `colonyTheme`, `alertLevel`,
   `powerPriority`, `gameSpeed`, `taxRate`, `solarEfficiency`, `satisfaction`) +
   the mission clock + system `theme`/`locale` + `lastAction`, with run tools
@@ -308,7 +370,7 @@ bundle), `icons.ts`.
   its own single-slot track, the shape hydration produces. Parking rows splice
   into their own stack. `snapshotLayout`/`fromSerializedLayout` round-trip
   parking alongside borders. The demo ships three **configurations**
-  (`demoConfigs` in `packages/vanilla/demo/palette.ts`): `rw-combobox`,
+  (`demoConfigs` in `packages/demo-core/src/layouts.ts`): `rw-combobox`,
   `rw-command-first`, `ro-combobox` — each loaded by a plain preset command
   button (no toggle state); `demoLayoutFor(id)` flips the reactive
   `demoEditable` flag. A "Save layout" / "Load layout" button group round-trips
@@ -326,10 +388,21 @@ bundle), `icons.ts`.
 
 ## 19. E2E coverage (Phase 10 — conformance suite)
 
-One Playwright project per adapter demo, each on its own port; all run the same
-`tests/e2e/*.spec.ts` — that shared suite **is** the adapter conformance
-contract. The reference demo is at `:4174`, with a `vanilla-smoke` project for
-the vanilla-only spec.
+Two Playwright projects against the vanilla demo (`:4174`), split by contract
+layer (`playwright.config.ts`):
+
+- `vanilla` (`testIgnore: /default-head\.spec\.ts/`) — the **adapter conformance
+  contract**. Every adapter must satisfy these specs with byte-equivalent DOM
+  (§15): layout hierarchy, DZ indices, testids, states, vars, a11y.
+- `default-head` (`testMatch: /default-head\.spec\.ts/`) — **default-head visual
+  details only** (`palette-default-*` overlays, radii, sliders, selects,
+  theme tool). Isolated because custom heads are exempt from these selectors
+  by design — head presentation, not core semantics.
+
+Future adapters add one Playwright project per demo, each on its own port,
+running the same conformance subset (the `vanilla` project specs, not
+`default-head`) — that shared subset **is** the adapter conformance
+contract. The reference demo is at `:4174`.
 
 - `e2e/palette.spec.ts` (7): command-box combobox runs commands inline +
   `.palette-ide.editing` chrome, drawer open with axis inversion (left drawer →
@@ -353,7 +426,7 @@ the vanilla-only spec.
   item-space DZ (left border — the centered console panel covers the top
   toolbar's right-hand tools; hovers a tool, never a zero-size gap; steps
   the pointer; JS-clicks the Terminal button since edit guards cover it).
-- `e2e/smoke.spec.ts` (1) + `e2e/vanilla.spec.ts` (vanilla-only smoke):
+- `e2e/smoke.spec.ts` (1) + `e2e/default-head.spec.ts` (default-head visual):
   heading + IDE chrome + combobox + work-zone on first paint.
 - Conformance: the suite has since grown well past the Phase 10 gate (adaptive
   axis specs, dwell, parking, drawer drag, whole-toolbar slide, ship context) —
@@ -441,8 +514,8 @@ but a build guarantee:
   host globals. Timer handles stay opaque (`unknown`) — pass them back to
   `clearHostTimeout`.
 - Consequence for Phase 2: `drag-session.ts` (`HTMLElement`, pointer events) does
-  **not** move into core. Drag sessions live in the adapters (`packages/vanilla`,
-  `packages/vanilla`); core exposes only structural commits
+  **not** move into core. Drag sessions live in the adapters (`packages/vanilla`);
+  core exposes only structural commits
   (`PaletteLayoutTree.moveItem` / `moveToolbar` / `insertItem` / `removeItem`).
 
 ### Core contracts
@@ -459,7 +532,7 @@ but a build guarantee:
   source point: `enum-from` (present any value as an enum / enum subset).
   Matching uses `Object.is`, the same contract as `PaletteStateStore.set`.
   A spec may also carry a virtual **inline** (`PointTarget = string |
-  VirtualPoint` in `specs.ts`): the definition object lives directly in
+  VirtualPoint` in `virtual.ts`): the definition object lives directly in
   `ToolToolbarItem` / `SerializedToolbarItem` `tool`, behaves like the same
   definition registered under its `id` (validated via `assertValidVirtual`,
   resolved via `PaletteCore.resolveTargetVirtual`), but its lifetime is the
@@ -528,7 +601,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `identifiers.ts` | `IconToken`, `Keystroke`, `Unsubscribe`, listener types |
 | `type.ts` | `EnumOption`, `DefaultTypeMap`, `TypeMap`, constraints (declaration-merging extension point) |
 | `points.ts` | `PointBase`, `ActionPoint`, `ValuedPoint` (no `defaultValue` — core holds no defaults; absent key = skeleton) + per-type aliases, `NothingPoint` (`type: 'nothing'` — context + enablement only; `isNothingPoint` guard), `isActionPoint` / `isValuedPoint` (type-guarded, `false` for nothing-points), `ROOT_CONTEXT` + `isRootContext` (`''` value, `'root'` alias); `PointBase.uses` (optional bags, load-bearing in Phase 8) + functional `can(...bags)` on all kinds (omitted = enabled) |
-| `specs.ts` | `PointSpec`, `PointTarget`, `isInlineSpec`, `canonicalSpecId`, `parsePointSpec`, `canonicalPointId` |
+| `virtual.ts` | `VirtualPoint` / `EnumFromDefinition`, `isInlineSpec`, `assertValidVirtual`, `matchEnumOption`, `readEnumFrom`, `resolveEnumSourceValue` (`Object.is` matching) |
 | `store.ts` | `PaletteStateStore` (single source of truth, starts empty — no hydration from definitions, no defaults; `has`/`require` strict helpers, `get` lenient skeleton probe) + `setTree` batching (all writes land before any listener runs, returns changed keys). Phase 9 removed the dead `getOr` / `update` helpers (tests-only, zero production callers). Data-owning removed `reset`/`resetAll` (consumer resets via `setMany`). |
 | `layout.ts` | layout data types, `PaletteLayoutTree`, `defaultLayoutFromPoints`, `validateSerializedLayout`, `isDrawerItem`, `snapshotLayout` (exported canonical live→serialized serializer — the SSR snapshot path routes through it, no private duplicate), pure track-space math (`clampUnit`, `actualTrackSpaceAt`, `insert/remove/resizeToolbar`, `insertTrackWithToolbar`, `removeEmptyTrack`, `removeParkedToolbar`, `canonicalItemTool`, `itemFingerprint`, `findOwnershipViolations`), the **op stream** (`LayoutOp` / `LayoutPruneVictim` / `subscribeOps`), the **drag-state surface** (`DraggingState` / `DragOrigin` / `DragMode`, the veto predicates `isItemSpaceFree`, `nearestFreeItemSpaceBefore/After`, `isDraggingWholeToolbar`, `draggingEmptiesTrackIndex`, `draggingWholeParkingRow`, the commits `commitDraggedToItemSpace` / `commitDraggedToTrackSpace` / `commitDraggedToStackSpace` / `commitDraggedToParking(Row)`, `commitDraggedToDrawer`), and the pure gap-highlight decisions (`borderStackHighlight`, `itemSpaceHighlight`, `trackSpaceHighlight`, `parkingFlanks` / `stackFlanks` → `GapHighlight`); item `tool` is `PointTarget` (string ref or inline virtual), serialized `tool` is `string \| VirtualPoint`, clone/serialize deep-copy inline definitions. A **drawer's content is one `Track`** (`DrawerToolbarItem.toolbar: Track` — several toolbars in line along the perpendicular child axis, with track spaces between them), so drawer toolbars participate in `moveItem`/`moveToolbar` like any other |
 | `configuration.ts` | `configuration` magic numbers + `PaletteConfiguration` (Phase 2, verbatim) |
@@ -547,7 +620,7 @@ One module per concern — the 980-line `palette/types.ts` was split, not copied
 | `context.ts` | `ValuesBag` (flat key/value storage: frozen `get`, `set`/`setTree` one-notify, global + per-key `subscribe`, `clearListeners`, `lock`/`unlock` → `PaletteWriteError`), `ContextName` (`ROOT_CONTEXT` = root), `BagListener`/`BagKeyListener` (Phase 8; same Map + `Object.is` + snapshot-iteration + async re-throw discipline as the store) |
 | `context-display.ts` | pure `(boundValues, boundBags)` resolvers: `BoundValues` / `BoundBags` types (folded in from `context-display-types.ts` in Phase 9 — a type-only import tree-shakes identically in one file), `dualSourceValue` (selection-bag-wins precedence), `boundValueAt`/`boundBagAt`/`readBoundBagKey` (never throw on missing context), `missingContext` sentinel (no mirroring, no virtual chaining) |
 | `styles/palette.css` | layout + edit chrome (Phase 6, extracted verbatim; global selectors unchanged) |
-| `theme/head-default.css` (`head-dark.css`, `head-light.css`) | dark base + light override (Phase 6, extracted verbatim; stay in sync per `docs/theming.md`) |
+| `styles/head-default.css` (`styles/head-dark.css`, `styles/head-light.css`) | default-head structure + dark/light `--pd-*` tokens (Phase 6, extracted verbatim; stay in sync per `docs/theming.md`) |
 
 ### Phase 7 status (SSR render model — landed 2026-09-14)
 
@@ -653,8 +726,8 @@ map (`bagForwards`):
 First conformance gate: the reference demo renders the Stellar Outpost demo and
 satisfies `tests/e2e/` — the suite every adapter must pass. One Playwright
 project per adapter demo, each on its own port (the reference demo is at
-`:4174`, plus a `vanilla-smoke` project for the vanilla-only spec). Net: +4
-files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`, `demo/palette.ts`), demo
+`:4174`, plus a `default-head` project for the default-head visual spec). Net: +4
+files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`, `demo/main.ts`), demo
 page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
 
 - `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (the Phase 2
@@ -670,8 +743,8 @@ page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
   CommandBox/Drawer/Theme` + `renderHeadItem` dispatch + `surfaceForRegion`.
   Drawer: icon-only trigger (label never rendered as text — accessible name +
   tooltip only), chevron ▸/▾, child axis perpendicular, popup `is-${childAxis}`
-  + `data-placement=center` + role dialog, body-portaled overlay, Escape closes
-  + focus trigger. CommandBox: `command-box-combobox/input/results` testids,
+  + `data-placement=center` + role dialog, hierarchical sibling (no portal),
+  Escape closes + focus trigger. CommandBox: `command-box-combobox/input/results` testids,
   ✎ open-configurator button → console edit mode, Enter runs first filtered
   entry.
 - `vanilla/src/ide.ts` — `createIDE(container, options)` per the Phase 10
@@ -691,15 +764,15 @@ page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
   container) so shortcuts fire even when focus is outside the IDE (body, demo
   chrome); typing still wins via `isEditableTarget`, consumed events via
   `defaultPrevented`, teardown on `dispose()`. Subscribes values/layout/console.
-- `vanilla/demo/palette.ts` — the demo's point definitions: the 15 colony
-  points (incl. a `console` run point), `demoKeys`, the 3 configs
-  (`rw-combobox` / `rw-command-first` / `ro-combobox`) + layouts, `demoState`
-  + `resetColony`/`isColonyDirty`.
+- `demo-core/src/points.ts` — the 15 colony points (incl. a `console` run point)
+  via the `demoPoints(actions)` factory + `DemoActions` seam; `demo-core`
+  also holds `demoKeys`, the 3 configs (`rw-combobox` / `rw-command-first` /
+  `ro-combobox`) + layouts, `demoState` factory + `resetColony`/`isColonyDirty`.
 - `vanilla/demo/main.ts` — parity page: demo-bar (heading, 3 mode buttons,
-  save/load, last-action), `PaletteCore` + `ConsoleStore` +
-  `bindConsoleToggle`, `createIDE` + work-zone (hero, pills, status panel,
-  hint), `core.values` → `demoState` sync + theme + mm:ss clock, `localStorage`
-  persistence (`palettable-demo-layout-v1` + `validateSerializedLayout`).
+  save/load, last-action), `PaletteCore` + `ConsoleStore`, `createIDE` +
+  work-zone (hero, pills, status panel, hint), `core.values` → lens sync +
+  theme + mm:ss clock, `localStorage` persistence
+  (`palettable-demo-layout-v1` + `validateSerializedLayout`).
 - E2E: the 2 catalogue-drag specs were stale (movement stripped for restart —
   it is specced in `docs/movements.md`; rows are click-to-select, zero
   `draggable=` in `src`). Replaced with click-to-select assertions; the suite is
