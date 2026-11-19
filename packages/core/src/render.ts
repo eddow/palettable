@@ -1,7 +1,7 @@
 /**
  * `@palettable/core` — SSR render model (Phase 7).
  *
- * Implements `plans/ssr.md` §4.3–§4.8 on top of the Phases 3–5 surface:
+ * Implements `docs/specs/ssr.md` §4.3–§4.8 on top of the Phases 3–5 surface:
  * a pure, synchronous resolver from (definitions + virtuals + layout +
  * values) to a render tree, plus an atomic snapshot, configuration pinning,
  * custom-type value codecs, and the import-graph / determinism guarantees.

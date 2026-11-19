@@ -1,7 +1,7 @@
 /**
  * `@palettable/core` — palette wire descriptors + hydration inputs (Phase 3).
  *
- * SSR wire format (`plans/ssr.md` §4.1–§4.2): point descriptors without `run`
+ * SSR wire format (`docs/specs/ssr.md` §4.1–§4.2): point descriptors without `run`
  * closures, plus `initialValues` validation. Rendering needs only the
  * descriptor; `run()` is unreachable from the render path by construction.
  *

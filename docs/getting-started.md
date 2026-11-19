@@ -19,7 +19,7 @@ pnpm install
 | `pnpm lint` | Biome check (tabs, single quotes, width 100) |
 | `pnpm build` / `pnpm preview` | Production build / local preview |
 
-Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
+Scratch files go in `tmp/` (git-ignored), never `/tmp`.
 
 ## Demo tour (`packages/vanilla/demo/main.ts`)
 

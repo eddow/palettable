@@ -18,6 +18,7 @@ import {
 	type PaletteRegion,
 	type SurfaceContext,
 	type ToolbarItem,
+	type Track,
 	type ValuesBag,
 } from '@palettable/core'
 import type { IdeStrings } from './strings.js'
@@ -57,6 +58,24 @@ export type HeadContext = {
 	readonly iconResolver?: IconResolver
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
+	/** Track an open drawer popup so the adapter can reposition it on layout change.
+	 * The live drawer `ToolbarItem` is the identity: a structural rebuild
+	 * recreates the wrapper/popup nodes, so the adapter re-opens by item. */
+	readonly onOpenDrawer?: (item: ToolbarItem) => void
+	readonly onCloseDrawer?: (item: ToolbarItem) => void
+	readonly renderToolbar?: (
+		toolbar: Track,
+		axis: 'horizontal' | 'vertical',
+		region: PaletteRegion
+	) => unknown
+	/** Edit-mode drag state for drawer hover-open (threaded from the adapter). */
+	readonly isEditing?: () => boolean
+	readonly isDragging?: () => boolean
+	/** Hierarchy close: close open drawers not containing `target`. */
+	readonly closeUnrelatedDrawers?: (target: EventTarget | null) => void
+	/** Drawer-child hover routing (drag paint + commit inside popups). */
+	readonly onDrawerPointermove?: (event: PointerEvent) => void
+	readonly onDrawerPointerover?: (event: PointerEvent) => void
 }
 
 /** Resolve the point id a tool item binds (canonical spec id). */

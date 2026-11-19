@@ -2,7 +2,7 @@
  * `@palettable/core` — context bags (Phase 8).
  *
  * `ValuesBag` is the flat, named key/value storage behind
- * `plans/context.md` §§1–3: same `Map` + `Object.is` + snapshot-iteration +
+ * `docs/specs/context.md` §§1–3: same `Map` + `Object.is` + snapshot-iteration +
  * async error re-throw discipline as `PaletteStateStore`, but with the
  * context contract — `get()` returns `Object.freeze()`-wrapped values,
  * `setTree` notifies once with the changed-key array, and the global

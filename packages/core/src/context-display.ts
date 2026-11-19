@@ -2,7 +2,7 @@
  * `@palettable/core` — pure context display resolvers (Phase 8).
  *
  * Headless derivation helpers over the `(boundValues, boundBags)`
- * param-array shape (`plans/context.md` §2.2, §4 step 6): no
+ * param-array shape (`docs/specs/context.md` §2.2, §4 step 6): no
  * value-mirroring, no virtual chaining — display follows context through
  * derivation. Render never throws on a missing bag (`undefined` slot =
  * "context absent" → disabled + placeholder unless the resolver defines

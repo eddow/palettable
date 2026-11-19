@@ -11,10 +11,8 @@ phase history.
 - **@palettable/core** = the headless layer: points, values store, layout tree,
   movement commits, command-box builders, console state, presenters, SSR render
   model, context bags, global CSS.
-- **Adapters** render the core: `@palettable/vanilla` (plain DOM, the reference
-  adapter + demo), `@palettable/vue` and `@palettable/svelte` (created in
-  `plans/extraction.md` Phases 11–12). Each imports `core` only — never the
-  reverse, never each other.
+- **Adapters** render core through plain DOM (`@palettable/vanilla`) or Vue
+  components (`@palettable/vue`). Each depends independently on core.
 - **Headless** contract: core owns state, a11y semantics, tool
   resolution, editing, and drag/drop — plus the HTML end-result contract
   (hierarchy, classes, `data-*` indices, testids, `--layout`/`--region` vars)
@@ -481,7 +479,7 @@ all identity checks through core helpers rather than through proxied references.
 - Type-check: `pnpm check` (per-package `tsc --noEmit`, via `pnpm --recursive`).
 - Unit: `pnpm test` (Vitest — `core` runs in `node`, adapters in `jsdom`).
 - E2E: `pnpm test:e2e` (Playwright dev server on `:4174`).
-- Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
+- Scratch files go in `tmp/` (git-ignored), never `/tmp`.
 
 ### Gotchas (recorded)
 
@@ -491,10 +489,8 @@ all identity checks through core helpers rather than through proxied references.
 
 ## 21. `@palettable/core` — headless package
 
-`packages/core` is the framework-agnostic headless layer. Every adapter
-(`packages/vanilla` today; `packages/vue` and `packages/svelte` in
-`plans/extraction.md` Phases 11–12) imports core, never the reverse and never
-each other. Core stays DOM-free and demo-free.
+`packages/core` is the framework-agnostic headless layer used by
+`packages/vanilla` and `packages/vue`. Core stays DOM-free and demo-free.
 
 ### DOM-free rule — **decided: strictly DOM-free, compiler-enforced**
 

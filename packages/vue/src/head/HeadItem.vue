@@ -13,6 +13,7 @@ import DrawerTool from './DrawerTool.vue'
 import SegmentedTool from './SegmentedTool.vue'
 import SelectTool from './SelectTool.vue'
 import SliderTool from './SliderTool.vue'
+import StarsTool from './StarsTool.vue'
 import StatusTool from './StatusTool.vue'
 import StepperTool from './StepperTool.vue'
 import ThemeTool from './ThemeTool.vue'
@@ -35,6 +36,7 @@ function controlOf(context: HeadContext): string | undefined {
 		:context="context"
 	/>
 	<StepperTool v-else-if="controlOf(context) === 'stepper'" :context="context" />
+	<StarsTool v-else-if="controlOf(context) === 'stars'" :context="context" />
 	<StatusTool v-else-if="controlOf(context) === 'status'" :context="context" />
 	<ThemeTool v-else-if="controlOf(context) === 'theme'" :context="context" />
 	<CommandBoxTool v-else-if="controlOf(context) === 'commandBox'" :context="context" />

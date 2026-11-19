@@ -49,12 +49,11 @@ Run: `pnpm --filter @palettable/vanilla test`. Config:
 
 ## E2E (Playwright)
 
-Run: `pnpm test:e2e`. `playwright.config.ts` serves the vanilla demo
-(vite dev on `:4174`) — plus a `default-head` project for the default-head visual spec.
-`test.beforeEach` clears `localStorage` and reloads. The suite is the
-**adapter conformance contract**: every adapter (vue, svelte — see
-`plans/extraction.md`) must satisfy the same specs — new highlight/commit
-behaviour lands with its spec first, core unit anchors second.
+Run `pnpm test:e2e`. Playwright serves vanilla on port 4174 and Vue on port
+4175. Both projects run the shared adapter conformance suite. The
+`default-head` project runs the default-head visual spec against vanilla.
+`test.beforeEach` clears `localStorage` and reloads. Add shared browser
+coverage for new highlight or commit behaviour and cover its decisions in core unit tests.
 
 - `e2e/smoke.spec.ts` (1): home page renders.
 - `e2e/palette.spec.ts` (5): command-box combobox runs commands

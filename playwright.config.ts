@@ -13,12 +13,18 @@ export default defineConfig({
 	use: {
 		trace: 'on-first-retry',
 	},
-	// Vanilla demo on :4174, plus a `default-head` project for the
-	// default-head visual spec (head presentation, not core semantics).
+	// Vanilla demo on :4174, Vue demo on :4175, plus a `default-head`
+	// project for the default-head visual spec (head presentation, not
+	// core semantics).
 	projects: [
 		{
 			name: 'vanilla',
 			use: { baseURL: 'http://localhost:4174' },
+			testIgnore: /default-head\.spec\.ts/,
+		},
+		{
+			name: 'vue',
+			use: { baseURL: 'http://localhost:4175' },
 			testIgnore: /default-head\.spec\.ts/,
 		},
 		{
@@ -33,6 +39,12 @@ export default defineConfig({
 			// rollup library), so e2e serves the vite dev server (:4174).
 			command: 'pnpm dev:vanilla',
 			url: 'http://localhost:4174',
+			reuseExistingServer: !process.env.CI,
+		},
+		{
+			// Vue demo serves its own vite dev server (:4175).
+			command: 'pnpm dev:vue',
+			url: 'http://localhost:4175',
 			reuseExistingServer: !process.env.CI,
 		},
 	],

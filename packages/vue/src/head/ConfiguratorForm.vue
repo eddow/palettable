@@ -135,7 +135,7 @@ function onDelete(): void {
 		</div>
 		<div class="palette-default-config-row">
 			<div class="palette-default-config-key"><strong>{{ strings.iconKey }}</strong></div>
-			<div class="palette-default-config-value"><input :value="typeof config.icon === 'string' ? config.icon : ''" @input="setConfig('icon', ($event.target as HTMLInputElement).value)" /></div>
+			<div class="palette-default-config-value"><input :value="typeof config.icon === 'string' ? config.icon : ''" :list="iconChoices !== undefined && iconChoices.length > 0 ? 'palette-config-icon-choices' : undefined" @input="setConfig('icon', ($event.target as HTMLInputElement).value)" /><datalist v-if="iconChoices !== undefined && iconChoices.length > 0" id="palette-config-icon-choices"><option v-for="choice in iconChoices" :key="choice" :value="choice" /></datalist></div>
 		</div>
 		<div class="palette-default-config-row">
 			<div class="palette-default-config-key"><strong>{{ strings.hintKey }}</strong></div>

@@ -57,6 +57,50 @@ export function startDragSession(options: DragSessionOptions): () => void {
 
 	sourceEvent.preventDefault()
 
+	// Re-dispatch every window pointermove to the element under the cursor
+	// so Vue template listeners (`@pointermove` on bars/borders/tracks)
+	// fire for the hovered element even when the pointer is implicitly
+	// captured to the drag-origin guard (touch/pen + Playwright synthetic
+	// mouse). Vanilla relies on bubbling from the element under the cursor;
+	// capture retargeting freezes `event.target` on the origin instead.
+	// The re-dispatched event is a real `PointerEvent` (not synthetic), so
+	// `elementFromPoint` hit-testing in the handlers still resolves the
+	// live element. Playwright's synthetic mouse is trusted in Chromium
+	// (`isTrusted: true`), so no `isTrusted` gate — the `under !== target`
+	// check already prevents double-handling when no capture is active.
+	// Dedup: the clone bubbles through every nested level (track → border
+	// → bar), and each level's Vue listener would send its own `over()`
+	// for the same physical move — one move must equal one `over()`
+	// (vanilla's window listeners fire once per move; without this the
+	// same gap commits twice: extract, then a duplicate slide-relocation).
+	// Stamp the clone; handlers drop events they already saw.
+	let lastDispatchStamp = ''
+	function redispatch(event: PointerEvent): void {
+		if (typeof ownerDocument.elementFromPoint !== 'function') return
+		if (event.clientX === undefined || event.clientY === undefined) return
+		const under = ownerDocument.elementFromPoint(event.clientX, event.clientY)
+		if (!(under instanceof HTMLElement)) return
+		if (under === event.target) return
+		const stamp = `${event.clientX}:${event.clientY}`
+		if (stamp === lastDispatchStamp) return
+		lastDispatchStamp = stamp
+		const clone = new PointerEvent('pointermove', {
+			bubbles: true,
+			cancelable: true,
+			clientX: event.clientX,
+			clientY: event.clientY,
+			pointerId: event.pointerId,
+			pointerType: event.pointerType,
+			buttons: event.buttons,
+			ctrlKey: event.ctrlKey,
+			shiftKey: event.shiftKey,
+			altKey: event.altKey,
+			metaKey: event.metaKey,
+		})
+		;(clone as PointerEvent & { __palettableRedispatch?: string }).__palettableRedispatch = stamp
+		under.dispatchEvent(clone)
+	}
+
 	function stop(reason: DragStopReason, event?: Event): void {
 		if (stopped) return
 		stopped = true
@@ -75,6 +119,7 @@ export function startDragSession(options: DragSessionOptions): () => void {
 			stop('buttons', event)
 			return
 		}
+		redispatch(event)
 		options.onMove({ ...snapshot }, event)
 	}
 

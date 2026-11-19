@@ -90,12 +90,20 @@ export function useValueLens<T extends Record<string, unknown>>(
 	const onChange = options?.onChange
 	const backing: Record<string, unknown> = { ...(options?.initial ?? {}) }
 	let disposed = false
+	// Declared before `pullKey` (which writes through to it): `const`
+	// hoisting means the binding exists at subscribe time but the
+	// initializer runs here — notify can only fire after this line.
+	const state = reactive(backing) as T
 
 	const pullKey = (key: string): void => {
 		if (!isBagKey(key)) return
 		const value = bag.get(key)
 		if (Object.is(backing[key], value)) return
 		backing[key] = value
+		// Write through to the reactive state (the proxy reads the bag
+		// first, so without this the component never re-renders on
+		// bag-notify — the bag changed but the reactive dep didn't).
+		;(state as Record<string, unknown>)[key] = value
 		onChange?.(key, value)
 	}
 
@@ -123,7 +131,9 @@ export function useValueLens<T extends Record<string, unknown>>(
 		}) as (...args: never[]) => void)
 	)
 
-	const state = reactive(backing) as T
+	// `state` is declared above (before `pullKey`); this duplicate
+	// declaration was left by the write-through edit — remove on sight.
+	void reactive(backing)
 
 	// Wrap the reactive state so bag-key writes route through `bag.set`
 	// (render via notify) while local keys write the state directly.

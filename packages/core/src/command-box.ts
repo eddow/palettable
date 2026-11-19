@@ -3,7 +3,7 @@
  *
  * Pure over point descriptors: no closures in the SSR path (the entry list
  * itself is client-only — the box shell is SSR, entries are not; see
- * `plans/ssr.md` §8). Entries carry `uses` and the renderer filters/resolves
+ * `docs/specs/ssr.md` §8). Entries carry `uses` and the renderer filters/resolves
  * at render time, never build-time precompile (Context §2.7); commands on
  * nothing-points with `uses: []`/`undefined` are always present.
  *
@@ -15,12 +15,12 @@
  *   adapters execute them via `PaletteCore.run(runnable)`.
  * - Catalogue drag payloads (`PALETTE_CATALOG_DRAG_MIME`,
  *   `serialize/parseCatalogDragPayload`, `paletteToolbarItemFromCatalogPayload`,
- *   `paletteCatalogEntries`) are **deleted per `plans/simplify.md`** (dead
+ *   `paletteCatalogEntries`) are **deleted per `docs/specs/simplify.md`** (dead
  *   code — zero `draggable=` in `src`): rows are click-to-select, not
  *   draggable. Only runnable payloads survive as plain `{ kind: 'runnable', runnable }`
  *   data (no JSON helpers — adapters serialize if they need to).
  * - `commandBoxEnumCommands` / `per-value` is **deleted per
- *   `plans/simplify.md`** (never set by demo/tools): enum catalog always
+ *   `docs/specs/simplify.md`** (never set by demo/tools): enum catalog always
  *   collapses to one tool-label row.
  * - `paletteToolbarItemFromSpec` / `paletteToolbarItemFromDerivedVariant`
  *   (which resolve control registries + components) stay adapter-owned —

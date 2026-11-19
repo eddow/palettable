@@ -18,7 +18,7 @@
  * (`config.closeOnClick` + hover ancestors) runs on the bubbling
  * `palettable-drawer-item-activate` event. Outside-click + Escape close.
  */
-import { computed, onBeforeUnmount, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import {
 	configuration,
 	drawerChildAxis,
@@ -28,6 +28,7 @@ import {
 	drawerOpenOf,
 	isDrawerItem,
 	type PaletteRegion,
+	type Toolbar,
 	type ToolbarItem,
 	type Track,
 } from '@palettable/core'
@@ -40,11 +41,13 @@ import {
 	resolveIcon,
 } from '../head.js'
 import type { HeadContext } from '../head.js'
+import DrawerChildTrack from '../layout/DrawerChildTrack.vue'
 
 const props = defineProps<{
 	context: HeadContext
 	renderToolbar?: (track: Track, axis: 'horizontal' | 'vertical', region: PaletteRegion) => unknown
 }>()
+void props
 
 const wrapperRef = useTemplateRef<HTMLElement>('wrapper')
 const triggerRef = useTemplateRef<HTMLButtonElement>('trigger')
@@ -110,6 +113,15 @@ const childTrack = computed<Track>(() =>
 	isDrawerItem(props.context.item) ? props.context.item.toolbar : []
 )
 
+function childContextFor(toolbar: Toolbar, item: ToolbarItem): HeadContext {
+	return {
+		...props.context,
+		item,
+		surface: { axis: childAxis.value, region: childRegion.value },
+		region: childRegion.value,
+	}
+}
+
 function close(): void {
 	if (!open.value) return
 	open.value = false
@@ -121,7 +133,7 @@ function close(): void {
 		popup.style.setProperty('--region', childRegion.value)
 	}
 	triggerRef.value?.setAttribute('aria-expanded', 'false')
-	props.context.onCloseDrawer?.(props.context.item, triggerRef.value as HTMLElement)
+	props.context.onCloseDrawer?.(props.context.item)
 }
 
 function openPopup(): void {
@@ -169,12 +181,7 @@ function openPopup(): void {
 	}
 	triggerRef.value?.setAttribute('aria-expanded', 'true')
 	if (props.context.surface.axis !== 'both') {
-		props.context.onOpenDrawer?.(
-			props.context.item,
-			triggerRef.value as HTMLElement,
-			popup as HTMLElement,
-			props.context.surface.axis
-		)
+		props.context.onOpenDrawer?.(props.context.item)
 	}
 }
 
@@ -225,13 +232,15 @@ function onDragHover(event: Event): void {
 
 function onWrapperPointerover(): void {
 	if (props.context.isEditing?.() !== true) return
-	if (props.context.isDragging?.() === true) return
 	if (openMode.value === 'hover') cancelHoverClose()
 	openPopup()
 }
 
-function onPopupPointerover(): void {
+function onPopupPointerover(event: Event): void {
 	if (props.context.isEditing?.() !== true) return
+	// Popup-inner hovers bubble through the outer bar too — keep the drawer
+	// open and stop the bar/border hierarchy close from shutting it.
+	event.stopPropagation()
 	openPopup()
 }
 
@@ -311,7 +320,18 @@ function exposeClose(): void {
 	}
 	expando.__drawerCloseOnClick = closeOnClick.value
 	expando.__drawerOpenMode = openMode.value
+	// Re-open across structural commits: the shell re-renders the drawer
+	// subtree on every `structure` event (fresh popup starts hidden), so it
+	// calls the live `__openDrawer` for tracked items. Register the fresh
+	// wrapper when it is already tracked as open.
+	if (open.value) props.context.onOpenDrawer?.(props.context.item)
 }
+
+onMounted(exposeClose)
+watch([openMode, closeOnClick], exposeClose)
+watch(open, (isOpen) => {
+	if (isOpen) exposeClose()
+})
 </script>
 
 <template>
@@ -321,8 +341,6 @@ function exposeClose(): void {
 		@palettable-drawer-drag-hover="onDragHover"
 		@pointerover="onWrapperPointerover"
 		@palettable-drawer-item-activate="onActivate"
-		@vue:mounted="exposeClose"
-		@vue:updated="exposeClose"
 	>
 		<button
 			ref="trigger"
@@ -353,9 +371,15 @@ function exposeClose(): void {
 			:track="childTrack"
 			:axis="childAxis"
 			:region="childRegion"
-		><component
-			v-if="renderToolbar !== undefined"
-			:is="renderToolbar(childTrack, childAxis, childRegion)"
+		><DrawerChildTrack
+			:track="childTrack"
+			:axis="childAxis"
+			:region="childRegion"
+			:editing="context.isEditing?.() ?? false"
+			:context-for="(toolbar, item) => childContextFor(toolbar, item)"
+			:inspected-item="undefined"
+			@drawer-pointermove="(event) => context.onDrawerPointermove?.(event)"
+			@drawer-pointerover="(event) => context.onDrawerPointerover?.(event)"
 		/></slot></div>
 	</div>
 </template>

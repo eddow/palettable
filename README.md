@@ -53,7 +53,7 @@ pnpm install
 | `pnpm lint` / `pnpm lint:fix` | Biome check / fix (tabs, single quotes) |
 | `pnpm preview:vanilla` | Preview production builds |
 
-Scratch files go in `sandbox/` (git-ignored), never `/tmp`.
+Scratch files go in `tmp/` (git-ignored), never `/tmp`.
 
 ## Minimal usage
 
@@ -119,9 +119,8 @@ Start with `docs/getting-started.md` (setup, demo tour, first palette), then:
 - `docs/theming.md` — stylesheets, tokens, demo wiring
 - `docs/testing.md` — unit + e2e inventory, gotchas
 
-Active work lives in `plans/` (`extraction.md`, `clarifications.md`). Per
-`AGENTS.md`: implement from `/plans/`, then migrate permanent decisions into
-`/docs/` (and delete the plan file).
+Active work follows the [publication roadmap](docs/specs/publication.md).
+Verified architectural decisions and usage instructions live in `docs/`.
 
 ## Testing
 
@@ -131,11 +130,8 @@ Active work lives in `plans/` (`extraction.md`, `clarifications.md`). Per
 
 ## Status
 
-Active stack: framework-agnostic `core` + the vanilla-DOM adapter — the
-reference adapter and demo, plus its drift specs.
-
-Next: the **vue** adapter (Phase 11) and a fresh **svelte** adapter
-(Phase 12) — see `plans/extraction.md`.
+Core, vanilla and Vue are in development for their first public release.
+Both adapters have a Stellar Outpost demo and run the shared browser suite.
 
 ## License
 

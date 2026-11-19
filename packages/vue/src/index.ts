@@ -6,6 +6,7 @@
  * re-renders Vue components on change. Pointer math, drag sessions and head
  * components live here — never in core.
  */
+export * from './add-item.js'
 export * from './drag-session.js'
 export * from './head.js'
 export * from './highlight.js'

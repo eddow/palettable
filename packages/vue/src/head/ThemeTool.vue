@@ -9,7 +9,7 @@
  * via `applyThemeSetting`) — never through `core.values`. Click cycles
  * light → dark → system, recomputed fresh each time.
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { themePresenter } from '@palettable/core'
 import { applyThemeSetting } from '../theme.js'
 import { boundOf, pointIdOf, readThemeSetting, resolveIcon } from '../head.js'
@@ -36,9 +36,11 @@ function apply(settingValue: 'light' | 'dark' | 'system'): void {
 
 // Apply the resolved theme on mount (mirrors the vanilla render side-effect
 // so body-portaled drawer popups follow the same switch).
-if (typeof document !== 'undefined') {
-	applyThemeSetting(document.documentElement, setting.value)
-}
+onMounted(() => {
+	if (typeof document !== 'undefined') {
+		applyThemeSetting(document.documentElement, setting.value)
+	}
+})
 
 function onClick(): void {
 	const { core, item, display } = props.context

@@ -11,11 +11,15 @@
  * live border array — structural commits re-render via layout-op
  * subscriptions in the IDE shell, never by position trust.
  */
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import type { Border, PaletteRegion, Toolbar, ToolbarItem, Track } from '@palettable/core'
 import BorderTrack from './BorderTrack.vue'
 import type { HeadContext } from '../head.js'
 import type { IdeStrings } from '../strings.js'
+import { trackKeyOf } from './identity-key.js'
+import { layoutRevisionKey } from './revision-key.js'
+
+const revision = inject(layoutRevisionKey, undefined)
 
 const props = defineProps<{
 	border: Border
@@ -31,9 +35,11 @@ const emit = defineEmits<{
 	guardPointerdown: [event: PointerEvent, toolbar: Toolbar, item: ToolbarItem]
 	barPointerdown: [event: PointerEvent, toolbar: Toolbar, region: PaletteRegion]
 	barPointermove: [event: PointerEvent, toolbar: Toolbar]
+	barPointerover: [event: PointerEvent, toolbar: Toolbar]
 	borderPointermove: [event: PointerEvent, border: Border]
 	borderPointerleave: [event: PointerEvent]
 	trackPointermove: [event: PointerEvent, track: Track, trackIndex: number]
+	trackPointerleave: [event: PointerEvent, track: Track, trackIndex: number]
 }>()
 
 const direction = computed(() =>
@@ -43,11 +49,16 @@ const inverse = computed(() => props.region === 'right' || props.region === 'bot
 
 /** Live track indices in render order (reversed for right/bottom). */
 const orderedIndices = computed(() => {
+	// Track the shell revision: the live border array mutates in place
+	// (same reference across commits), so without this the computed
+	// never re-evaluates and new tracks never render.
+	revision?.value
 	const indices = props.border.map((_, index) => index)
 	return inverse.value ? indices.reverse() : indices
 })
 
 function stackGapCount(): number {
+	revision?.value
 	return props.border.length + 1
 }
 
@@ -74,7 +85,7 @@ function stackGapAt(position: number): number {
 			></div>
 			<BorderTrack
 				v-if="position - 1 < border.length"
-				:key="`track-${orderedIndices[position - 1]}`"
+				:key="trackKeyOf(border[orderedIndices[position - 1]!], orderedIndices[position - 1])"
 				:track="border[orderedIndices[position - 1]!]!"
 				:track-index="orderedIndices[position - 1]!"
 				:editing="editing"
@@ -84,6 +95,9 @@ function stackGapAt(position: number): number {
 				@guard-pointerdown="(event, toolbar, item) => emit('guardPointerdown', event, toolbar, item)"
 				@bar-pointerdown="(event, toolbar) => emit('barPointerdown', event, toolbar, region)"
 				@bar-pointermove="(event, toolbar) => emit('barPointermove', event, toolbar)"
+				@bar-pointerover="(event, toolbar) => emit('barPointerover', event, toolbar)"
+				@track-pointermove="(event, track) => emit('trackPointermove', event, track, orderedIndices[position - 1]!)"
+				@track-pointerleave="(event, track) => emit('trackPointerleave', event, track, orderedIndices[position - 1]!)"
 			/>
 		</template>
 	</div>

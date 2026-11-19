@@ -11,7 +11,7 @@ export class PaletteError extends Error {
 
 /**
  * Thrown by rejected bag writes (locked `ValuesBag.set` / `setTree` — see
- * `plans/context.md` §2.4–§2.5). Adapters catch it to surface error feedback
+ * `docs/specs/context.md` §2.4–§2.5). Adapters catch it to surface error feedback
  * or revert a local optimistic UI update.
  */
 export class PaletteWriteError extends PaletteError {

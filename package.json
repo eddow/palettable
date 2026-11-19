@@ -24,6 +24,7 @@
 	],
 	"scripts": {
 		"dev:vanilla": "pnpm --filter @palettable/vanilla dev -- --port 4174 --strictPort",
+		"dev:vue": "pnpm --filter @palettable/vue dev -- --port 4175 --strictPort",
 		"build": "pnpm --filter @palettable/core build && pnpm --filter @palettable/vanilla build",
 		"check": "pnpm --recursive check",
 		"test": "pnpm --recursive test",

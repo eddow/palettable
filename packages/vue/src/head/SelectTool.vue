@@ -13,7 +13,7 @@
  * `.palette-default-select-filter` row with `data-testid` input + empty
  * state. Opens on click only, never hover.
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef } from 'vue'
 import { selectClosedLabel, selectPresenter } from '@palettable/core'
 import { resolveIdeStrings } from '../strings.js'
 import {
@@ -28,6 +28,8 @@ const props = defineProps<{ context: HeadContext }>()
 
 const open = ref(false)
 const filter = ref('')
+const boxRef = useTemplateRef<HTMLElement>('box')
+const triggerRef = useTemplateRef<HTMLButtonElement>('trigger')
 
 const view = computed(() => {
 	const { core, item, surface, display } = props.context
@@ -35,6 +37,7 @@ const view = computed(() => {
 })
 
 const closedLabel = computed(() => selectClosedLabel(view.value))
+const direction = computed(() => view.value.direction)
 const toolIcon = computed(() => resolveIcon(view.value.toolIcon, props.context.iconResolver))
 const valueIcon = computed(() => resolveIcon(view.value.icon, props.context.iconResolver))
 const strings = computed(() => resolveIdeStrings(props.context.strings))
@@ -76,26 +79,51 @@ function onFilterKeydown(event: KeyboardEvent): void {
 		if (first !== undefined) {
 			void props.context.core.run(view.value.select(first.value))
 			close()
+			triggerRef.value?.focus()
 		}
 	} else if (event.key === 'Escape') {
 		close()
+		triggerRef.value?.focus()
 	}
 }
+
+function onDocumentClick(event: MouseEvent): void {
+	if (!open.value) return
+	if (boxRef.value?.contains(event.target as Node | null) === true) return
+	close()
+}
+
+function onTriggerKeydown(event: KeyboardEvent): void {
+	if (event.key === 'Escape' && open.value) {
+		event.stopPropagation()
+		close()
+		triggerRef.value?.focus()
+	}
+}
+
+document.addEventListener('click', onDocumentClick, true)
+
+onBeforeUnmount(() => {
+	document.removeEventListener('click', onDocumentClick, true)
+})
 </script>
 
 <template>
 	<div
+		ref="box"
 		class="palette-default-select"
 		:class="`palette-default-tone-${view.tone}`"
 		:title="view.title"
 	>
 		<button
+			ref="trigger"
 			type="button"
 			class="palette-default-select-trigger"
 			aria-haspopup="listbox"
 			:aria-expanded="open ? 'true' : 'false'"
 			:disabled="!view.can"
 			@click="toggle"
+			@keydown="onTriggerKeydown"
 		>
 			<span
 				class="palette-default-select-value"
@@ -103,9 +131,10 @@ function onFilterKeydown(event: KeyboardEvent): void {
 			>
 				<span v-if="toolIcon !== undefined" class="palette-default-icon palette-default-tool-icon">{{ toolIcon }}</span>
 				<span v-if="valueIcon !== undefined" class="palette-default-icon palette-default-value-icon">{{ valueIcon }}</span>
-				<span v-if="view.isSkeleton" :class="SELECT_WATERMARK_CLASS" aria-hidden="true">?</span>
-				<span v-else-if="closedLabel !== undefined" class="palette-default-choice">{{ closedLabel }}</span>
 			</span>
+			<span v-if="view.isSkeleton" :class="SELECT_WATERMARK_CLASS" aria-hidden="true">?</span>
+			<span v-else-if="closedLabel !== undefined && direction === 'horizontal'" class="palette-default-choice">{{ closedLabel }}</span>
+			<span v-else-if="closedLabel !== undefined && direction === 'vertical'" class="palette-default-choice">{{ closedLabel }}</span>
 		</button>
 		<div class="palette-default-select-list" role="listbox" :hidden="!open ? '' : undefined">
 			<div v-if="view.showFilter" class="palette-default-select-filter">
@@ -115,7 +144,6 @@ function onFilterKeydown(event: KeyboardEvent): void {
 					data-testid="select-filter-input"
 					type="text"
 					:placeholder="strings.filterPlaceholder"
-					value=""
 					:aria-label="strings.filterAriaLabel"
 					@click.stop
 					@keydown="onFilterKeydown"

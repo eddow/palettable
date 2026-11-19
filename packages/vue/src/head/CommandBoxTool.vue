@@ -110,7 +110,6 @@ function entryIcon(icon: unknown): string | undefined {
 					class="palette-default-command-input"
 					data-testid="command-box-input"
 					:placeholder="strings.commandPlaceholder"
-					value=""
 					@focus="onFocus"
 					@blur="onBlur"
 					@keydown="onKeydown"
