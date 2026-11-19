@@ -25,6 +25,7 @@ const props = defineProps<{
 	region: PaletteRegion
 	editing: boolean
 	contextFor: (toolbar: Toolbar, item: ToolbarItem, itemIndex: number) => HeadContext
+	themeEnabled?: boolean
 	inspectedItem: ToolbarItem | undefined
 }>()
 
@@ -71,6 +72,7 @@ function onBarPointerover(event: PointerEvent, toolbar: Toolbar): void {
 				container-kind="border"
 				:editing="editing"
 				:context-for="(item, itemIndex) => contextFor(slot.toolbar, item, itemIndex)"
+				:theme-enabled="themeEnabled"
 				:inspected-item="inspectedItem"
 				@inspect="(item) => dragApi?.inspect(item)"
 				@guard-pointerdown="onGuardPointerdown"

@@ -68,7 +68,7 @@ import {
 	statusShellTemplate,
 	stepperShellTemplate,
 } from './templates.js'
-import { applyThemeSetting } from './theme.js'
+import { applyThemeSetting, readThemeSetting, type ThemeSetting } from './theme.js'
 
 /** Consumer icon resolver: maps an `IconToken` to its rendered glyph
  * (string-to-string only — keeps `textContent` + `escapeHtml` safety, no
@@ -104,6 +104,13 @@ export type HeadContext = {
 	 * so emoji passthrough is the default. Consumer-owned (e.g. the demo
 	 * maps `icon:moon` via a hard-coded dictionary). */
 	readonly iconResolver?: IconResolver
+	/**
+	 * Observable theme setting (one per IDE instance, see
+	 * `createThemeSetting`). Threaded into the `theme` tool so tool clicks,
+	 * consumer writes, and direct root edits all render the same button.
+	 * Absent = the tool reads the document root directly (legacy).
+	 */
+	readonly theme?: ThemeSetting
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
 	/** Track an open drawer popup so the adapter can reposition it on layout change.
@@ -699,11 +706,7 @@ export function renderStars(context: HeadContext): HTMLElement {
 }
 
 /** Read the current theme setting from the document root (`data-theme`, default `system`). Exported for `ide.ts` in-place updates. */
-export function readThemeSetting(): 'light' | 'dark' | 'system' {
-	if (typeof document === 'undefined') return 'system'
-	const raw = document.documentElement.dataset.theme
-	return raw === 'light' || raw === 'dark' ? raw : 'system'
-}
+export { readThemeSetting } from './theme.js'
 
 /** Read the next theme value from a cycle runnable. */
 function nextCycleValue(cycle: Runnable): 'light' | 'dark' | 'system' {
@@ -713,20 +716,27 @@ function nextCycleValue(cycle: Runnable): 'light' | 'dark' | 'system' {
 
 /** Render a `theme` tool bound to the enum-shaped `theme` nothing-point
  * (`light`/`dark`/`system` options). Get/set lives adapter-side: the
- * current setting is read from the document root (`data-theme` /
- * `palette-default-theme-light` class, `system` default) and writes go
- * through `applyThemeSetting` — never through `core.values`.
+ * current setting comes from the `HeadContext.theme` mirror when present
+ * (else the document root directly), and writes go through it — never
+ * through `core.values`.
  * Applies the resolved theme to the document root on render + every click
  * (`head-light.css` keys off `.palette-default-theme-light`, so drawer
  * popups follow the same switch). Icon-value only
  * (current option icon, no text — like the toggle): the button is a compact
- * icon square. Skeleton renders the tool icon only. */
+ * icon square. Skeleton renders the tool icon only.
+ * Custom heads observe the same mirror: subscribe to `theme` and re-render
+ * the presenter view-model on change — no tool required. */
 export function renderTheme(context: HeadContext): HTMLElement {
-	const { core, item } = context
+	const { core, item, theme } = context
 	const resolver = context.iconResolver
 	const display = context.display
 	const { point, bags } = boundOf(core, pointIdOf(item))
-	const value = readThemeSetting()
+	const readSetting = (): 'light' | 'dark' | 'system' => theme?.value ?? readThemeSetting()
+	const writeSetting = (next: 'light' | 'dark' | 'system'): void => {
+		if (theme !== undefined) theme.set(next)
+		else if (typeof document !== 'undefined') applyThemeSetting(document.documentElement, next)
+	}
+	const value = readSetting()
 	const view = themePresenter(item, { point, value, bags }, display)
 	const [button, icon, label] = sel(
 		buttonShellTemplate({ tone: view.tone, compact: true }),
@@ -743,23 +753,37 @@ export function renderTheme(context: HeadContext): HTMLElement {
 		btn.disabled = true
 		return btn
 	}
-	if (typeof document !== 'undefined') {
-		applyThemeSetting(document.documentElement, view.value)
-	}
+	writeSetting(view.value ?? readSetting())
 	btn.addEventListener('click', () => {
 		// Recompute the cycle at click time: `view.cycle` is captured from
 		// render and goes stale after the first click (system→light would
 		// replay forever). Fresh read → apply next value to the root, then
 		// refresh the icon in place (theme has no core value subscription —
-		// the document root is the source of truth).
+		// the setting mirror is the source of truth).
 		const fresh = boundOf(core, pointIdOf(item))
-		const next = themePresenter(item, { ...fresh, value: readThemeSetting() }, display)
+		const next = themePresenter(item, { ...fresh, value: readSetting() }, display)
 		const applied = nextCycleValue(next.cycle)
-		applyThemeSetting(document.documentElement, applied)
-		const synced = themePresenter(item, { ...fresh, value: applied }, display)
+		writeSetting(applied)
+		syncTheme()
+	})
+	const syncTheme = (): void => {
+		if (!btn.isConnected && typeof btn.remove === 'function') {
+			unsubscribe?.()
+			return
+		}
+		const fresh = boundOf(core, pointIdOf(item))
+		const synced = themePresenter(item, { ...fresh, value: readSetting() }, display)
 		fillIcon(icon, resolveIcon(synced.valueIcon, resolver))
 		btn.title = synced.title
-	})
+	}
+	const unsubscribe = theme?.subscribe(() => syncTheme())
+	if (unsubscribe !== undefined) {
+		// The tool re-syncs on structural rebuilds (fresh subscription per
+		// render); the stale mirror subscription dies with this node.
+		const observer =
+			typeof MutationObserver !== 'undefined' ? new MutationObserver(() => syncTheme()) : undefined
+		observer?.observe(btn.parentNode ?? btn, { childList: true })
+	}
 	return btn
 }
 
@@ -1282,6 +1306,10 @@ export function renderDrawer(context: HeadContext): HTMLElement {
 /** Dispatch an item to its head control by explicit `control` id. */
 export function renderHeadItem(context: HeadContext): HTMLElement | null {
 	const control = (context.item as { control?: string }).control
+	// Opt-in gate: a stored layout can still carry a theme tool while the
+	// IDE hides it — no tool renders (drawer popups follow the same rule
+	// through their child contexts).
+	if (control === 'theme' && context.theme === undefined) return null
 	switch (control) {
 		case 'button':
 			return renderButton(context)

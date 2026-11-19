@@ -47,6 +47,15 @@ Run: `pnpm --filter @palettable/vanilla test`. Config:
 | `src/value-sync.test.ts` | the fine-DOM reconciliation contract: per-tool value sync in place (same node: toggle / slider / focused-slider guard), editing chrome without rebuild (`syncEditing`/`applyEditing` — root classes, `inert`, guards, same `.toolbar` identity), `setInspecting` two-node flip, selection patch re-rendering the details panel only, `can` flips toggling `disabled` in place |
 | `src/drag.test.ts` | slide measuring + add-item probes: `extractionGrabOffset` (intra-button offset, middle fallbacks) + `itemFromAddSelection` (set/tool/action/item variants, family mismatch → `undefined`); `clampSlideDelta` lives in core (single copy) |
 
+## Vue unit (Vitest, jsdom)
+
+Run: `pnpm --filter @palettable/vue test`. Config:
+`packages/vue/vitest.config.ts` (jsdom, `include: ['src/**/*.test.ts']`).
+
+| File | Covers |
+| ---- | ------ |
+| `src/layout/adapter-pair.test.ts` | adapter-pair layout parity (publication §2.a): the same five workflows (add tool / run command / update value / save + restore / cross-track drag) driven through both mounted adapters (`createIDE` + `PaletteIde`), asserting equivalent values (`asObject`) and byte-identical `JSON.stringify(getSnapshot())` after each step. The vanilla import is a unit-test-only relative path to `../../../vanilla/src/ide.js` (no package dependency); typecheck covers it via the Vue tsconfig. |
+
 ## E2E (Playwright)
 
 Run `pnpm test:e2e`. Playwright serves vanilla on port 4174 and Vue on port

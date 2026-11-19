@@ -32,12 +32,15 @@ const props = defineProps<{
 	region?: string
 	strings?: Partial<IdeStrings>
 	iconChoices?: readonly string[]
+	themeEnabled?: boolean
 	deletable?: boolean
 	patch: (apply: (target: ToolbarItem) => void) => void
 	onDelete?: () => void
 }>()
 
 const strings = computed(() => resolveIdeStrings(props.strings))
+
+const themeEnabled = computed(() => props.themeEnabled ?? true)
 
 function defaultControlFor(point: AnyPoint | undefined): string | undefined {
 	if (point === undefined) return 'status'
@@ -75,6 +78,7 @@ const choices = computed(() => {
 		const family = familyOf[group] ?? 'item'
 		registry[group] = {}
 		for (const id of ids) {
+			if (id === 'theme' && !themeEnabled.value) continue
 			registry[group]![id] = { id, label: name(id), families: [family] }
 		}
 	}

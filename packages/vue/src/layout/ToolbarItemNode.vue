@@ -31,6 +31,7 @@ const props = defineProps<{
 	context: HeadContext
 	editing: boolean
 	inspected: boolean
+	themeEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -94,7 +95,7 @@ function onGuardPointerdown(event: PointerEvent): void {
 		:data-inspected="inspected ? 'true' : undefined"
 	>
 		<div class="toolbar-item-content" :inert="editing && !isDrawer ? true : undefined">
-			<HeadItem :context="context" />
+			<HeadItem :context="context" :theme-enabled="themeEnabled" />
 		</div>
 		<div
 			v-if="editing"

@@ -436,10 +436,20 @@ export type ThemePresenter = {
 
 const THEME_ORDER: readonly ThemeValue[] = ['light', 'dark', 'system']
 
-/** View-model for a theme tool bound to an enum-shaped nothing-point: cycles light → dark → system.
- * Skeleton: adapter-provided `bound.value` absent → `value: undefined` (adapters render unset).
- * The adapter owns get/set on the document root (standard `<html>` class toggle). `valueIcon`
- * carries the current option's icon (icon-value, no text needed). */
+/** Resolved UI theme: explicit `light`/`dark`, or `system` (adapter resolves via media query). */
+export type ResolvedTheme = 'light' | 'dark'
+
+/** Resolve a theme setting to what renders (`system` follows the OS). */
+export function resolveTheme(
+	setting: ThemeValue | undefined,
+	prefersLight: boolean
+): ResolvedTheme {
+	if (setting === 'light') return 'light'
+	if (setting === 'dark') return 'dark'
+	return prefersLight ? 'light' : 'dark'
+}
+
+/** View-model for a theme tool bound to an enum-shaped nothing-point. */
 export function themePresenter(
 	item: ToolbarItem,
 	bound: BoundDisplay,

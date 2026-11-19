@@ -14,7 +14,6 @@ describe('outsideGapForTrack', () => {
 		{ start: 100, end: 200 },
 	]
 	it('resolves the nearer edge of the alongside span', () => {
-		// Inside track 0, before its middle → gap 0; after → gap 1.
 		expect(outsideGapForTrack(spans, 25)).toBe(0)
 		expect(outsideGapForTrack(spans, 75)).toBe(1)
 		// Inside track 1, before its middle → gap 1; after → gap 2.
@@ -27,5 +26,10 @@ describe('outsideGapForTrack', () => {
 	})
 	it('returns undefined with no spans (empty border)', () => {
 		expect(outsideGapForTrack([], 50)).toBeUndefined()
+	})
+
+	it('re-exports the core implementation (single shared copy)', async () => {
+		const core = await import('@palettable/core')
+		expect(outsideGapForTrack).toBe(core.outsideGapForTrack)
 	})
 })

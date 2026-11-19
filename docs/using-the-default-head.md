@@ -35,7 +35,7 @@ lacks — a play/rating row). Together they prove both replacement and extension
 | item (nothing-point tool, context plus enablement) | `commandBox` | `commandBoxPresenter` | `renderCommandBox` | configurator |
 | item (nothing-point tool, context plus enablement) | `drawer` | — (core portal) | `renderDrawer` (reused, not duplicated) | configurator |
 | item (nothing-point tool, context plus enablement) | `status` | `statusPresenter` | `renderStatus` | configurator |
-| item (enum-shaped nothing-point, adapter get/set on `<html>`) | `theme` | `themePresenter` | vanilla `renderTheme` | configurator |
+| item (enum-shaped nothing-point, adapter get/set on `<html>`) | `theme` (opt-in via `IdeOptions.theme`) | `themePresenter` | vanilla `renderTheme` / Vue `ThemeTool.vue` | configurator (gated) |
 
 Notes:
 
@@ -69,13 +69,22 @@ Notes:
   Horizontal fills the bar block-size via the generic toolbar-fill rule; **vertical** is a pinned `2.5rem` square
   stacking icon above minutes above seconds (`splitStatusTime`, strict `mm:ss` only — other strings fall back to a
   single value node so the square is never empty and the toolbar never widens).
-- The `theme` tool is a **nothing-point cycle button** presenting the `light` / `dark` / `system` options with adapter get/set on the document root
-  point with adapter get/set on the document root (`readThemeSetting` / `applyThemeSetting`): each click applies the next value
+- The `theme` tool is a **nothing-point cycle button** presenting the `light` / `dark` / `system` options, **opt-in** via `IdeOptions.theme`
+  (`true` creates one `ThemeSetting` mirror for the IDE lifetime; pass a
+  `createThemeSetting()` mirror to share it, or omit it and the tool never
+  renders — no add-box row, no configurator choice, no document-root write).
+  Reads come from the `ThemeSetting` mirror when present (`HeadContext.theme`,
+  plain `.value` in vanilla / `useThemeSetting(setting).value` in Vue), else
+  the document root directly (`readThemeSetting`); writes go through
+  `theme.set` (or `applyThemeSetting` on the legacy path) — never through
+  `core.values`. Each click applies the next value
   (`.palette-default-theme-light` class + `data-theme` + `color-scheme`), so
   drawer popups follow the same switch. It renders icon-value
   only (the current option's icon — ☀️/🌙/💻 — no text, like the toggle), so
   it sits as a compact square on the top bar's single track. `system` follows
-  the OS `prefers-color-scheme` media query.
+  the OS `prefers-color-scheme` media query. Custom heads stay observable
+  without the tool: subscribe to the mirror (`theme.subscribe`) and re-render
+  the `themePresenter` view-model on change — verified by unit test.
 
 - `segmented` is the "radio-button" idiom: joined buttons where the selected one
   reads as pushed-in. `select` is the compact dropdown (custom button +

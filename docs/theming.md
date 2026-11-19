@@ -111,12 +111,37 @@ not a light-override selector.
 | `--pd-drawer-*` (popup border/bg/shadow) | dark slate / near-black / black shadow | border → `--pd-border`, bg → `--pd-surface`, same shadow |
 | `--pd-r-*` / `--pd-ease` / `--pd-slide` | `9/10/12/14/18px`, `120/140ms` | unchanged |
 
-The `theme` tool (an enum-shaped nothing-point tool, like `status` but presenting `light`/`dark`/`system` options) applies the resolved theme itself: the vanilla renderer
-(`renderTheme` + `updateToolNode` in `head.ts`/`ide.ts`, via
-`applyThemeSetting` in `theme.ts`) toggles `.palette-default-theme-light`
-on `<html>` on render + every value change, so the demo no longer needs its
-own `applyTheme` — it just imports all three stylesheets and lets the tool
-sync the class. `system` follows `matchMedia('(prefers-color-scheme: light)')`.
+The `theme` tool (an enum-shaped nothing-point tool, like `status` but
+presenting `light`/`dark`/`system` options) is **opt-in**: pass
+`theme: true` (vanilla `IdeOptions` / Vue `PaletteIde` prop) or a
+`ThemeSetting` from `createThemeSetting()` to offer the `theme` control;
+omit it and the tool never renders — no add-box row, no configurator
+choice, no document-root write. `createThemeSetting()` is the readable +
+writable setting both adapters share: `.value` (current `light`/`dark`/
+`system`, `system` default = nothing stored yet), `.set(next)` (writes
+through to the document root), `.subscribe(listener)` (tool clicks,
+consumer writes, external root edits via `MutationObserver`), `.dispose()`
+(stop observing). Vue's `useThemeSetting(setting)` exposes `.value`
+reactively (`computed(() => setting.value)` re-renders); vanilla reads come
+from the same `.value` and re-render in place through the tool binding.
+Custom heads observe the same mirror (`HeadContext.theme`) — no tool
+required. The tool itself (`renderTheme` / `ThemeTool.vue`, via
+`applyThemeSetting` in `theme.ts`) cycles the mirror on click
+(light → dark → system, recomputed fresh each time), which toggles
+`.palette-default-theme-light` on `<html>` + `data-theme` + `colorScheme`.
+Each `set`/`applyThemeSetting` call samples
+`matchMedia('(prefers-color-scheme: light)')` once — the adapters install
+no `change` listener, so an OS preference flip while the palette is open
+does not re-paint on its own (re-apply the current setting to re-sample).
+The demos still call `applyThemeSetting` directly from their own
+`applyTheme()` page-chrome helper (they pass `theme: true`, and the helper
+keeps demo chrome in sync on load) — the tool does not replace that call.
+`system` follows
+`matchMedia('(prefers-color-scheme: light)')` for paint but is preserved
+as the stored setting, so the cycle keeps working. With the tool omitted
+and no direct root write, nothing applies — the resolved theme stays the
+stylesheet default (dark), with no automatic `system` write (verified by
+unit test).
 
 The demo syncs `.palette-default-theme-light` onto `<html>` (not `<main>`)
 so it covers the whole IDE subtree plus demo chrome. The drawer popup shell

@@ -67,7 +67,7 @@ import {
 import type { ControlDefaults, ControlRegistry } from './controls.js'
 import type { SurfaceContext, ToolbarItem } from './layout.js'
 import { resolveControl } from './presenters.js'
-import { humanizeId, type CatalogStrings, resolveCatalogStrings } from './strings.js'
+import { type CatalogStrings, humanizeId, resolveCatalogStrings } from './strings.js'
 
 /** Search query accepted by `filterCommandEntries`. */
 export type CommandBoxQuery = {
@@ -419,7 +419,10 @@ function addItemLabelOf(point: AnyPoint | undefined, fallback: string): string {
 	return typeof label === 'string' && label.length > 0 ? label : fallback
 }
 
-function addItemIconOf(point: AnyPoint | undefined, fallback: string | undefined): string | undefined {
+function addItemIconOf(
+	point: AnyPoint | undefined,
+	fallback: string | undefined
+): string | undefined {
 	const icon = point !== undefined && 'icon' in point ? point.icon : undefined
 	return typeof icon === 'string' ? icon : fallback
 }
@@ -491,7 +494,10 @@ export function itemFromAddSelection(
 			const item = {
 				point: pointId,
 				control,
-				config: { icon: addItemIconOf(point, source.icon), label: addItemLabelOf(point, source.label) },
+				config: {
+					icon: addItemIconOf(point, source.icon),
+					label: addItemLabelOf(point, source.label),
+				},
 			} as ToolbarItem & { toolbar?: never[] }
 			if (control === 'drawer') {
 				;(item as { toolbar?: never[] }).toolbar = []
@@ -501,7 +507,10 @@ export function itemFromAddSelection(
 		return {
 			point: pointId,
 			control: addItemControlFor(point, registry, defaults),
-			config: { icon: addItemIconOf(point, source.icon), label: addItemLabelOf(point, source.label) },
+			config: {
+				icon: addItemIconOf(point, source.icon),
+				label: addItemLabelOf(point, source.label),
+			},
 		} as ToolbarItem
 	}
 	if (variant.kind === 'action') {

@@ -3,6 +3,8 @@ import {
 	createVanillaKeys,
 	isEditableTarget,
 	keystrokeFromEvent,
+	keystrokeFromEventLike,
+	normalizeKeyBindings,
 	normalizeKeystroke,
 } from './keys.js'
 
@@ -92,5 +94,21 @@ describe('isEditableTarget', () => {
 		expect(isEditableTarget(input)).toBe(true)
 		expect(isEditableTarget(document.createElement('div'))).toBe(false)
 		expect(isEditableTarget(null)).toBe(false)
+	})
+})
+
+describe('adapter/core parity', () => {
+	it('delegates normalization + registry to core (single implementation)', async () => {
+		const core = await import('@palettable/core')
+		expect(normalizeKeystroke).toBe(core.normalizeKeystroke)
+		expect(keystrokeFromEventLike).toBe(core.keystrokeFromEventLike)
+		expect(normalizeKeyBindings).toBe(core.normalizeKeyBindings)
+		expect(keystrokeFromEvent(event({ key: '+', shiftKey: true }))).toBe(
+			core.keystrokeFromEventLike({ key: '+', shiftKey: true })
+		)
+		const keys = createVanillaKeys({ 'ctrl+s': { kind: 'action', point: 'saveGame' } })
+		const headless = core.createHeadlessKeys({ 'ctrl+s': { kind: 'action', point: 'saveGame' } })
+		expect(keys.bindings).toEqual(headless.bindings)
+		expect(keys.resolveKeystroke?.('Ctrl+S')).toEqual(headless.resolveKeystroke('Ctrl+S'))
 	})
 })

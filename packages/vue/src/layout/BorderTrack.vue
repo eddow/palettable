@@ -23,6 +23,7 @@ const props = defineProps<{
 	trackIndex: number
 	editing: boolean
 	contextFor: (toolbar: Toolbar, item: ToolbarItem, itemIndex: number) => HeadContext
+	themeEnabled?: boolean
 	inspectedItem: ToolbarItem | undefined
 }>()
 
@@ -107,6 +108,7 @@ function gapCount(): number {
 					container-kind="border"
 					:editing="editing"
 					:context-for="(item, itemIndex) => contextFor(track[gap - 1]!.toolbar, item, itemIndex)"
+					:theme-enabled="themeEnabled"
 					:inspected-item="inspectedItem"
 					@inspect="(item) => emit('inspect', item)"
 					@guard-pointerdown="(event) => emit('guardPointerdown', event)"

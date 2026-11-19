@@ -56,6 +56,13 @@ export type HeadContext = {
 	 * glyph. `undefined` return (or absent resolver) keeps the token as-is,
 	 * so emoji passthrough is the default. */
 	readonly iconResolver?: IconResolver
+	/**
+	 * Observable theme setting (one per component tree, see
+	 * `createThemeSetting`). Threaded into the `theme` tool so tool clicks,
+	 * consumer writes, and direct root edits all re-render the same button.
+	 * Absent = the tool reads the document root directly (legacy).
+	 */
+	readonly theme?: import('./theme.js').ThemeSetting
 	readonly onOpenConsole?: (mode: 'run' | 'edit') => void
 	readonly onInspect?: (item: ToolbarItem) => void
 	/** Track an open drawer popup so the adapter can reposition it on layout change.
@@ -119,11 +126,7 @@ export function surfaceForRegion(region: PaletteRegion | undefined): SurfaceCont
 }
 
 /** Read the current theme setting from the document root (`data-theme`, default `system`). */
-export function readThemeSetting(): 'light' | 'dark' | 'system' {
-	if (typeof document === 'undefined') return 'system'
-	const raw = document.documentElement.dataset.theme
-	return raw === 'light' || raw === 'dark' ? raw : 'system'
-}
+export { readThemeSetting } from './theme.js'
 
 /** Stylised skeleton watermark class for a select with no matching option (`?`).
  * Own class (never `.palette-default-choice`) so label selectors and the

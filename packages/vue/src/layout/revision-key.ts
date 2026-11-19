@@ -10,6 +10,4 @@
  */
 import type { InjectionKey, Ref } from 'vue'
 
-export const layoutRevisionKey: InjectionKey<Ref<number>> = Symbol(
-	'palettable-layout-revision'
-)
+export const layoutRevisionKey: InjectionKey<Ref<number>> = Symbol('palettable-layout-revision')

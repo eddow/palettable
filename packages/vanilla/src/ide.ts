@@ -91,12 +91,23 @@ import {
 	segmentedOptionShellTemplate,
 	selectOptionShellTemplate,
 } from './templates.js'
-import { applyThemeSetting } from './theme.js'
+import { applyThemeSetting, createThemeSetting, type ThemeSetting } from './theme.js'
+
+export type { ThemeSetting }
+export { applyThemeSetting, createThemeSetting }
 
 export type IdeOptions = {
 	readonly core: PaletteCore
 	readonly consoleStore: ConsoleStore
 	readonly isEditable: () => boolean
+	/**
+	 * Opt-in theme tool: pass `true` (or a `ThemeSetting` from
+	 * `createThemeSetting`) to offer the `theme` control. Default
+	 * `false` — no tool, no catalog/add rows, no document-root write.
+	 * `true` creates one mirror for the IDE lifetime; pass a shared
+	 * setting to sync several IDEs (or a consumer toggle / custom head).
+	 */
+	readonly theme?: boolean | ThemeSetting
 	/** Control-only item ids for the console add-box (`controls.item` keys). */
 	readonly itemControls?: readonly string[]
 	readonly paletteId?: string
@@ -298,7 +309,8 @@ function updateToolNode(
 	surface: SurfaceContext,
 	node: HTMLElement,
 	resolver?: IconResolver,
-	display?: DisplayStrings
+	display?: DisplayStrings,
+	theme?: ThemeSetting
 ): void {
 	const control = (item as { control?: unknown }).control
 	const pointId = pointIdOf(item)
@@ -521,7 +533,11 @@ function updateToolNode(
 			return
 		}
 		case 'theme': {
-			const view = themePresenter(item, { point, value: readThemeSetting(), bags }, display)
+			const view = themePresenter(
+				item,
+				{ point, value: theme?.value ?? readThemeSetting(), bags },
+				display
+			)
 			const button = node.querySelector('button')
 			if (button instanceof HTMLButtonElement) {
 				button.title = view.title
@@ -536,7 +552,7 @@ function updateToolNode(
 					}
 				}
 			}
-			if (point !== undefined && typeof document !== 'undefined') {
+			if (point !== undefined && typeof document !== 'undefined' && theme === undefined) {
 				applyThemeSetting(document.documentElement, view.value ?? readThemeSetting())
 			}
 			return
@@ -594,7 +610,7 @@ const VANILLA_CONTROL_IDS = {
 	run: ['button'],
 } as const
 
-function vanillaControlRegistry(strings: IdeStrings): ControlRegistry {
+function vanillaControlRegistry(strings: IdeStrings, themeEnabled: boolean): ControlRegistry {
 	const name = (id: string): string => strings.controlNames[id] ?? id
 	const familyOf: Record<string, 'boolean' | 'enum' | 'number' | 'item' | 'action'> = {
 		boolean: 'boolean',
@@ -608,6 +624,7 @@ function vanillaControlRegistry(strings: IdeStrings): ControlRegistry {
 		const family = familyOf[group] ?? 'item'
 		registry[group] = {}
 		for (const id of ids) {
+			if (id === 'theme' && !themeEnabled) continue
 			registry[group][id] = { id, label: name(id), families: [family] }
 		}
 	}
@@ -641,7 +658,17 @@ function filterAddSources(
 export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandle {
 	const { core, consoleStore } = options
 	const paletteId = options.paletteId ?? 'demo'
-	const itemControls = options.itemControls ?? ['commandBox', 'drawer', 'status', 'theme']
+	const themeOwned = options.theme === true
+	const themeSetting =
+		themeOwned || options.theme === false || options.theme === undefined ? undefined : options.theme
+	const themeOwnedSetting = themeOwned ? createThemeSetting() : undefined
+	const themeActive = (themeOwnedSetting ?? themeSetting) as ThemeSetting | undefined
+	const themeEnabled = themeActive !== undefined
+	const itemControls =
+		options.itemControls ??
+		(themeEnabled
+			? ['commandBox', 'drawer', 'status', 'theme']
+			: ['commandBox', 'drawer', 'status'])
 	const iconResolver = options.iconResolver
 	const iconChoices = options.iconChoices ?? []
 	const renderIconField = options.renderIconField
@@ -740,15 +767,15 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 	 * context-bound tools (`uses`) additionally follow `subscribeContext`
 	 * (bag change → re-read dual-source value). Nothing-point tools
 	 * (`status`/`commandBox`/`drawer`/`theme`) follow `subscribeContext`
-	 * for their used bags; `theme` additionally re-applies the document-root
-	 * class on every update (adapter-owned system value).
+	 * for their used bags; `theme` additionally follows the adapter theme
+	 * setting (mirror changes re-render in place).
 	 */
 	function bindTool(content: HTMLElement, item: ToolbarItem, surface: SurfaceContext): void {
 		const control = (item as { control?: unknown }).control
 		const pointId = pointIdOf(item)
 		const point = pointId !== undefined ? core.getDefinition(pointId) : undefined
 		const update = () =>
-			updateToolNode(core, item, surface, content, iconResolver, currentDisplay())
+			updateToolNode(core, item, surface, content, iconResolver, currentDisplay(), themeActive)
 		const unsubs: Unsubscribe[] = []
 		if (point !== undefined && isValuedPoint(point)) {
 			unsubs.push(core.values.subscribe(point.id, () => update()))
@@ -796,6 +823,9 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 						update()
 					})
 				)
+			}
+			if (control === 'theme' && themeActive !== undefined) {
+				unsubs.push(themeActive.subscribe(() => update()))
 			}
 		}
 		if (unsubs.length > 0) toolBindings.set(content, unsubs)
@@ -2441,6 +2471,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 				iconResolver,
 				strings: currentStrings(),
 				display: currentDisplay(),
+				theme: themeActive,
 				onOpenConsole: (mode) => consoleStore.open(mode),
 				onInspect: () => setInspecting(item),
 				isEditing: () => computeEditing(),
@@ -3237,17 +3268,27 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		results.dataset.testid = 'console-results'
 		popover.append(results)
 
+		/** Add-box rows for the console edit surface. Shared by the visible
+		 * list and keyboard selection so both exclude the theme point when
+		 * the tool is disabled. `itemControls` can never restore it: an
+		 * explicit `theme` entry there is dropped without opt-in. */
+		function addSources(): readonly AddableEntry[] {
+			// Edit surface: one addable row per point (valued + action
+			// + nothing) — SSR-safe, no `can` / `uses`. The theme tool
+			// is opt-in: without `theme` enabled its point is excluded
+			// here so no add row can create it.
+			return addableEntries(
+				core.points,
+				{ itemControls, strings: core.strings },
+				{ excludePoints: themeEnabled ? ['console'] : ['console', 'theme'] }
+			).filter((source) => themeEnabled || source.id !== 'item:theme')
+		}
+
 		const refreshResults = () => {
 			consoleQuery = input.value
 			results.textContent = ''
 			if (isEditing) {
-				// Edit surface: one addable row per point (valued + action
-				// + nothing) — SSR-safe, no `can` / `uses`.
-				const sources = addableEntries(
-					core.points,
-					{ itemControls, strings: core.strings },
-					{ excludePoints: ['console'] }
-				)
+				const sources = addSources()
 				const filtered = filterAddSources(sources, consoleQuery)
 				if (filtered.length === 0) {
 					const empty = el('div', 'palette-default-command-empty')
@@ -3333,12 +3374,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			if (event.key === 'Enter') {
 				event.preventDefault()
 				if (isEditing) {
-					const sources = addableEntries(
-						core.points,
-						{ itemControls, strings: core.strings },
-						{ excludePoints: ['console'] }
-					)
-					const first = filterAddSources(sources, input.value)[0]
+					const first = filterAddSources(addSources(), input.value)[0]
 					if (first) {
 						setInspecting(undefined)
 						addDraft = undefined
@@ -3562,7 +3598,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 		const choices = controlChoicesFor(
 			point,
 			{ axis: surface.axis === 'both' ? 'horizontal' : surface.axis, region: surface.region },
-			vanillaControlRegistry(currentStrings()),
+			vanillaControlRegistry(currentStrings(), themeEnabled),
 			VANILLA_CONTROL_DEFAULTS,
 			(item as { control?: string }).control
 		)
@@ -3911,6 +3947,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			iconResolver,
 			strings,
 			display: currentDisplay(),
+			theme: themeActive,
 			onOpenConsole: (mode) => consoleStore.open(mode),
 			onInspect: undefined,
 			renderToolbar: (childTrack: Track, childAxis, childRegion) =>
@@ -4533,6 +4570,7 @@ export function createIDE(container: HTMLElement, options: IdeOptions): IdeHandl
 			localeUnsub?.()
 			contextUnsub()
 			consoleUnsub()
+			themeOwnedSetting?.dispose()
 			dropAllBindings()
 			keyWindow.removeEventListener('keydown', onKeyDown)
 			consoleHost.textContent = ''

@@ -12,7 +12,11 @@ phase history.
   movement commits, command-box builders, console state, presenters, SSR render
   model, context bags, global CSS.
 - **Adapters** render core through plain DOM (`@palettable/vanilla`) or Vue
-  components (`@palettable/vue`). Each depends independently on core.
+  components (`@palettable/vue`). Each depends independently on core:
+  `packages/vanilla/package.json` and `packages/vue/package.json` declare
+  `@palettable/core: workspace:*` under `dependencies` (vue adds only its
+  own `vue` runtime dep), and neither adapter imports the other. Core has
+  zero `dependencies` — only dev-time build/test tooling.
 - **Headless** contract: core owns state, a11y semantics, tool
   resolution, editing, and drag/drop — plus the HTML end-result contract
   (hierarchy, classes, `data-*` indices, testids, `--layout`/`--region` vars)
@@ -324,6 +328,20 @@ fields). Each adapter demo consumes demo-core via dev-dependencies and
 binds the `DemoActions` seam to its own reactivity. The vanilla demo
 imports demo-core directly (`demo/main.ts`); the only adapter-owned demo
 module left is `demo/icons.ts` (the DOM icon field renderer).
+Host-specific state stays in the demos: `localStorage` persistence
+(save/load keys), the fleet/ship selection bags, the `mission` clock bag,
+and the `value-proxy` / `value-lens` chrome mirrors all live in
+`demo/main.ts` / `demo/App.vue`, never in `src/` or demo-core
+(demo-core's `saveColonyToStorage` is only the shared storage helper;
+the demo wires it through its own `DemoActions`).
+
+Verified Node/dependency ownership (2026-11-19): `core/dist/index.mjs`
+(ESM) and `core/dist/index.cjs` (CJS) both import under plain Node with
+zero DOM globals; `new PaletteCore(...)` + `values.set/get` + layout
+snapshot + `resolveTheme` all run headless. Each adapter's runtime imports
+core independently. The demos and vanilla's demo-layout test use
+`@palettable/demo-core` as a development dependency. Core has no runtime
+dependencies.
 
 The vanilla demo lives in `packages/vanilla/demo/` (setup demo):
 `main.ts` (page, `PaletteCore` + `createIDE`, persistence — imports
@@ -518,11 +536,14 @@ but a build guarantee:
 
 - **Icons are opaque tokens** (`IconToken = string`). Resolution to a component or
   glyph is an adapter concern; core never imports an icon factory.
-- **Keystrokes are normalized strings** (`"Ctrl+Shift+S"`). Core owns only the
-  headless lookup (`findKeystrokesFor`, `findKeystrokesForTarget`); adapters
-  own `KeyboardEvent` → keystroke normalization (`normalizePaletteKeystroke`,
-  `paletteKeystrokeFromEvent`). `KeyBindings` values are strings (references
-  by name); inline virtual definitions live on toolbar items, never in this
+- **Keystrokes are normalized strings** (`"Ctrl+Shift+S"`). Core owns the
+  headless normalization (`normalizeKeystroke`, `keystrokeFromEventLike`,
+  `normalizeKeyBindings`, `createHeadlessKeys`) plus the headless lookup
+  (`findKeystrokesFor`, `findKeystrokesForTarget`); adapters own the
+  `KeyboardEvent` → headless-event translation (`keystrokeFromEvent`,
+  `createVanillaKeys` / `createVueKeys`) and the DOM-target guard
+  (`isEditableTarget`). `KeyBindings` values are runnables; inline virtual
+  definitions live on toolbar items, never in this
   map — a key bound to an inline enum-from uses the virtual's `id`.
 - **Virtual points** (`virtual.ts`) are end-user-defined derived points over a
   source point: `enum-from` (present any value as an enum / enum subset).
@@ -727,13 +748,30 @@ files (`vanilla/src/keys.ts`, `head.ts`, `ide.ts`, `demo/main.ts`), demo
 page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
 
 - `vanilla/src/keys.ts` — adapter-side `KeyboardEvent` ownership (the Phase 2
-  split): `normalizeKeystroke` (Ctrl/Alt/Shift/Meta order + aliases;
-  Plus-key aware — lone `'+'` / trailing `'+'` (`'Shift++'`) name the Plus
-  key, not a separator, and `'Shift+='` folds to `'+'`), `keystrokeFromEvent`
-  (Shift consumed producing a symbol: `Shift+=` / numpad `+` both resolve to
-  `'+'`; Shift-letter stays distinct), `createVanillaKeys` (normalized map +
-  `findByTool` + `resolve`), `isEditableTarget`. Covered in `keys.test.ts`
-  (5 tests).
+  split): core owns the headless implementation (`normalizeKeystroke`
+  Ctrl/Alt/Shift/Meta order + aliases; Plus-key aware — lone `'+'` /
+  trailing `'+'` (`'Shift++'`) name the Plus key, not a separator, and
+  `'Shift+='` folds to `'+'`; `keystrokeFromEventLike` — Shift consumed
+  producing a symbol: `Shift+=` / numpad `+` both resolve to
+  `'+'`; Shift-letter stays distinct; `createHeadlessKeys` normalized map +
+  `findByTool` + `resolveKeystroke`); adapters own the DOM translation
+  (`keystrokeFromEvent`, `createVanillaKeys` — `resolve(event)` — and the
+  `HeadlessKeys` extension), `isEditableTarget`. Covered in `keys.test.ts`
+  (5 tests + adapter/core parity).
+- `vanilla/src/slide.ts` + `outside.ts` + `highlight.ts` — the same split
+  for drag geometry: core owns the DOM-free arithmetic (axis-projected
+  `toolbarSlideBounds` / `toolbarGrabOffset` / `extractionGrabOffset` over
+  structural `AxisRect`s, beside-border `outsideGapForTrack` over plain
+  spans, the `highlighted` / `hovered` vocabulary in
+  `dropZoneHighlightClasses`); adapters own measuring
+  (`getBoundingClientRect`) + the DOM traversal (`clearGapClasses`).
+- `core/ide-strings.ts` — the single default-head chrome table
+  (`defaultIdeStrings` / `resolveIdeStrings`, `IdeLocaleBundle`); adapters
+  re-export it under their documented names (`VanillaLocaleBundle` /
+  `VueLocaleBundle` + `IdeStrings`). Core `themePresenter` owns the pure
+  setting resolution (`resolveTheme`); adapters own the OS read
+  (`systemPrefersLight` via `matchMedia`) + document-root write
+  (`applyThemeSetting`).
 - `vanilla/src/head.ts` — the plain-DOM head: `renderButton/Toggle/Select/
   Segmented/Slider(showValue badge)/Stepper/Stars(radiogroup)/Status/
   CommandBox/Drawer/Theme` + `renderHeadItem` dispatch + `surfaceForRegion`.
@@ -775,10 +813,11 @@ page (`demo/main.ts`), 2 stale drag specs retired, 33 e2e green:
   green. This unlocks Phase 11, not Phase 12.
 - Drag sessions landed (2026-09-15): `vanilla/src/drag-session.ts`
   (`startDragSession` — window move/up, blur/cancel/hidden cleanup, no pointer
-  capture so hover targets stay live) + `slide.ts` (`toolbarSlideBounds` /
-  `clampSlideDelta` / `toolbarGrabOffset` — adapter-owned, needs
-  `getBoundingClientRect`; single-copy rule with the release `resizeToolbar`
-  commit) + `add-item.ts` (`itemFromAddSelection` via `resolveControl`).
+  capture so hover targets stay live) + `slide.ts` (adapter-measured
+  `toolbarSlideBounds` / `toolbarGrabOffset` / `extractionGrabOffset` over
+  core's axis-projected arithmetic + `clampSlideDelta`; single-copy rule
+  with the release `resizeToolbar` commit) + `add-item.ts`
+  (`itemFromAddSelection` via `resolveControl`).
   `ide.ts` wires `pointerdown` → `startSession` (tool vs whole-toolbar grab),
   `pointermove` → `GapDwell` → `commitDraggedTo*` + `syncGapClasses`, rAF loop
   (`latestPointer` + `Set<callback>` drained/cleared per frame →

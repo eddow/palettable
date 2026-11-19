@@ -1,29 +1,29 @@
 /**
  * `@palettable/vue` — slide measuring (adapter-owned DOM projection).
  *
- * Verbatim port of the vanilla adapter's `slide.ts`:
- * `toolbarSlideBounds` / `toolbarGrabOffset` need DOM metrics
- * (`getBoundingClientRect`), so they live here — never in core. Core owns
- * the arithmetic (`clampSlideDelta`) + the release commit (`commitSlide`);
- * the adapter owns measuring + the per-frame `transform` write.
+ * Same contract as the vanilla adapter's `slide.ts`: core owns the
+ * axis-projected arithmetic (`toolbarSlideBounds`,
+ * `toolbarGrabOffset`, `extractionGrabOffset`, `clampSlideDelta`) +
+ * the release commit (`commitSlide`); this module owns measuring
+ * (`getBoundingClientRect`) + the per-frame `transform` write.
  */
 
-export type SlideDirection = 'horizontal' | 'vertical'
+import {
+	type AxisRect,
+	extractionGrabOffset as coreExtractionGrabOffset,
+	toolbarGrabOffset as coreToolbarGrabOffset,
+	toolbarSlideBounds as coreToolbarSlideBounds,
+	type SlideBounds,
+	type SlideDirection,
+} from '@palettable/core'
 
-export type SlideBounds = {
-	readonly start: number
-	readonly available: number
-}
+export type { AxisRect, SlideBounds, SlideDirection }
+export { coreToolbarSlideBounds as toolbarSlideBoundsFromSpan }
 
 /**
  * Pixel bounds for sliding a toolbar along its track. The toolbar's
- * `.toolbar-track-slot` parent sits between the leading gap
- * (`space[slot]`) and trailing gap (`space[slot + 1]`) elements; their
- * live edges bound the free span, so the available slide is the
- * trailing-gap end minus the leading-gap start minus the dragged
- * toolbar's own live span. Neighbour growth (a lit merge DZ widening
- * its toolbar) moves those edges, so it is already in the measurement —
- * never predicted or subtracted separately.
+ * slot sits between the leading and trailing gap elements; their live
+ * edges bound the free span (see core `toolbarSlideBounds`).
  */
 export function toolbarSlideBounds(
 	toolbarElement: HTMLElement,
@@ -33,16 +33,14 @@ export function toolbarSlideBounds(
 	const before = slot?.previousElementSibling
 	const after = slot?.nextElementSibling
 	if (!(before instanceof HTMLElement) || !(after instanceof HTMLElement)) return undefined
-	const horizontal = direction === 'horizontal'
-	const start = horizontal
-		? before.getBoundingClientRect().left
-		: before.getBoundingClientRect().top
-	const end = horizontal
-		? after.getBoundingClientRect().right
-		: after.getBoundingClientRect().bottom
-	const rect = toolbarElement.getBoundingClientRect()
-	const available = end - start - (horizontal ? rect.width : rect.height)
-	return available > 0 ? { start, available } : undefined
+	return coreToolbarSlideBounds(
+		{
+			before: before.getBoundingClientRect(),
+			after: after.getBoundingClientRect(),
+			toolbar: toolbarElement.getBoundingClientRect(),
+		},
+		direction
+	)
 }
 
 /**
@@ -57,9 +55,12 @@ export function toolbarGrabOffset(options: {
 	clientY: number
 	direction: SlideDirection
 }): number {
-	const rect = options.toolbarElement.getBoundingClientRect()
-	const horizontal = options.direction === 'horizontal'
-	return (horizontal ? options.clientX : options.clientY) - (horizontal ? rect.left : rect.top)
+	return coreToolbarGrabOffset({
+		toolbar: options.toolbarElement.getBoundingClientRect(),
+		clientX: options.clientX,
+		clientY: options.clientY,
+		direction: options.direction,
+	})
 }
 
 /**
@@ -76,19 +77,11 @@ export function extractionGrabOffset(options: {
 	buttonGrab: { readonly x: number; readonly y: number } | undefined
 	direction: SlideDirection
 }): number {
-	const horizontal = options.direction === 'horizontal'
-	const rect = options.toolbarElement.getBoundingClientRect()
-	const middle = (horizontal ? rect.width : rect.height) / 2
-	const fallback = middle > 0 ? middle : 0
 	const button = options.buttonElement
-	const grab = options.buttonGrab
-	if (button === undefined || grab === undefined) return fallback
-	if (typeof button.getBoundingClientRect !== 'function') return fallback
-	const buttonRect = button.getBoundingClientRect()
-	const buttonEdge = horizontal ? buttonRect.left : buttonRect.top
-	const toolbarEdge = horizontal ? rect.left : rect.top
-	const offset = buttonEdge - toolbarEdge + (horizontal ? grab.x : grab.y)
-	const size = horizontal ? rect.width : rect.height
-	if (!(offset >= 0 && offset <= size)) return fallback
-	return offset
+	return coreExtractionGrabOffset({
+		toolbar: options.toolbarElement.getBoundingClientRect(),
+		button: button === undefined ? undefined : button.getBoundingClientRect(),
+		buttonGrab: options.buttonGrab,
+		direction: options.direction,
+	})
 }

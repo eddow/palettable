@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `@palettable/vue` — `drawer` trigger head control.
+ * `@palettable/vue` — drawer trigger head control.
  *
  * Same DOM contract as the vanilla `renderDrawer`: a `.palettable-drawer`
  * wrapper (purely structural — NO region/axis stamped) holding a
@@ -46,6 +46,7 @@ import DrawerChildTrack from '../layout/DrawerChildTrack.vue'
 const props = defineProps<{
 	context: HeadContext
 	renderToolbar?: (track: Track, axis: 'horizontal' | 'vertical', region: PaletteRegion) => unknown
+	themeEnabled?: boolean
 }>()
 void props
 
@@ -119,6 +120,7 @@ function childContextFor(toolbar: Toolbar, item: ToolbarItem): HeadContext {
 		item,
 		surface: { axis: childAxis.value, region: childRegion.value },
 		region: childRegion.value,
+		theme: props.themeEnabled ?? true ? props.context.theme : undefined,
 	}
 }
 
@@ -377,6 +379,7 @@ watch(open, (isOpen) => {
 			:region="childRegion"
 			:editing="context.isEditing?.() ?? false"
 			:context-for="(toolbar, item) => childContextFor(toolbar, item)"
+			:theme-enabled="themeEnabled"
 			:inspected-item="undefined"
 			@drawer-pointermove="(event) => context.onDrawerPointermove?.(event)"
 			@drawer-pointerover="(event) => context.onDrawerPointerover?.(event)"

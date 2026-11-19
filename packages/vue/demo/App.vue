@@ -20,6 +20,7 @@
 				:core="core"
 				:console-store="consoleStore"
 				:is-editable="isEditable"
+				:theme="true"
 				:item-controls="['commandBox', 'drawer', 'status', 'theme']"
 				palette-id="demo"
 				:icon-resolver="demoIconResolver"

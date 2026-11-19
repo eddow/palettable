@@ -164,7 +164,7 @@ describe('useValueLens over PaletteStateStore', () => {
 		// The lens returns the raw object — writing it back is an
 		// equal-value write: no store notification, same identity kept.
 		expect(state.config).toBe(config)
-		state.config = state.config
+		state.config = config
 		expect(global).not.toHaveBeenCalled()
 		expect(bag.get('config')).toBe(config)
 		// A genuinely new object still writes through once.

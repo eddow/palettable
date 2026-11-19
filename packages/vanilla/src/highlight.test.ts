@@ -5,7 +5,7 @@
  * every paint class.
  */
 import { describe, expect, it } from 'vitest'
-import { clearGapClasses } from './highlight.js'
+import { clearGapClasses, dropZoneHighlightClasses } from './highlight.js'
 
 function gapHost(count: number): HTMLElement {
 	const root = document.createElement('div')
@@ -29,5 +29,10 @@ describe('clearGapClasses', () => {
 			expect(gap.classList.contains('hovered')).toBe(false)
 		}
 		root.remove()
+	})
+
+	it('shares the highlight vocabulary with core (single source)', async () => {
+		const core = await import('@palettable/core')
+		expect(dropZoneHighlightClasses).toBe(core.dropZoneHighlightClasses)
 	})
 })

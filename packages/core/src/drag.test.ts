@@ -12,6 +12,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { configuration } from './configuration.js'
 import type { DragEvent, GrabTarget, Hoverable } from './drag.js'
 import {
+	extractionGrabOffset,
+	isDropZoneHighlightClass,
+	outsideGapForTrack,
+	toolbarGrabOffset,
+	toolbarSlideBounds,
+} from './drag.js'
+import {
 	dragOver,
 	dragStart,
 	type LayoutPruneVictim,
@@ -241,6 +248,60 @@ describe('createDrag session shell', () => {
 })
 
 describe('slide geometry home (Phase 4)', () => {
+	describe('structural slide helpers (single adapter-shared copy)', () => {
+		it('measures the resting span from structural gap edges', () => {
+			expect(
+				toolbarSlideBounds(
+					{
+						before: { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 },
+						after: { left: 0, right: 300, top: 0, bottom: 0, width: 300, height: 0 },
+						toolbar: { left: 100, right: 160, top: 0, bottom: 20, width: 60, height: 20 },
+					},
+					'horizontal'
+				)
+			).toEqual({ start: 0, available: 240 })
+		})
+
+		it('measures grab offsets from structural rects', () => {
+			const toolbar = { left: 200, right: 260, top: 0, bottom: 20, width: 60, height: 20 }
+			expect(
+				toolbarGrabOffset({ toolbar, clientX: 210, clientY: 0, direction: 'horizontal' })
+			).toBe(10)
+			expect(
+				extractionGrabOffset({
+					toolbar,
+					button: { left: 210, right: 250, top: 0, bottom: 20, width: 40, height: 20 },
+					buttonGrab: { x: 5, y: 0 },
+					direction: 'horizontal',
+				})
+			).toBe(15)
+			expect(
+				extractionGrabOffset({
+					toolbar,
+					button: undefined,
+					buttonGrab: { x: 5, y: 0 },
+					direction: 'horizontal',
+				})
+			).toBe(30)
+		})
+
+		it('projects a beside-border pointer onto stack gaps', () => {
+			const spans = [
+				{ start: 0, end: 100 },
+				{ start: 100, end: 200 },
+			]
+			expect(outsideGapForTrack(spans, 25)).toBe(0)
+			expect(outsideGapForTrack(spans, 175)).toBe(2)
+			expect(outsideGapForTrack([], 50)).toBeUndefined()
+		})
+
+		it('owns the drop-zone highlight vocabulary', () => {
+			expect(isDropZoneHighlightClass('highlighted')).toBe(true)
+			expect(isDropZoneHighlightClass('hovered')).toBe(true)
+			expect(isDropZoneHighlightClass('dragged')).toBe(false)
+		})
+	})
+
 	function wholeToolbarLayout(): SerializedLayout {
 		return {
 			version: 1,

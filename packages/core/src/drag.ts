@@ -153,6 +153,166 @@ export type Hoverable =
 /** Two raw client numbers, passed on every hover. No measurement, no axis. */
 export type PointerSample = { readonly clientX: number; readonly clientY: number }
 
+/** Slide axis: the axis of the dragged toolbar's own track. */
+export type SlideDirection = 'horizontal' | 'vertical'
+
+/** Axis-projected free span: leading gap's edge → trailing gap's end. */
+export type SlideBounds = {
+	readonly start: number
+	readonly available: number
+}
+
+/** Structural rect: the axis-projected `DOMRect` subset slide math reads. */
+export type AxisRect = {
+	readonly left: number
+	readonly right: number
+	readonly top: number
+	readonly bottom: number
+	readonly width: number
+	readonly height: number
+}
+
+/** Structural gap pair: the two live edges bounding a toolbar slot. */
+export type SlideSpan = {
+	readonly before: AxisRect
+	readonly after: AxisRect
+	readonly toolbar: AxisRect
+}
+
+/**
+ * Pixel bounds for sliding a toolbar along its track, from structural
+ * rects. The toolbar's slot sits between the leading gap and the trailing
+ * gap; their live edges bound the free span, so the available slide is
+ * the trailing-gap end minus the leading-gap start minus the dragged
+ * toolbar's own live span. Neighbour growth (a lit merge DZ widening
+ * its toolbar) moves those edges, so it is already in the measurement —
+ * never predicted or subtracted separately.
+ */
+export function toolbarSlideBounds(
+	span: SlideSpan,
+	direction: SlideDirection
+): SlideBounds | undefined {
+	const horizontal = direction === 'horizontal'
+	const start = horizontal ? span.before.left : span.before.top
+	const end = horizontal ? span.after.right : span.after.bottom
+	const rect = span.toolbar
+	const available = end - start - (horizontal ? rect.width : rect.height)
+	return available > 0 ? { start, available } : undefined
+}
+
+/**
+ * Grab offset of the cursor *within* the toolbar, in pixels. Captured once
+ * on pointerdown so the cursor stays at the same point on the toolbar
+ * (natural grab).
+ */
+export function toolbarGrabOffset(options: {
+	readonly toolbar: AxisRect
+	readonly clientX: number
+	readonly clientY: number
+	readonly direction: SlideDirection
+}): number {
+	const rect = options.toolbar
+	const horizontal = options.direction === 'horizontal'
+	return (horizontal ? options.clientX : options.clientY) - (horizontal ? rect.left : rect.top)
+}
+
+/**
+ * Intra-button grab: the mousedown point within the dragged button, in
+ * pixels. A restructure extraction promotes the button into a fresh
+ * singleton toolbar — adding this to the button's fresh offset inside its
+ * new toolbar keeps the pointer glued to the same point on the icon
+ * (the extraction grab). Falls back to the toolbar middle when the button
+ * is unmeasurable.
+ */
+export function extractionGrabOffset(options: {
+	readonly toolbar: AxisRect
+	readonly button: AxisRect | undefined
+	readonly buttonGrab: { readonly x: number; readonly y: number } | undefined
+	readonly direction: SlideDirection
+}): number {
+	const horizontal = options.direction === 'horizontal'
+	const rect = options.toolbar
+	const middle = (horizontal ? rect.width : rect.height) / 2
+	const fallback = middle > 0 ? middle : 0
+	const button = options.button
+	const grab = options.buttonGrab
+	if (button === undefined || grab === undefined) return fallback
+	const buttonEdge = horizontal ? button.left : button.top
+	const toolbarEdge = horizontal ? rect.left : rect.top
+	const offset = buttonEdge - toolbarEdge + (horizontal ? grab.x : grab.y)
+	const size = horizontal ? rect.width : rect.height
+	if (!(offset >= 0 && offset <= size)) return fallback
+	return offset
+}
+
+/**
+ * One track's span on the border's stack axis (already projected).
+ */
+export type TrackSpan = {
+	readonly start: number
+	readonly end: number
+}
+
+/**
+ * Resolve the stack gap for a pointer at `along` (already projected onto
+ * the border's stack axis) given the track spans in order. A span
+ * alongside track *i* resolves to the nearer of gaps *i* / *i+1* (nearer
+ * edge wins); a pointer before every span resolves to gap 0, after every
+ * span to gap `spans.length`. Returns `undefined` when there are no spans
+ * (empty border — nothing to align with, so the caller reports nothing).
+ */
+export function outsideGapForTrack(spans: readonly TrackSpan[], along: number): number | undefined {
+	if (spans.length === 0) return undefined
+	let best = 0
+	let bestDistance = Number.POSITIVE_INFINITY
+	spans.forEach((span, trackIndex) => {
+		const middle = (span.start + span.end) / 2
+		const distance =
+			along < span.start ? span.start - along : along > span.end ? along - span.end : 0
+		const edgeGap = along - middle < 0 ? trackIndex : trackIndex + 1
+		const clamped = Math.min(Math.max(edgeGap, 0), spans.length)
+		if (distance < bestDistance) {
+			bestDistance = distance
+			best = clamped
+		}
+	})
+	return best
+}
+
+/** Drop-zone paint classes: the session's `highlight` vocabulary. */
+export const dropZoneHighlightClasses = ['highlighted', 'hovered'] as const
+
+/**
+ * Structural highlight-clear contract: the SSR-safe predicate over a
+ * class list. DOM wrappers (`clearGapClasses`) query their root for
+ * `.toolbar-drop-zone.<class>` and remove these classes node by node.
+ */
+export function isDropZoneHighlightClass(value: string): boolean {
+	return (dropZoneHighlightClasses as readonly string[]).includes(value)
+}
+
+/** Structural drop-zone node: class list + child scope (no DOM types). */
+export type DropZoneNode = {
+	hasClass(name: string): boolean
+	removeClass(name: string): void
+	childNodes(): Iterable<DropZoneNode>
+}
+
+/**
+ * Drop every `highlighted` / `hovered` paint class in a structural
+ * drop-zone tree (editing off, drag end). DOM-free: adapters wrap their
+ * root element in a `DropZoneNode` adapter (or call the DOM helper that
+ * does) so the traversal + class removal stays shared.
+ */
+export function clearDropZoneHighlight(root: DropZoneNode): void {
+	for (const node of root.childNodes()) {
+		clearDropZoneHighlight(node)
+		for (const name of dropZoneHighlightClasses) {
+			if (node.hasClass(name)) node.removeClass(name)
+		}
+	}
+}
+
 /**
  * Clamp the pointer to the slide's free span and return the shift to apply
  * (relative to the toolbar's resting position). `frame.start` is the

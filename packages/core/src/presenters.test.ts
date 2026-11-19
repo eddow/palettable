@@ -19,6 +19,7 @@ import {
 	headTooltip,
 	isPresenterDrawerItem,
 	resolveControl,
+	resolveTheme,
 	selectClosedLabel,
 	selectPresenter,
 	sliderPresenter,
@@ -313,6 +314,15 @@ describe('buttonPresenter / togglePresenter / statusPresenter', () => {
 		)
 		expect(skeleton.value).toBeUndefined()
 		expect(skeleton.cycle).toEqual({ kind: 'set', point: 'theme', value: 'light' })
+	})
+
+	it('resolves theme settings to what renders (single adapter-shared copy)', () => {
+		expect(resolveTheme('light', false)).toBe('light')
+		expect(resolveTheme('dark', true)).toBe('dark')
+		expect(resolveTheme('system', true)).toBe('light')
+		expect(resolveTheme('system', false)).toBe('dark')
+		expect(resolveTheme(undefined, true)).toBe('light')
+		expect(resolveTheme(undefined, false)).toBe('dark')
 	})
 })
 

@@ -26,6 +26,7 @@ const props = defineProps<{
 	containerKind: 'border' | 'parking'
 	editing: boolean
 	contextFor: (item: ToolbarItem, itemIndex: number) => HeadContext
+	themeEnabled?: boolean
 	inspectedItem: ToolbarItem | undefined
 }>()
 
@@ -125,6 +126,7 @@ function fingerprint(item: ToolbarItem): string {
 				:item-index="gap - 1"
 				:context="contextFor(toolbar[gap - 1]!, gap - 1)"
 				:editing="editing"
+				:theme-enabled="themeEnabled"
 				:inspected="isInspected(toolbar[gap - 1]!)"
 				@inspect="(item) => emit('inspect', item)"
 				@guard-pointerdown="(event) => emit('guardPointerdown', event)"

@@ -50,12 +50,19 @@ import { createVueKeys, isEditableTarget } from '../keys.js'
 import { outsideGapForTrack } from '../outside.js'
 import { extractionGrabOffset, toolbarGrabOffset, toolbarSlideBounds } from '../slide.js'
 import { surfaceForRegion, type HeadContext } from '../head.js'
-import { syncIdeCatalogStrings, useIdeDisplay, useIdeStrings, type IdeOptions } from '../ide.js'
+import {
+	syncIdeCatalogStrings,
+	useIdeDisplay,
+	useIdeStrings,
+	useIdeTheme,
+	type IdeOptions,
+} from '../ide.js'
 
 const props = defineProps<IdeOptions>()
 
 const strings = useIdeStrings(props)
 const display = useIdeDisplay(props)
+const { setting: themeSetting, enabled: themeEnabled } = useIdeTheme(props)
 const paletteId = computed(() => props.paletteId ?? 'demo')
 
 /** Structural revision: bumped by every store/layout/console event. */
@@ -1005,6 +1012,7 @@ function contextFor(
 		strings: strings.value,
 		display: display.value,
 		iconResolver: props.iconResolver,
+		theme: themeSetting.value,
 		onOpenConsole: (mode) => props.consoleStore.open(mode),
 		onInspect: () => {
 			inspected.value = item
@@ -1672,6 +1680,7 @@ defineExpose({ bump, inspected, dragActive: { get value() { return isDragLive() 
 			:editing="editing"
 			:strings="strings"
 			:context-for="(toolbar, item, itemIndex) => contextFor('top', toolbar, item, itemIndex)"
+			:theme-enabled="themeEnabled"
 			:inspected-item="inspected"
 			@inspect="onInspect"
 			@guard-pointerdown="onGuardPointerdown"
@@ -1690,6 +1699,7 @@ defineExpose({ bump, inspected, dragActive: { get value() { return isDragLive() 
 				:editing="editing"
 				:strings="strings"
 				:context-for="(toolbar, item, itemIndex) => contextFor('left', toolbar, item, itemIndex)"
+				:theme-enabled="themeEnabled"
 				:inspected-item="inspected"
 				@inspect="onInspect"
 				@guard-pointerdown="onGuardPointerdown"
@@ -1714,6 +1724,8 @@ defineExpose({ bump, inspected, dragActive: { get value() { return isDragLive() 
 					:icon-resolver="props.iconResolver"
 					:icon-choices="props.iconChoices"
 					:item-controls="props.itemControls"
+					:theme-enabled="themeEnabled"
+					:theme="themeSetting"
 					:strings="strings"
 					:display="display"
 					:on-close="() => props.consoleStore.close()"
@@ -1734,6 +1746,7 @@ defineExpose({ bump, inspected, dragActive: { get value() { return isDragLive() 
 				:editing="editing"
 				:strings="strings"
 				:context-for="(toolbar, item, itemIndex) => contextFor('right', toolbar, item, itemIndex)"
+				:theme-enabled="themeEnabled"
 				:inspected-item="inspected"
 				@inspect="onInspect"
 				@guard-pointerdown="onGuardPointerdown"
@@ -1752,6 +1765,7 @@ defineExpose({ bump, inspected, dragActive: { get value() { return isDragLive() 
 			:editing="editing"
 			:strings="strings"
 			:context-for="(toolbar, item, itemIndex) => contextFor('bottom', toolbar, item, itemIndex)"
+			:theme-enabled="themeEnabled"
 			:inspected-item="inspected"
 			@inspect="onInspect"
 			@guard-pointerdown="onGuardPointerdown"

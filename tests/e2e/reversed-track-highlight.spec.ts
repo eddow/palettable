@@ -9,16 +9,18 @@ test.beforeEach(async ({ page }) => {
 
 async function highlightedItemGaps(page: import('@playwright/test').Page) {
 	return page.evaluate(() => {
-		return [...document.querySelectorAll('.toolbar-item-space.toolbar-drop-zone.highlighted')].map((n) => {
-			const el = n as HTMLElement
-			const bar = el.closest('.toolbar')
-			const trackEl = el.closest('.toolbar-track')
-			return {
-				gap: el.getAttribute('data-item-space-index'),
-				track: trackEl?.getAttribute('data-track-index'),
-				tools: bar ? [...bar.querySelectorAll('.toolbar-item')].length : -1,
+		return [...document.querySelectorAll('.toolbar-item-space.toolbar-drop-zone.highlighted')].map(
+			(n) => {
+				const el = n as HTMLElement
+				const bar = el.closest('.toolbar')
+				const trackEl = el.closest('.toolbar-track')
+				return {
+					gap: el.getAttribute('data-item-space-index'),
+					track: trackEl?.getAttribute('data-track-index'),
+					tools: bar ? [...bar.querySelectorAll('.toolbar-item')].length : -1,
+				}
 			}
-		})
+		)
 	})
 }
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-	availableEntryKeywords,
 	type AddableEntry,
 	type AddSelection,
+	availableEntryKeywords,
 	type CommandBoxEntry,
 	enumValueKeywords,
 	filterCommandEntries,
@@ -318,7 +318,13 @@ describe('itemFromAddSelection', () => {
 		const item = itemFromAddSelection(
 			{
 				source: toolSource({ id: 'status', kind: 'item', activity: 'item', control: 'status' }),
-				variant: { id: 'status:item', kind: 'item', control: 'status', label: 'Status', meta: 'item' },
+				variant: {
+					id: 'status:item',
+					kind: 'item',
+					control: 'status',
+					label: 'Status',
+					meta: 'item',
+				},
 			},
 			points()
 		)
@@ -326,7 +332,13 @@ describe('itemFromAddSelection', () => {
 		const drawer = itemFromAddSelection(
 			{
 				source: toolSource({ id: 'drawer', kind: 'item', activity: 'item', control: 'drawer' }),
-				variant: { id: 'drawer:item', kind: 'item', control: 'drawer', label: 'Drawer', meta: 'item' },
+				variant: {
+					id: 'drawer:item',
+					kind: 'item',
+					control: 'drawer',
+					label: 'Drawer',
+					meta: 'item',
+				},
 			},
 			points()
 		)
@@ -337,7 +349,13 @@ describe('itemFromAddSelection', () => {
 		const pts = points()
 		expect(
 			itemFromAddSelection(
-				selection({ id: 'missing:tool', kind: 'tool', pointId: 'missing', label: 'X', meta: 'tool' }),
+				selection({
+					id: 'missing:tool',
+					kind: 'tool',
+					pointId: 'missing',
+					label: 'X',
+					meta: 'tool',
+				}),
 				pts
 			)
 		).toBe(undefined)
@@ -358,7 +376,13 @@ describe('itemFromAddSelection', () => {
 			itemFromAddSelection(
 				{
 					source: toolSource({ id: 'reset', activity: 'action', pointId: 'reset' }),
-					variant: { id: 'reset:action', kind: 'action', pointId: 'reset', label: 'Reset', meta: 'run' },
+					variant: {
+						id: 'reset:action',
+						kind: 'action',
+						pointId: 'reset',
+						label: 'Reset',
+						meta: 'run',
+					},
 				},
 				pts
 			)

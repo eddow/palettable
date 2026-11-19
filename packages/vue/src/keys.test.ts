@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createVueKeys, isEditableTarget, keystrokeFromEvent, normalizeKeystroke } from './keys.js'
+import {
+	createVueKeys,
+	isEditableTarget,
+	keystrokeFromEvent,
+	keystrokeFromEventLike,
+	normalizeKeyBindings,
+	normalizeKeystroke,
+} from './keys.js'
 
 function event(init: Partial<KeyboardEvent> & { key: string }): KeyboardEvent {
 	return {
@@ -82,5 +89,15 @@ describe('keystrokeFromEvent / createVueKeys', () => {
 		expect(isEditableTarget(input)).toBe(true)
 		expect(isEditableTarget(button)).toBe(false)
 		expect(isEditableTarget(null)).toBe(false)
+	})
+
+	it('re-exports the core implementation (single shared copy)', async () => {
+		const core = await import('@palettable/core')
+		expect(normalizeKeystroke).toBe(core.normalizeKeystroke)
+		expect(keystrokeFromEventLike).toBe(core.keystrokeFromEventLike)
+		expect(normalizeKeyBindings).toBe(core.normalizeKeyBindings)
+		const keys = createVueKeys({ 'ctrl+s': { kind: 'action', point: 'saveGame' } })
+		const headless = core.createHeadlessKeys({ 'ctrl+s': { kind: 'action', point: 'saveGame' } })
+		expect(keys.bindings).toEqual(headless.bindings)
 	})
 })

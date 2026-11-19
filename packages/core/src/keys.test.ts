@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { PaletteError } from './errors.js'
-import { findKeystrokesFor, findKeystrokesForTarget, type KeyBindings } from './keys.js'
+import {
+	createHeadlessKeys,
+	findKeystrokesFor,
+	findKeystrokesForTarget,
+	type KeyBindings,
+	keystrokeFromEventLike,
+	normalizeKeystroke,
+} from './keys.js'
 
 describe('findKeystrokesFor', () => {
 	const bindings: KeyBindings = {
@@ -69,5 +76,34 @@ describe('PaletteError', () => {
 		expect(error).toBeInstanceOf(Error)
 		expect(error.name).toBe('PaletteError')
 		expect(error.message).toBe('boom')
+	})
+})
+
+describe('normalizeKeystroke (single adapter-shared copy)', () => {
+	it('orders modifiers and normalizes aliases', () => {
+		expect(normalizeKeystroke('shift+ctrl+s')).toBe('Ctrl+Shift+S')
+		expect(normalizeKeystroke('cmd+s')).toBe('Meta+S')
+		expect(normalizeKeystroke('escape')).toBe('Esc')
+		expect(normalizeKeystroke(' space ')).toBe('Space')
+	})
+
+	it('keeps the Plus key through normalization (separator collision)', () => {
+		expect(normalizeKeystroke('+')).toBe('+')
+		expect(normalizeKeystroke('plus')).toBe('+')
+		expect(normalizeKeystroke('Shift++')).toBe('+')
+		expect(normalizeKeystroke('Shift+=')).toBe('+')
+		expect(normalizeKeystroke('-')).toBe('-')
+	})
+
+	it('derives headless keystrokes and resolves headless registries', () => {
+		expect(keystrokeFromEventLike({ key: 's', ctrlKey: true })).toBe('Ctrl+S')
+		expect(keystrokeFromEventLike({ key: '+', shiftKey: true })).toBe('+')
+		expect(keystrokeFromEventLike({ key: 'A', shiftKey: true })).toBe('Shift+A')
+		const keys = createHeadlessKeys({
+			'`': { kind: 'action', point: 'console' },
+			'ctrl+s': { kind: 'action', point: 'saveGame' },
+		})
+		expect(keys.resolveKeystroke('Ctrl+S')).toEqual({ kind: 'action', point: 'saveGame' })
+		expect(keys.findByTool('console')).toEqual(['`'])
 	})
 })

@@ -27,4 +27,9 @@ describe('outsideGapForTrack', () => {
 		expect(outsideGapForTrack(spans, 12)).toBe(1)
 		expect(outsideGapForTrack(spans, 18)).toBe(1)
 	})
+
+	it('re-exports the core implementation (single shared copy)', async () => {
+		const core = await import('@palettable/core')
+		expect(outsideGapForTrack).toBe(core.outsideGapForTrack)
+	})
 })

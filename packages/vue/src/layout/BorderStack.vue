@@ -27,6 +27,7 @@ const props = defineProps<{
 	editing: boolean
 	strings: IdeStrings
 	contextFor: (toolbar: Toolbar, item: ToolbarItem, itemIndex: number) => HeadContext
+	themeEnabled?: boolean
 	inspectedItem: ToolbarItem | undefined
 }>()
 
@@ -90,6 +91,7 @@ function stackGapAt(position: number): number {
 				:track-index="orderedIndices[position - 1]!"
 				:editing="editing"
 				:context-for="contextFor"
+				:theme-enabled="themeEnabled"
 				:inspected-item="inspectedItem"
 				@inspect="(item) => emit('inspect', item)"
 				@guard-pointerdown="(event) => emit('guardPointerdown', event)"

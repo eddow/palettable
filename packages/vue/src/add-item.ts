@@ -9,4 +9,3 @@
  */
 
 export { type AddSelection, itemFromAddSelection } from '@palettable/core'
-

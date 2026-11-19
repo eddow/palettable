@@ -14,14 +14,26 @@ import {
 	type DisplayStrings,
 	type PaletteCore,
 } from '@palettable/core'
-import { type ComputedRef, computed } from 'vue'
+import { type ComputedRef, computed, onBeforeUnmount, ref } from 'vue'
 import type { IconResolver } from './head.js'
 import { type IdeStrings, resolveIdeStrings, type VueLocaleBundle } from './strings.js'
+import { createThemeSetting, type ThemeSetting } from './theme.js'
+
+export { createThemeSetting } from './theme.js'
+export type { ThemeSetting }
 
 export type IdeOptions = {
 	readonly core: PaletteCore
 	readonly consoleStore: ConsoleStore
 	readonly isEditable: () => boolean
+	/**
+	 * Opt-in theme tool: pass `true` (or a `ThemeSetting` from
+	 * `createThemeSetting`) to offer the `theme` control. Default
+	 * `false` — no tool, no catalog/add rows, no document-root write.
+	 * `true` creates one mirror for the component lifetime; pass a shared
+	 * setting to sync several trees (or a consumer toggle / custom head).
+	 */
+	readonly theme?: boolean | ThemeSetting
 	/** Control-only item ids for the console add-box (`controls.item` keys). */
 	readonly itemControls?: readonly string[]
 	readonly paletteId?: string
@@ -91,4 +103,35 @@ export function syncIdeCatalogStrings(options: IdeOptions): void {
 	const locale = currentLocaleOf(options.core, localePointId)
 	const bundle = locale !== undefined ? options.stringsForLocale?.(locale) : undefined
 	options.core.setStrings(bundleCatalogStrings(bundle))
+}
+
+/**
+ * Observable theme setting for the tree (`IdeOptions.theme`). `true`
+ * creates one mirror for the component lifetime; a passed setting is
+ * shared as-is (several trees / consumer toggle / custom head).
+ * `enabled` gates the `theme` control everywhere: toolbar dispatch,
+ * console add-box, configurator choices.
+ */
+export function useIdeTheme(options: IdeOptions): {
+	setting: ComputedRef<ThemeSetting | undefined>
+	enabled: ComputedRef<boolean>
+} {
+	const owned = ref<ThemeSetting | undefined>(undefined)
+	const setting = computed<ThemeSetting | undefined>(() => {
+		if (options.theme === true) {
+			if (owned.value === undefined) owned.value = createThemeSetting()
+			return owned.value
+		}
+		if (options.theme === false || options.theme === undefined) {
+			owned.value?.dispose()
+			owned.value = undefined
+			return undefined
+		}
+		owned.value?.dispose()
+		owned.value = undefined
+		return options.theme
+	})
+	const enabled = computed(() => setting.value !== undefined)
+	onBeforeUnmount(() => owned.value?.dispose())
+	return { setting, enabled }
 }

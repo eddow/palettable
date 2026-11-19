@@ -44,6 +44,8 @@ const props = defineProps<{
 	iconResolver?: (token: string) => string | undefined
 	iconChoices?: readonly string[]
 	itemControls?: readonly string[]
+	themeEnabled?: boolean
+	theme?: import('../theme.js').ThemeSetting
 	strings: ReturnType<typeof resolveIdeStrings>
 	display?: import('@palettable/core').DisplayStrings
 	onClose: () => void
@@ -53,6 +55,8 @@ const props = defineProps<{
 	onDeleteInspected: () => void
 	patchLive: (item: ToolbarItem, apply: (target: ToolbarItem) => void) => void
 }>()
+
+const themeEnabled = computed(() => props.themeEnabled ?? props.theme !== undefined)
 
 const query = ref('')
 const inputRef = useTemplateRef<HTMLInputElement>('input')
@@ -103,13 +107,25 @@ type ResultRow =
 	| { readonly kind: 'add'; readonly entry: AddableEntry }
 	| { readonly kind: 'run'; readonly entry: { readonly id: string; readonly label: string; readonly meta: string; readonly icon?: string; readonly can?: boolean; readonly run: unknown } }
 
+const themeExcludedSources = computed<readonly string[]>(() =>
+	themeEnabled.value ? ['console'] : ['console', 'theme']
+)
+
+/** Add-box rows for the console edit surface. Shared by the visible list,
+ * keyboard Enter, and details lookup so all three exclude the theme point
+ * when the tool is disabled. `itemControls` can never restore it: an
+ * explicit `theme` entry there is dropped without opt-in. */
+function addSources(): readonly AddableEntry[] {
+	return addableEntries(
+		props.core.points,
+		{ itemControls: props.itemControls, strings: props.core.strings },
+		{ excludePoints: themeExcludedSources.value }
+	).filter((source) => themeEnabled.value || source.id !== 'item:theme')
+}
+
 const results = computed<readonly ResultRow[]>(() => {
 	if (props.editing) {
-		const sources = addableEntries(
-			props.core.points,
-			{ itemControls: props.itemControls, strings: props.core.strings },
-			{ excludePoints: ['console'] }
-		)
+		const sources = addSources()
 		const filtered = filterCommandEntries(sources, { free: query.value })
 		return filtered.slice(0, 8).map((entry) => ({ kind: 'add' as const, entry }))
 	}
@@ -183,11 +199,7 @@ const inspectedPoint = computed(() => {
 const selectedAddEntry = computed(() => {
 	const id = selectedId.value ?? snapshot.value.selectedEntryId
 	if (id === undefined) return undefined
-	return addableEntries(
-		props.core.points,
-		{ itemControls: props.itemControls, strings: props.core.strings },
-		{ excludePoints: ['console'] }
-	).find((entry) => entry.id === id)
+	return addSources().find((entry) => entry.id === id)
 })
 
 const addDraftKey = ref(0)
@@ -243,6 +255,7 @@ function previewContext(draft: ToolbarItem): HeadContext {
 		strings: props.strings,
 		display: props.display,
 		iconResolver: props.iconResolver,
+		theme: themeEnabled.value ? props.theme : undefined,
 		onOpenConsole: (mode) => props.consoleStore.open(mode),
 	}
 }
@@ -373,6 +386,7 @@ watch(
 							:point="inspectedPoint"
 							:strings="strings"
 							:icon-choices="iconChoices"
+							:theme-enabled="themeEnabled"
 							:patch="(apply) => { const item = props.inspected; if (item !== undefined) props.patchLive(item, apply) }"
 							:on-delete="onDeleteInspected"
 						/>
@@ -390,6 +404,7 @@ watch(
 									:point="addDraftPoint !== undefined ? addDraftPoint : undefined"
 									:strings="strings"
 									:icon-choices="iconChoices"
+									:theme-enabled="themeEnabled"
 									:deletable="false"
 									:patch="patchDraft"
 								/>
@@ -400,7 +415,7 @@ watch(
 										data-testid="console-add-preview-content"
 										@pointerdown="(event) => onPreviewPointerdown(event, addDraft!)"
 									>
-										<HeadItem :context="previewContext(addDraft)" />
+										<HeadItem :context="previewContext(addDraft)" :theme-enabled="themeEnabled" />
 									</div>
 								</div>
 							</template>

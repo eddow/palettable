@@ -6,6 +6,7 @@
  * top-level dictionaries with `catalog.*` as a legacy alias.
  */
 import { describe, expect, it } from 'vitest'
+import { defaultIdeStrings, resolveIdeStrings } from './ide-strings.js'
 import { bundleCatalogStrings, defaultCatalogStrings, resolveCatalogStrings } from './strings.js'
 
 describe('resolveCatalogStrings', () => {
@@ -52,5 +53,13 @@ describe('bundleCatalogStrings', () => {
 	it('keeps the English default object untouched', () => {
 		resolveCatalogStrings({ pointLabels: { lamp: 'Lampe' } })
 		expect(defaultCatalogStrings.pointLabels).toBeUndefined()
+	})
+})
+
+describe('resolveIdeStrings (single adapter-shared copy)', () => {
+	it('merges controlNames per control id', () => {
+		const resolved = resolveIdeStrings({ controlNames: { toggle: 'Bascule' } })
+		expect(resolved.controlNames).toMatchObject({ toggle: 'Bascule', select: 'Select' })
+		expect(defaultIdeStrings.commandPlaceholder).toBe('Command…')
 	})
 })

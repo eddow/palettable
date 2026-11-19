@@ -884,7 +884,7 @@ describe('per-tool value sync', () => {
 		const host = document.createElement('div')
 		document.body.append(host)
 		hosts.push(host)
-		const ide = createIDE(host, { core, consoleStore, isEditable: () => false })
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false, theme: true })
 		const button = host.querySelector('[data-testid="theme-tool"]') as HTMLButtonElement | null
 		expect(button).not.toBe(null)
 		// Icon-value only: the current option icon, no text label.
@@ -1306,6 +1306,182 @@ describe('editing chrome without rebuild', () => {
 		)
 		expect(keys).toContain('Control')
 		ide.dispose()
+	})
+})
+
+describe('theme opt-in (IdeOptions.theme)', () => {
+	function themeSetup(
+		options?: {
+			theme?: boolean | import('./theme.js').ThemeSetting
+			itemControls?: readonly string[]
+		} & Record<string, unknown>
+	) {
+		const core = new PaletteCore(
+			[
+				{
+					id: 'theme',
+					label: 'Theme',
+					type: 'nothing',
+					options: [
+						{ value: 'light', icon: '☀️', label: 'Light' },
+						{ value: 'dark', icon: '🌙', label: 'Dark' },
+						{ value: 'system', icon: '💻', label: 'System' },
+					],
+				},
+			],
+			{
+				initialLayout: {
+					version: 1,
+					borders: {
+						top: [[{ space: 1, toolbar: [{ point: 'theme', control: 'theme' }] }]],
+						right: [],
+						bottom: [],
+						left: [],
+					},
+				},
+			}
+		)
+		const consoleStore = new ConsoleStore()
+		const host = document.createElement('div')
+		document.body.append(host)
+		hosts.push(host)
+		const ide = createIDE(host, { core, consoleStore, isEditable: () => false, ...options })
+		return { core, consoleStore, ide, host }
+	}
+
+	it('omitted theme hides the tool and writes nothing to the root', () => {
+		delete document.documentElement.dataset.theme
+		const { ide, host } = themeSetup()
+		expect(host.querySelector('[data-testid="theme-tool"]')).toBe(null)
+		expect(document.documentElement.dataset.theme).toBeUndefined()
+		ide.dispose()
+	})
+
+	it('omitted theme excludes a persisted theme item from the add list and keyboard Enter', () => {
+		delete document.documentElement.dataset.theme
+		const { ide, host, consoleStore } = themeSetup({ theme: false })
+		consoleStore.open('edit')
+		const input = host.querySelector('[data-testid="console-input"]') as HTMLInputElement | null
+		expect(input).not.toBe(null)
+		input!.value = 'Theme'
+		input!.dispatchEvent(new Event('input', { bubbles: true }))
+		const rows = [
+			...host.querySelectorAll('[data-testid="console-results"] .palette-default-command-result'),
+		]
+		expect(rows.some((row) => row.textContent?.includes('Theme'))).toBe(false)
+		input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+		expect(consoleStore.snapshot.selectedEntryId).toBeUndefined()
+		ide.dispose()
+	})
+
+	it('omitted theme drops an explicit itemControls theme entry', () => {
+		delete document.documentElement.dataset.theme
+		const { ide, host, consoleStore } = themeSetup({
+			theme: false,
+			itemControls: ['commandBox', 'drawer', 'status', 'theme'],
+		} as never)
+		consoleStore.open('edit')
+		const input = host.querySelector('[data-testid="console-input"]') as HTMLInputElement | null
+		input!.value = ''
+		input!.dispatchEvent(new Event('input', { bubbles: true }))
+		const rows = [
+			...host.querySelectorAll('[data-testid="console-results"] .palette-default-command-result'),
+		]
+		expect(rows.some((row) => row.textContent?.includes('Theme'))).toBe(false)
+		ide.dispose()
+	})
+
+	it('theme: true renders the tool and cycles the root setting', async () => {
+		delete document.documentElement.dataset.theme
+		const { ide, host } = themeSetup({ theme: true })
+		const tool = host.querySelector('[data-testid="theme-tool"]') as HTMLButtonElement | null
+		expect(tool).not.toBe(null)
+		// Explicit consumer write before any click: the tool follows the mirror.
+		const { createThemeSetting } = await import('./theme.js')
+		const shared = createThemeSetting(document.documentElement)
+		expect(shared.value).toBe('system')
+		tool!.click()
+		expect(document.documentElement.dataset.theme).toBe('light')
+		expect(tool!.querySelector('.palette-default-icon')?.textContent).toBe('☀️')
+		shared.dispose()
+		delete document.documentElement.dataset.theme
+		ide.dispose()
+	})
+
+	it('disposing one IDE keeps a shared setting alive for the other', async () => {
+		delete document.documentElement.dataset.theme
+		const { createThemeSetting } = await import('./theme.js')
+		const shared = createThemeSetting(document.documentElement)
+		const first = themeSetup({ theme: shared })
+		const second = themeSetup({ theme: shared })
+		first.ide.dispose()
+		// First IDE owned nothing: the shared observer and listeners survive.
+		shared.set('dark')
+		expect(document.documentElement.dataset.theme).toBe('dark')
+		expect(second.host.querySelector('[data-testid="theme-tool"]')).not.toBe(null)
+		second.ide.dispose()
+		// Caller still owns the setting after both IDEs are gone.
+		shared.set('light')
+		expect(document.documentElement.dataset.theme).toBe('light')
+		shared.dispose()
+		delete document.documentElement.dataset.theme
+	})
+
+	it('disposing a theme: true IDE disposes its owned setting', async () => {
+		delete document.documentElement.dataset.theme
+		const { ide, host } = themeSetup({ theme: true })
+		// Owned mirror applies the seeded setting on first paint.
+		expect(document.documentElement.dataset.theme).toBe('system')
+		expect(host.querySelector('[data-testid="theme-tool"]')).not.toBe(null)
+		ide.dispose()
+		// Owned setting disposed: external root edits no longer notify.
+		const { createThemeSetting } = await import('./theme.js')
+		const probe = createThemeSetting(document.documentElement)
+		const seen: string[] = []
+		probe.subscribe((next) => seen.push(next))
+		document.documentElement.dataset.theme = 'dark'
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(seen).toEqual(['dark'])
+		probe.dispose()
+		delete document.documentElement.dataset.theme
+	})
+
+	it('a custom head observes the shared mirror with the tool omitted', async () => {
+		delete document.documentElement.dataset.theme
+		const { createThemeSetting } = await import('./theme.js')
+		const { themePresenter } = await import('@palettable/core')
+		const shared = createThemeSetting(document.documentElement)
+		const seen: string[] = []
+		shared.subscribe((next) => seen.push(next))
+		// Mounted custom head with the tool omitted: presenter re-reads the
+		// mirror, so external writes stay observable.
+		const renderCustomHead = () =>
+			themePresenter(
+				{
+					point: 'theme',
+					control: 'stars',
+					config: { icon: '🎨', label: 'Theme', hint: 'Custom head' },
+				} as never,
+				{
+					point: {
+						id: 'theme',
+						type: 'nothing',
+						options: [
+							{ value: 'light', icon: '☀️' },
+							{ value: 'dark', icon: '🌙' },
+							{ value: 'system', icon: '💻' },
+						],
+					} as never,
+					value: shared.value,
+					bags: [],
+				}
+			)
+		expect(renderCustomHead().value).toBe('system')
+		shared.set('dark')
+		expect(renderCustomHead().valueIcon).toBe('🌙')
+		expect(seen).toEqual(['dark'])
+		shared.dispose()
+		delete document.documentElement.dataset.theme
 	})
 })
 

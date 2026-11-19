@@ -284,6 +284,7 @@ const ide = createIDE(ideHost, {
 	core,
 	consoleStore,
 	isEditable: () => editable,
+	theme: true,
 	itemControls: ['commandBox', 'drawer', 'status', 'theme'],
 	paletteId: 'demo',
 	iconResolver: demoIconResolver,
