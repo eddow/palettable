@@ -41,6 +41,7 @@ import {
 import BorderStack from './BorderStack.vue'
 import ConsoleOverlay from './ConsoleOverlay.vue'
 import { layoutRevisionKey } from './revision-key.js'
+import { toolbarKeyOf, trackKeyOf } from './identity-key.js'
 import { barRegistryKey, createBarRegistry } from './bar-registry.js'
 import { ideDragApiKey } from './ide-drag-api.js'
 import { startDragSession } from '../drag-session.js'
@@ -105,11 +106,28 @@ const barRegistry = createBarRegistry()
 provide(barRegistryKey, barRegistry)
 provide(layoutRevisionKey, layoutRevision)
 
+/**
+ * Applied-highlight mirror: the last lit state per drop-zone, keyed
+ * structurally (identity-stable toolbar/track ids + gap index — the
+ * session creates fresh DZ objects per decision, so object identity
+ * cannot dedupe).
+ *
+ * The session diffs paint against its own baseline and emits `on` only
+ * on change — so a highlight that arrives while the post-commit DOM is
+ * not yet rendered (same `over()` pass as the `structure` event) is
+ * dropped by `applyHighlight` (no node to toggle) and never re-emitted.
+ * The mirror re-applies the lit entries after the declarative re-render
+ * flushes (see `applyStructureEvent`), converging DOM paint with the
+ * session baseline. `off` events delete the entry. Cleared on drag end
+ * and editing-off alongside the class clear.
+ */
+const appliedHighlights = new Map<string, { dz: DropZone; state: HighlightState }>()
+
 provide(ideDragApiKey, {
 	barPointerdown: (event, toolbar, region) => onBarPointerdown(event, toolbar, region),
 	barPointermove: (event, toolbar) => onBarPointermove(event, toolbar),
 	barPointerover: (event, toolbar) => onBarPointerover(event, toolbar),
-	guardPointerdown: (event, toolbar, item) => onGuardPointerdown(event, toolbar, item),
+	guardPointerdown: (event) => onGuardPointerdown(event),
 	inspect: (item) => onInspect(item),
 	parkingPointermove: (event) => onParkingPointermove(event),
 	parkingPointerleave: (event) => onParkingPointerleave(event),
@@ -144,11 +162,19 @@ let slideQueueWrite: (() => void) | undefined
 let slideCleanup: (() => void) | undefined
 const maskLitRegions = new Set<PaletteRegion>()
 let panelMaskLit = false
-/** Last track-gap hover sent to the session (idempotency memo — mirrors
- * vanilla's `hoveredTrackSpace`: the fresh toolbar sits under the pointer
- * after a commit, so re-sending the same gap would commit a duplicate
- * toolbar for it). Cleared on drag end; keyed per track object. */
-let hoveredTrackSpace: { track: Track; gap: number } | undefined
+/** Last track-gap hover committed (idempotency memo — mirrors
+ * vanilla's `hoveredTrackSpace`: a bare gap index. After a commit the
+ * fresh toolbar sits under the pointer — re-sending the same gap would
+ * commit a duplicate toolbar for it. Keyed on the gap index alone, NOT
+ * the `Track` object: vanilla uses a plain number and the commit
+ * splices fresh arrays. Cleared when the pointer leaves the track-gap
+ * surface or the track element; KEPT when the pointer is over a toolbar
+ * (the fresh toolbar covers the gap after a commit — clearing there
+ * would re-arm on the next move). */
+let hoveredTrackSpace: number | undefined
+
+/** Track object of the last committed track-gap hover (memo identity half: the gap index alone re-arms across stale-prop renders — the live track identity distinguishes a consumed gap from a fresh one). */
+let hoveredTrackRef: Track | undefined
 
 /** Live drag flag (plain function — `computed` never re-evaluates for module `let`). */
 function isDragLive(): boolean {
@@ -268,6 +294,12 @@ function gapNodeFor(dz: DropZone): HTMLElement | undefined {
  * declarative re-render re-registers them; the rendered order mirrors
  * the live layout order, so scan the connected bars and match by live
  * identity via `toolbarAtElement`.
+ *
+ * Invalidated bars (stale toolbar object reused across a commit) resolve
+ * `undefined` here: the DOM-order scan in `toolbarAtElement` indexes the
+ * LIVE layout arrays, so a bar whose toolbar has no live slot (pruned
+ * origin, replaced singleton) matches nothing — and `gapNodeFor` then
+ * skips the paint instead of lighting a dead node.
  */
 function barForToolbar(toolbar: Toolbar): HTMLElement | undefined {
 	const root = ideRootRef.value
@@ -296,7 +328,60 @@ function trackElementFor(track: Track): HTMLElement | undefined {
 	return undefined
 }
 
+/**
+ * Structural key for a drop-zone: stable across the session's per-decision
+ * DZ object recreations (identity-key ids survive commits; pruned objects
+ * release via WeakMap so a stale entry can never collide with a fresh gap).
+ */
+function highlightKeyOf(dz: DropZone): string {
+	switch (dz.kind) {
+		case 'item-gap':
+			return `item:${toolbarKeyOf(dz.toolbar)}:${dz.gap}`
+		case 'track-gap':
+			return `track:${trackKeyOf(dz.track)}:${dz.gap}`
+		case 'stack-gap':
+		case 'outside': {
+			// Borders are stable per region (never replaced) — resolve the
+			// region live so the key survives DZ object recreation.
+			const live = props.core.layout.getLayout()
+			const regions = ['top', 'right', 'bottom', 'left'] as const
+			const region = regions.find((name) => live.borders[name] === dz.border) ?? '?'
+			return `stack:${region}:${dz.gap}`
+		}
+		case 'parking-gap':
+			return `parking:${dz.gap}`
+	}
+}
+
+/** Mirror a highlight event into `appliedHighlights` (`off` deletes). */
+function recordHighlight(dz: DropZone, state: HighlightState): void {
+	if (state === 'off') {
+		appliedHighlights.delete(highlightKeyOf(dz))
+		return
+	}
+	appliedHighlights.set(highlightKeyOf(dz), { dz, state })
+}
+
+/**
+ * Re-apply every lit mirror entry (post-structure re-render flush).
+ * Entries whose nodes still do not resolve (pruned gaps) are dropped —
+ * the session baseline already forgot them, so re-emitting is impossible
+ * and holding them would paint a gap the engine considers dark.
+ */
+function reapplyHighlights(): void {
+	for (const [key, entry] of [...appliedHighlights]) {
+		const node = gapNodeFor(entry.dz)
+		if (!(node instanceof HTMLElement)) {
+			appliedHighlights.delete(key)
+			continue
+		}
+		node.classList.toggle('highlighted', true)
+		node.classList.toggle('hovered', entry.state === 'double')
+	}
+}
+
 function applyHighlight(dz: DropZone, state: HighlightState): void {
+	recordHighlight(dz, state)
 	const on = state === 'on' || state === 'double'
 	const hovered = state === 'double'
 	const node = gapNodeFor(dz)
@@ -357,8 +442,19 @@ function remeasureSlideSpan(): void {
  * re-sync the registry to the live elements, re-arm the slide frame,
  * and re-apply the drag chrome. The scheduled re-render (`bump()`)
  * then reconciles declaratively on top of already-correct paint.
+ *
+ * Highlights of the same `over()` pass that name post-commit nodes
+ * cannot resolve yet (the DOM still shows the pre-commit structure) —
+ * they are recorded in `appliedHighlights` and re-applied after the
+ * re-render flushes (see `reapplyHighlights`), converging with the
+ * session baseline the diff will never re-emit.
  */
 function applyStructureEvent(): void {
+	// Mirror the session's `afterStructure()`: the paint baseline is
+	// dropped with no `off` emissions, so the mirror must drop too —
+	// otherwise the flush below would re-light gaps the session already
+	// forgot. The pass's own highlights arrive after this and re-record.
+	appliedHighlights.clear()
 	syncBarRegistryToLiveDom()
 	applyDragChrome()
 	rearmSlideAfterStructure()
@@ -366,6 +462,16 @@ function applyStructureEvent(): void {
 	void nextTick(() => {
 		reopenTrackedDrawers()
 		syncBarRegistryToLiveDom()
+		// The re-render recreates bars (fresh nodes, no paint) but patches
+		// track/stack gaps in place (stale pre-commit paint survives on the
+		// same nodes — and the session never emits `off` for paint its
+		// cleared baseline forgot). Wipe everything, then re-light exactly
+		// what the mirror recorded; re-apply the drag chrome the re-render
+		// destroyed with the old bar node.
+		const root = ideRootRef.value
+		if (root instanceof HTMLElement) clearGapClasses(root)
+		reapplyHighlights()
+		applyDragChrome()
 	})
 }
 
@@ -391,19 +497,33 @@ function syncBarRegistryToLiveDom(): void {
 		const trackEls = [...borderEl.querySelectorAll(':scope > .toolbar-track')].filter(
 			(node): node is HTMLElement => node instanceof HTMLElement
 		)
-		const ordered = region === 'right' || region === 'bottom' ? [...trackEls].reverse() : trackEls
-		for (let trackIndex = 0; trackIndex < border.length; trackIndex += 1) {
-			const track = border[trackIndex]
+		const inverse = region === 'right' || region === 'bottom'
+		for (let position = 0; position < trackEls.length; position += 1) {
+			const positionedTrack = border[inverse ? border.length - 1 - position : position]
+			const track = positionedTrack
 		if (track === undefined) continue
-			const trackEl = ordered[trackIndex]
+			// DOM order is render order: the live index maps from the DOM
+			// position (single mapping — never a pre-reversed copy).
+			const trackEl = trackEls[position]
 			if (trackEl instanceof HTMLElement) barRegistry.setTrack(track, trackEl)
 			if (!(trackEl instanceof HTMLElement)) continue
 			const slotEls = [...trackEl.querySelectorAll(':scope > .toolbar-track-slot')].filter(
 				(node): node is HTMLElement => node instanceof HTMLElement
 			)
+			// The DOM still shows the pre-commit structure when this runs
+			// (the declarative re-render has not run yet): pair slot
+			// elements to LIVE slots by render position — the DOM order
+			// IS the live order minus the commit delta, and the bar
+			// occupying each rendered slot is the bar for the live
+			// toolbar now at that position. The freshly extracted
+			// singleton reuses the dragged bar node (same DOM position),
+			// so the bar sitting in the slot the fresh toolbar now
+			// occupies is its live bar. Identity checks against the
+			// pre-commit DOM would resolve every bar to the OLD toolbar
+			// (same object the drag grabbed) and veto the correct sync.
 			for (let slotIndex = 0; slotIndex < track.length; slotIndex += 1) {
 				const toolbar = track[slotIndex]?.toolbar
-			if (toolbar === undefined) continue
+				if (toolbar === undefined) continue
 				const slotEl = slotEls[slotIndex]
 				if (!(slotEl instanceof HTMLElement)) continue
 				const bar = slotEl.querySelector(':scope > .toolbar')
@@ -627,11 +747,13 @@ function endToolDrag(): void {
 	disarmSlide()
 	dragSession = undefined
 	draggingState = undefined
-	lastPointerMoveStamp = undefined
 	slideGrabOffset = undefined
 	slideItemGrab = undefined
 	hoveredTrackSpace = undefined
+	hoveredTrackRef = undefined
+	maskLitRegions.clear()
 	panelMaskLit = false
+	appliedHighlights.clear()
 	clearDragChrome()
 	const root = ideRootRef.value
 	if (root instanceof HTMLElement) clearGapClasses(root)
@@ -770,7 +892,7 @@ function paintItemSpaces(
 		return
 	}
 	if (hovered === undefined && activeItem === undefined) {
-		session.over({ kind: 'toolbar', toolbar }, pointerSample(event))
+			session.over({ kind: 'toolbar', toolbar }, pointerSample(event))
 		return
 	}
 	const hover: Hoverable =
@@ -979,7 +1101,28 @@ function onInspect(item: ToolbarItem): void {
 	inspected.value = item
 }
 
-function onGuardPointerdown(event: PointerEvent, toolbar: Toolbar, item: ToolbarItem): void {
+/** Guard grab: resolve the live toolbar + item from the pointer at grab time.
+ * The guard emits only the event (no toolbar/item props): a bubbled
+ * `pointerdown` can race a structural commit, so render-time props may
+ * already be stale. The wrapper's `data-item-index` + the bar registry
+ * pin the live objects; a drawer-child guard resolves through the drawer
+ * path. (Vanilla closes over render-time values via `makeGuard(resolve)`
+ * — safe there because the node map re-syncs synchronously in the commit
+ * pass; the declarative adapter must look up live instead.)
+ */
+function onGuardPointerdown(event: PointerEvent): void {
+	const target = event.target
+	if (!(target instanceof HTMLElement)) return
+	const wrapper = target.closest('[data-item-index]')
+	if (!(wrapper instanceof HTMLElement)) return
+	const itemIndex = Number(wrapper.dataset.itemIndex)
+	if (!Number.isInteger(itemIndex)) return
+	const bar = wrapper.closest('.toolbar')
+	if (!(bar instanceof HTMLElement)) return
+	const toolbar = toolbarOfBar(bar) ?? toolbarAtElement(bar)
+	if (toolbar === undefined) return
+	const item = toolbar[itemIndex]
+	if (item === undefined) return
 	inspected.value = item
 	startToolDrag(event, toolbar, item)
 }
@@ -1020,6 +1163,15 @@ function onBarPointermove(event: PointerEvent, toolbar: Toolbar): void {
 		const gapEl = under.closest('[data-track-space-index]')
 		if (gapEl instanceof HTMLElement && under.closest('.toolbar') === null) return
 	}
+	// Stale-prop guard: the emitted `toolbar` prop may predate the latest
+	// structural commit (same component instance, updated prop racing the
+	// bubbled event). Resolve the live toolbar from the element under the
+	// pointer; the prop is only the fallback for position-based events.
+	// A hover that reaches a bar neutralizes the mask the same way a
+	// track-gap hover does (see onTrackPointermove): mask bits are
+	// paint-only and must never outlive the session diff.
+	paintMask(false)
+	paintPanelMask(false)
 	const openedDrawer = maybeOpenDrawerAt(event)
 	closeUnrelatedDrawers(under ?? event.target, openedDrawer ?? undefined)
 	const target = under ?? (event.target instanceof HTMLElement ? event.target : undefined)
@@ -1033,7 +1185,10 @@ function onBarPointermove(event: PointerEvent, toolbar: Toolbar): void {
 	if (target.closest('.palettable-drawer__popup')) return
 	const liveBar = target.closest('.toolbar')
 	if (!(liveBar instanceof HTMLElement)) return
-	const liveToolbar = toolbarOfBar(liveBar) ?? toolbarAtElement(liveBar)
+	// Live-first resolution (see `toolbarOfBar`): the registry is re-synced
+	// on every structural commit, so it already points at the fresh bar;
+	// the prop fallback covers the pre-mount window only.
+	const liveToolbar = toolbarOfBar(liveBar) ?? toolbarAtElement(liveBar) ?? toolbar
 	if (liveToolbar === undefined) return
 	const hoveredDrawerItem = drawerItemOfTarget(target, liveBar)
 	if (hoveredDrawerItem !== undefined) {
@@ -1241,16 +1396,36 @@ function onParkingPointerleave(event: PointerEvent): void {
 	dragSession?.over(null, pointerSample(event))
 }
 
+/** Resolve the live `Track` behind a rendered `.toolbar-track` node. */
+function trackOfElement(trackEl: HTMLElement): Track | undefined {
+	// The DOM stamps the live track index (`BorderStack` passes
+	// `orderedIndices[position - 1]`, a live index, as `track-index`),
+	// so it indexes the live border directly — no render-order mapping.
+	const trackIndex = Number(trackEl.dataset.trackIndex)
+	if (!Number.isInteger(trackIndex)) return undefined
+	const borderEl = trackEl.closest('.toolbar-border')
+	if (!(borderEl instanceof HTMLElement)) return undefined
+	const region = borderEl.dataset.region as PaletteRegion | undefined
+	if (region === undefined) return undefined
+	const live = props.core.layout.getLayout()
+	return live.borders[region]?.[trackIndex]
+}
+
 function onTrackPointermove(event: PointerEvent, track: Track, _trackIndex: number): void {
 	const session = dragSession
 	if (!session) return
 	const under = coordinateTarget(event)
 	const target = under ?? (event.target instanceof HTMLElement ? event.target : undefined)
 	if (!(target instanceof HTMLElement)) return
-	if (target.closest('.toolbar')) {
-		hoveredTrackSpace = undefined
-		return
-	}
+	// Inside a toolbar → that toolbar owns the perpendicular DZs.
+	// Keep the memo (vanilla `hoveredTrackSpace` discipline): after a
+	// commit the fresh toolbar sits under the pointer, and clearing here
+	// would re-arm the same gap on the next move (duplicate toolbar).
+	// Stale-prop guard: the emitted `track` may predate the latest
+	// structural commit (the commit splices a fresh track array while the
+	// component instance keeps the old prop). Resolve the live track by
+	// identity — the gap element's own track beats the stale prop.
+	if (target.closest('.toolbar')) return
 	const spaceEl = target.closest('[data-track-space-index]')
 	if (!spaceEl) {
 		hoveredTrackSpace = undefined
@@ -1261,18 +1436,37 @@ function onTrackPointermove(event: PointerEvent, track: Track, _trackIndex: numb
 		hoveredTrackSpace = undefined
 		return
 	}
-	// Idempotency memo (vanilla `hoveredTrackSpace`): same gap = no-op.
-	if (hoveredTrackSpace?.track === track && hoveredTrackSpace.gap === index) return
-	hoveredTrackSpace = { track, gap: index }
+	// Any true track/stack/outside hover clears the center mask + panel
+	// hover paints: the mask is paint-only (never via the session), so a
+	// stale mask bit would outlive the session highlight diff and read as
+	// a phantom lit gap.
+	paintMask(false)
+	paintPanelMask(false)
+	// Idempotency memo: same gap = no-op (the fresh toolbar sits under
+	// the pointer after a commit — re-committing would build a second
+	// toolbar for the same gap). Keyed on the gap element's track
+	// identity, so a stale prop from a pre-commit render can never
+	// re-arm a gap the live layout already consumed.
+	const gapTrackEl = spaceEl.closest('.toolbar-track')
+	const gapTrack = gapTrackEl instanceof HTMLElement ? trackOfElement(gapTrackEl) : undefined
+	const liveTrack = gapTrack ?? track
+	if (hoveredTrackSpace === index && hoveredTrackRef === liveTrack) return
+	hoveredTrackSpace = index
+	hoveredTrackRef = liveTrack
 	slideRearmEvent = event
-	session.over({ kind: 'track-gap', track, gap: index }, pointerSample(event))
+	session.over({ kind: 'track-gap', track: liveTrack, gap: index }, pointerSample(event))
 	slideRearmEvent = undefined
 }
 
 function onTrackPointerleave(event: PointerEvent, _track: Track, _trackIndex: number): void {
-	void event
-	void _track
-	void _trackIndex
+	// Leaving the track element clears the memo (vanilla `pointerleave`);
+	// the bubbling bar/track nesting means a move between two bars inside
+		// the same track must NOT clear: only a true leave (target ===
+	// currentTarget) resets. A cleared memo re-arms the same gap on the
+	// next move (duplicate toolbar).
+	if (event.target !== event.currentTarget) return
+	hoveredTrackSpace = undefined
+	hoveredTrackRef = undefined
 }
 
 /** Drawer-child hover: item-gap paint + commit, same session path as borders. */
@@ -1286,6 +1480,8 @@ function onDrawerPointermove(event: PointerEvent): void {
 	}
 	const under = coordinateTarget(event)
 	closeUnrelatedDrawers(under ?? event.target)
+	paintMask(false)
+	paintPanelMask(false)
 	if (!editing.value) return
 	const target = under ?? (event.target instanceof HTMLElement ? event.target : undefined)
 	if (!(target instanceof HTMLElement)) return

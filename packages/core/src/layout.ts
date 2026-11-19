@@ -1533,6 +1533,14 @@ export function dragOver(
 	// Parking rows have no track fallback — the decision is empty and the
 	// session's `parkingFlanks` merge paints the flanking parking gaps, so
 	// a parking bar-background hover (no active item) still lights flanks.
+	// NOTE (whole-toolbar slide zone): the Vue adapter's bar handler sends
+	// a `toolbar` hover (active-item anchored) rather than a `tool` hover
+	// for guard/edge targets, so this branch MUST apply the same zone
+	// short-circuit as the `tool` branch above. Returning the anchored
+	// fallback here instead would compute the dragged toolbar's own flanks
+	// via `trackSpaceHighlight`, which are sliding-vetoed to empty — the
+	// session would then emit no highlight at all and the zone paint
+	// died with the extraction that created it.
 	if (element.kind === 'toolbar') {
 		// Inside the slide zone (the dragged toolbar's own background): the
 		// bar carries no item anchor, but the zone still paints the edges.

@@ -39,7 +39,7 @@
 		"dev": "vite",
 		"build": "rollup -c",
 		"prepack": "rollup -c",
-		"check": "tsc --noEmit -p ./tsconfig.json",
+		"check": "vue-tsc --noEmit -p tsconfig.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"preview": "vite preview",

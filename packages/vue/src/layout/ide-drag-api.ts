@@ -16,7 +16,7 @@ export type IdeDragApi = {
 	barPointerdown(event: PointerEvent, toolbar: Toolbar, region: PaletteRegion): void
 	barPointermove(event: PointerEvent, toolbar: Toolbar): void
 	barPointerover(event: PointerEvent, toolbar: Toolbar): void
-	guardPointerdown(event: PointerEvent, toolbar: Toolbar, item: ToolbarItem): void
+	guardPointerdown(event: PointerEvent): void
 	inspect(item: ToolbarItem): void
 	parkingPointermove(event: PointerEvent): void
 	parkingPointerleave(event: PointerEvent): void

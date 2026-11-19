@@ -59,7 +59,7 @@ onBeforeUnmount(() => {
 
 const emit = defineEmits<{
 	inspect: [item: ToolbarItem]
-	guardPointerdown: [event: PointerEvent, toolbar: Toolbar, item: ToolbarItem]
+	guardPointerdown: [event: PointerEvent]
 	barPointerdown: [event: PointerEvent, toolbar: Toolbar]
 	barPointermove: [event: PointerEvent, toolbar: Toolbar]
 	barPointerover: [event: PointerEvent, toolbar: Toolbar]
@@ -127,7 +127,7 @@ function fingerprint(item: ToolbarItem): string {
 				:editing="editing"
 				:inspected="isInspected(toolbar[gap - 1]!)"
 				@inspect="(item) => emit('inspect', item)"
-				@guard-pointerdown="(event, item) => emit('guardPointerdown', event, toolbar, item)"
+				@guard-pointerdown="(event) => emit('guardPointerdown', event)"
 			/>
 		</template>
 	</div>

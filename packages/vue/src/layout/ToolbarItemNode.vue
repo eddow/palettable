@@ -9,6 +9,13 @@
  * an inert ancestor would remove the inline popup from hit-testing) with
  * the head control, plus a `.toolbar-item-guard` in edit mode
  * (`pointerdown` selects for the configurator + starts the tool drag).
+ *
+ * The guard emits only the pointer event: the IDE shell resolves the
+ * live toolbar + item from the event target at grab time (identity scan
+ * over the live layout — never a possibly stale component prop). This
+ * mirrors the vanilla `makeGuard(wrapper, resolve)` closure, where the
+ * guard resolves `{ toolbar, item }` lazily on `pointerdown` instead of
+ * closing over the render-time values.
  */
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import type { ToolbarItem } from '@palettable/core'
@@ -28,7 +35,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	inspect: [item: ToolbarItem]
-	guardPointerdown: [event: PointerEvent, item: ToolbarItem]
+	guardPointerdown: [event: PointerEvent]
 }>()
 
 const pointId = computed(() => {
@@ -73,8 +80,7 @@ onBeforeUnmount(() => {
 })
 
 function onGuardPointerdown(event: PointerEvent): void {
-	emit('inspect', props.item)
-	emit('guardPointerdown', event, props.item)
+	emit('guardPointerdown', event)
 }
 </script>
 

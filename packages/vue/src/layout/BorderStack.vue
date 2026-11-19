@@ -32,7 +32,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	inspect: [item: ToolbarItem]
-	guardPointerdown: [event: PointerEvent, toolbar: Toolbar, item: ToolbarItem]
+	guardPointerdown: [event: PointerEvent]
 	barPointerdown: [event: PointerEvent, toolbar: Toolbar, region: PaletteRegion]
 	barPointermove: [event: PointerEvent, toolbar: Toolbar]
 	barPointerover: [event: PointerEvent, toolbar: Toolbar]
@@ -92,7 +92,7 @@ function stackGapAt(position: number): number {
 				:context-for="contextFor"
 				:inspected-item="inspectedItem"
 				@inspect="(item) => emit('inspect', item)"
-				@guard-pointerdown="(event, toolbar, item) => emit('guardPointerdown', event, toolbar, item)"
+				@guard-pointerdown="(event) => emit('guardPointerdown', event)"
 				@bar-pointerdown="(event, toolbar) => emit('barPointerdown', event, toolbar, region)"
 				@bar-pointermove="(event, toolbar) => emit('barPointermove', event, toolbar)"
 				@bar-pointerover="(event, toolbar) => emit('barPointerover', event, toolbar)"

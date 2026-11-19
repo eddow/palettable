@@ -25,7 +25,8 @@
  * - `paletteToolbarItemFromSpec` / `paletteToolbarItemFromDerivedVariant`
  *   (which resolve control registries + components) stay adapter-owned —
  *   core has no components. The builders emit runnables + variant descriptors;
- *   adapters map them to items.
+ *   `itemFromAddSelection` maps a chosen variant to a `ToolbarItem` (pure
+ *   data, tested here) and adapters re-export it.
  */
 
 import { entryIdOf } from './catalog.js'
@@ -63,7 +64,10 @@ import {
 	splitCommandWords,
 	uniqueNormalized,
 } from './catalog.js'
-import { type CatalogStrings, resolveCatalogStrings } from './strings.js'
+import type { ControlDefaults, ControlRegistry } from './controls.js'
+import type { SurfaceContext, ToolbarItem } from './layout.js'
+import { resolveControl } from './presenters.js'
+import { humanizeId, type CatalogStrings, resolveCatalogStrings } from './strings.js'
 
 /** Search query accepted by `filterCommandEntries`. */
 export type CommandBoxQuery = {
@@ -384,6 +388,151 @@ export function paletteDerivedVariants(
 			spec: source.pointId,
 		},
 	]
+}
+
+/** Console add-flow selection: an add-list entry plus the chosen variant. */
+export type AddSelection = {
+	readonly source: AddableEntry
+	readonly variant: DerivedVariant
+}
+
+/** Control fallback chain for a fresh item (top surface, no explicit control). */
+function addItemControlFor(
+	point: AnyPoint | undefined,
+	registry: ControlRegistry | undefined,
+	defaults: ControlDefaults | undefined
+): string | undefined {
+	const surface: SurfaceContext = { axis: 'horizontal', region: 'top' }
+	const resolved = resolveControl(point, surface, registry, defaults, undefined)
+	if (resolved !== undefined) return resolved
+	// No registry (adapters pass none in unit fixtures): fall back to the
+	// family default so the draft/preview still renders a real control.
+	if (point !== undefined && isActionPoint(point)) return 'button'
+	if (point === undefined || !isValuedPoint(point)) return 'status'
+	if (point.type === 'boolean') return 'toggle'
+	if (point.type === 'enum') return 'select'
+	return 'slider'
+}
+
+function addItemLabelOf(point: AnyPoint | undefined, fallback: string): string {
+	const label = point !== undefined && 'label' in point ? point.label : undefined
+	return typeof label === 'string' && label.length > 0 ? label : fallback
+}
+
+function addItemIconOf(point: AnyPoint | undefined, fallback: string | undefined): string | undefined {
+	const icon = point !== undefined && 'icon' in point ? point.icon : undefined
+	return typeof icon === 'string' ? icon : fallback
+}
+
+/**
+ * Build a `ToolbarItem` from a console add-flow selection (entry + variant).
+ *
+ * Pure over point definitions (no components — the single implementation
+ * both adapters share): `item` variants become control-only items;
+ * `tool`/`action` variants become spec-bound tools with the family default
+ * control; `set` variants become spec-bound tools with the bare point id.
+ * Returns `undefined` when the selection cannot materialize (unknown
+ * point, mismatched family).
+ */
+export function itemFromAddSelection(
+	selection: AddSelection,
+	points: readonly AnyPoint[],
+	registry?: ControlRegistry,
+	defaults?: ControlDefaults
+): ToolbarItem | undefined {
+	const { source, variant } = selection
+	if (variant.kind === 'item') {
+		if (!variant.control) return undefined
+		// Nothing-points bind 1:1 by plain id (mirrors the hydration
+		// migration `{ point: control, control }` in `layout.ts`): a point-less
+		// item breaks `canonicalItemPoint` (throws) and every head renderer
+		// that resolves the point. Drawers additionally need their nested
+		// track (empty until the user fills it after drop).
+		const item = {
+			point: variant.control,
+			control: variant.control,
+			config: {
+				icon: variant.icon ?? '⌘',
+				label: variant.label,
+				hint: variant.meta,
+			},
+		} as ToolbarItem & { toolbar?: never[] }
+		if (variant.control === 'drawer') {
+			;(item as { toolbar?: never[] }).toolbar = []
+		}
+		return item
+	}
+	if (!variant.pointId) return undefined
+	const pointId = variant.pointId
+	const point = points.find((candidate) => candidate.id === pointId)
+	if (variant.kind === 'tool') {
+		// Action rows (`addableEntries` `activity: 'action'`) land here as
+		// `tool` variants (legacy `paletteDerivedVariants` action branch):
+		// an action binds a plain-id button.
+		if (point !== undefined && isActionPoint(point)) {
+			return {
+				point: pointId,
+				control: addItemControlFor(point, registry, defaults),
+				config: {
+					icon: addItemIconOf(point, variant.icon ?? source.icon),
+					label: addItemLabelOf(point, variant.label),
+					hint: variant.meta,
+				},
+			} as ToolbarItem
+		}
+		if (!point || isActionPoint(point)) return undefined
+		// Nothing-point tool: bind the point id 1:1 with its mapped control
+		// (variant carries `point.controls[0]`; `controlFor` resolves the same
+		// via the allowlist). Drawers need their nested track (empty until
+		// the user fills it after drop).
+		if (isNothingPoint(point)) {
+			const control = variant.control ?? addItemControlFor(point, registry, defaults)
+			if (control === undefined) return undefined
+			const item = {
+				point: pointId,
+				control,
+				config: { icon: addItemIconOf(point, source.icon), label: addItemLabelOf(point, source.label) },
+			} as ToolbarItem & { toolbar?: never[] }
+			if (control === 'drawer') {
+				;(item as { toolbar?: never[] }).toolbar = []
+			}
+			return item
+		}
+		return {
+			point: pointId,
+			control: addItemControlFor(point, registry, defaults),
+			config: { icon: addItemIconOf(point, source.icon), label: addItemLabelOf(point, source.label) },
+		} as ToolbarItem
+	}
+	if (variant.kind === 'action') {
+		if (!variant.action) return undefined
+		if (!point || !isActionPoint(point)) return undefined
+		return {
+			point: `${pointId}:${variant.action}`,
+			control: addItemControlFor(point, registry, defaults),
+			config: {
+				icon: addItemIconOf(point, variant.icon ?? source.icon),
+				label: variant.label,
+				hint: variant.meta,
+			},
+		} as ToolbarItem
+	}
+	if (variant.kind !== 'set') return undefined
+	if (!point || !isValuedPoint(point)) return undefined
+	const matchesFamily =
+		(variant.valueType === 'boolean' && point.type === 'boolean') ||
+		(variant.valueType === 'enum' && point.type === 'enum') ||
+		(variant.valueType === 'number' && point.type === 'number')
+	if (!matchesFamily) return undefined
+	return {
+		point: pointId,
+		control: addItemControlFor(point, registry, defaults),
+		config: {
+			icon: addItemIconOf(point, source.icon),
+			label: addItemLabelOf(point, humanizeId(pointId)),
+			hint: variant.meta,
+		},
+	} as ToolbarItem
 }
 
 /**

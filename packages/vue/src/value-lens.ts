@@ -23,7 +23,7 @@
  * Call `dispose()` (or let `onUnmounted` do it when called inside `setup`)
  * to drop the bag subscription.
  */
-import { getCurrentInstance, onUnmounted, reactive } from 'vue'
+import { getCurrentInstance, onUnmounted, reactive, toRaw } from 'vue'
 
 /** Minimal bag surface shared by `PaletteStateStore` and `ValuesBag`. */
 export type ValueBagLike = {
@@ -97,12 +97,20 @@ export function useValueLens<T extends Record<string, unknown>>(
 
 	const pullKey = (key: string): void => {
 		if (!isBagKey(key)) return
-		const value = bag.get(key)
-		if (Object.is(backing[key], value)) return
-		backing[key] = value
-		// Write through to the reactive state (the proxy reads the bag
-		// first, so without this the component never re-renders on
-		// bag-notify — the bag changed but the reactive dep didn't).
+		// Unwrap: the bag must never hold a Vue proxy (a proxy written back
+		// through the lens compares unequal to the raw value and fires a
+		// spurious notification — the equal-value guarantee for
+		// object-valued points). `toRaw` is identity for non-proxies.
+		const value = toRaw(bag.get(key))
+		// Write ONLY through the reactive `state` (which lands in `backing`
+		// via the proxy): a direct `backing[key] = value` write would bypass
+		// reactivity AND poison the subsequent reactive write (Vue sees
+		// `Object.is`-equal, skips the trigger, and effects never re-run).
+		if (Object.is((state as Record<string, unknown>)[key], value)) {
+			if (Object.is(backing[key], value)) return
+			backing[key] = value
+			return
+		}
 		;(state as Record<string, unknown>)[key] = value
 		onChange?.(key, value)
 	}
@@ -131,30 +139,46 @@ export function useValueLens<T extends Record<string, unknown>>(
 		}) as (...args: never[]) => void)
 	)
 
-	// `state` is declared above (before `pullKey`); this duplicate
-	// declaration was left by the write-through edit — remove on sight.
-	void reactive(backing)
-
 	// Wrap the reactive state so bag-key writes route through `bag.set`
 	// (render via notify) while local keys write the state directly.
-	// NOTE: the proxy wraps the *reactive* object, so `get` must read the
-	// bag (single source) — never `backing` directly, which Vue's
-	// reactivity would otherwise bypass. After `dispose()`, bag-notify
-	// stops writing `backing`, but `get` still prefers the live bag —
-	// exactly like the vanilla proxy. Tests asserting a frozen post-dispose
-	// read should read `bag.get` expectations, not the lens.
+	//
+	// NOTE: `get` reads the *reactive* state (tracked), never the bag
+	// directly. Reading `bag.get()` here would bypass Vue's dependency
+	// tracking — an effect observing a lens key would subscribe to
+	// nothing and never re-run on external store writes or lens writes.
+	// `pullKey` keeps the state in sync with the bag on every notify
+	// (plus the initial `syncFromBag()` below), so the reactive mirror is
+	// always current; the bag stays the single source of truth for writes.
+	// The `tracked !== undefined` fallback covers keys the bag gained
+	// that were never pulled (read live, still tracking the state dep so
+	// the first notify-driven `pullKey` write re-runs the effect).
+	// After `dispose()`, bag-notify stops syncing the state, so reads
+	// return the last synced value — tests asserting post-dispose reads
+	// should read `bag.get` expectations, not the lens.
 	const lens = new Proxy(state, {
 		get(ownTarget, property, receiver) {
 			if (typeof property !== 'string') return Reflect.get(ownTarget, property, receiver)
 			if (!isBagKey(property)) return Reflect.get(ownTarget, property, receiver)
-			// Prefer the bag when it holds the key (single source); fall back
-			// to the reactive state for keys the bag hasn't seen yet.
+			// Reactive read (tracked): the state mirror is synced from the
+			// bag on every notify + at init, so this is always current while
+			// subscribed. Never read `bag.get()` here — it bypasses tracking.
+			// Unwrap: readers must get the raw object, never a Vue proxy —
+			// writing a proxy back (`lens.x = lens.x`) compares unequal to
+			// the raw value and fires a spurious store notification.
+			const tracked = toRaw(Reflect.get(ownTarget, property, receiver))
+			if (tracked !== undefined) return tracked
+			// Live-bag fallback for keys the bag holds but the mirror hasn't
+			// seen (read live; the tracked read above already subscribed the
+			// dep, so the first notify-driven `pullKey` re-runs the effect).
+			// Subscribed lenses only: after `dispose()` the lens is frozen
+			// at its last synced values — falling through to the bag would
+			// leak keys added after disposal into a dead lens.
+			if (disposed) return tracked
 			if ((bag as { has?: (id: string) => boolean }).has?.(property)) {
-				return bag.get(property)
+				return toRaw(bag.get(property))
 			}
-			const bagValue = bag.get(property)
-			if (bagValue !== undefined) return bagValue
-			return Reflect.get(ownTarget, property, receiver)
+			const bagValue = toRaw(bag.get(property))
+			return bagValue === undefined ? tracked : bagValue
 		},
 		set(ownTarget, property, value, receiver) {
 			if (typeof property !== 'string') return Reflect.set(ownTarget, property, value, receiver)
@@ -168,8 +192,11 @@ export function useValueLens<T extends Record<string, unknown>>(
 			// Bag key: echo-loop guard — skip the write when the bag already
 			// holds the value. Otherwise write the bag and let bag-notify
 			// (above) do the write-through; never write `backing` here.
-			if (Object.is(bag.get(property), value)) return true
-			bag.set(property, value as never)
+			// Unwrap (raw + proxy compare): `Object.is` on the raw proxy
+			// target keeps the equal-value guarantee for objects.
+			const raw = toRaw(value)
+			if (Object.is(toRaw(bag.get(property)), raw)) return true
+			bag.set(property, raw as never)
 			return true
 		},
 		deleteProperty(ownTarget, property) {

@@ -35,8 +35,8 @@ const emit = defineEmits<{
 	drawerPointerover: [event: PointerEvent]
 }>()
 
-function onGuardPointerdown(event: PointerEvent, toolbar: Toolbar, item: ToolbarItem): void {
-	dragApi?.guardPointerdown(event, toolbar, item)
+function onGuardPointerdown(event: PointerEvent): void {
+	dragApi?.guardPointerdown(event)
 }
 
 function onBarPointerdown(event: PointerEvent, toolbar: Toolbar): void {

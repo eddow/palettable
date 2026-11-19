@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
 	availableEntryKeywords,
+	type AddableEntry,
+	type AddSelection,
 	type CommandBoxEntry,
 	enumValueKeywords,
 	filterCommandEntries,
+	itemFromAddSelection,
 	paletteAddItemEntries,
 	paletteCommandEntries,
 	paletteDerivedVariants,
@@ -264,5 +267,101 @@ describe('query model (tokenize/filter/rank/suggest/parse)', () => {
 
 	it('lists available keywords sorted and de-duplicated', () => {
 		expect(availableEntryKeywords(entries)).toEqual(['command', 'dark', 'mode', 'theme'])
+	})
+})
+
+describe('itemFromAddSelection', () => {
+	function toolSource(overrides?: Partial<AddableEntry>): AddableEntry {
+		return {
+			id: 'theme',
+			kind: 'tool',
+			label: 'Theme',
+			meta: 'tool',
+			keywords: [],
+			activity: 'valued',
+			pointId: 'theme',
+			...overrides,
+		}
+	}
+
+	function selection(variant: AddSelection['variant']): AddSelection {
+		return { source: toolSource(), variant }
+	}
+
+	it('resolves tool/action/set variants to spec-bound tools', () => {
+		const pts = points()
+		const tool = itemFromAddSelection(
+			selection({ id: 'theme:tool', kind: 'tool', pointId: 'theme', label: 'Theme', meta: 'tool' }),
+			pts
+		)
+		expect(tool).toMatchObject({ point: 'theme', control: 'select' })
+		const action = itemFromAddSelection(
+			selection({ id: 'reset:tool', kind: 'tool', pointId: 'reset', label: 'Reset', meta: 'run' }),
+			pts
+		)
+		expect(action).toMatchObject({ point: 'reset', control: 'button' })
+		const set = itemFromAddSelection(
+			selection({
+				id: 'fontSize:set',
+				kind: 'set',
+				pointId: 'fontSize',
+				valueType: 'number',
+				label: 'Font Size',
+				meta: 'set',
+			}),
+			pts
+		)
+		expect(set).toMatchObject({ point: 'fontSize', control: 'slider' })
+	})
+
+	it('resolves item variants to control-only items (drawer gains a track)', () => {
+		const item = itemFromAddSelection(
+			{
+				source: toolSource({ id: 'status', kind: 'item', activity: 'item', control: 'status' }),
+				variant: { id: 'status:item', kind: 'item', control: 'status', label: 'Status', meta: 'item' },
+			},
+			points()
+		)
+		expect(item).toMatchObject({ point: 'status', control: 'status' })
+		const drawer = itemFromAddSelection(
+			{
+				source: toolSource({ id: 'drawer', kind: 'item', activity: 'item', control: 'drawer' }),
+				variant: { id: 'drawer:item', kind: 'item', control: 'drawer', label: 'Drawer', meta: 'item' },
+			},
+			points()
+		)
+		expect(drawer).toMatchObject({ point: 'drawer', control: 'drawer', toolbar: [] })
+	})
+
+	it('returns undefined for unknown points and mismatched families', () => {
+		const pts = points()
+		expect(
+			itemFromAddSelection(
+				selection({ id: 'missing:tool', kind: 'tool', pointId: 'missing', label: 'X', meta: 'tool' }),
+				pts
+			)
+		).toBe(undefined)
+		expect(
+			itemFromAddSelection(
+				selection({
+					id: 'theme:set',
+					kind: 'set',
+					pointId: 'theme',
+					valueType: 'number',
+					label: 'Theme',
+					meta: 'set',
+				}),
+				pts
+			)
+		).toBe(undefined)
+		expect(
+			itemFromAddSelection(
+				{
+					source: toolSource({ id: 'reset', activity: 'action', pointId: 'reset' }),
+					variant: { id: 'reset:action', kind: 'action', pointId: 'reset', label: 'Reset', meta: 'run' },
+				},
+				pts
+			)
+		).toBe(undefined)
 	})
 })

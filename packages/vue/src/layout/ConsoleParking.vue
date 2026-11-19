@@ -30,7 +30,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
 	inspect: [item: ToolbarItem]
-	guardPointerdown: [event: PointerEvent, toolbar: Toolbar, item: ToolbarItem]
+	guardPointerdown: [event: PointerEvent]
 	barPointerdown: [event: PointerEvent, toolbar: Toolbar]
 	barPointermove: [event: PointerEvent, toolbar: Toolbar]
 }>()
@@ -148,7 +148,7 @@ function onPanelPointerleave(event: PointerEvent): void {
 					:context-for="(item) => contextFor(visible[position - 1]!.toolbar, item)"
 					:inspected-item="undefined"
 					@inspect="(item) => dragApi?.inspect(item)"
-					@guard-pointerdown="(event, toolbar, item) => dragApi?.guardPointerdown(event, toolbar, item)"
+					@guard-pointerdown="(event) => dragApi?.guardPointerdown(event)"
 					@bar-pointerdown="(event, toolbar) => dragApi?.barPointerdown(event, toolbar, 'top')"
 					@bar-pointermove="(event, toolbar) => dragApi?.barPointermove(event, toolbar)"
 					@bar-pointerover="(event, toolbar) => dragApi?.barPointerover(event, toolbar)"

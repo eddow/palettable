@@ -181,13 +181,17 @@ test('sliding a whole toolbar: zone hovers paint the same edges, neighbour hover
 
 		// ── Outside the zone: the neighbour toolbar's own tool ─────────────
 		// The neighbour bar is the one that is NOT the dragged singleton.
+		// Jump directly (single pointermove, no interpolation steps): the
+		// straight-line path from the fresh tool crosses the lit neighbour
+		// edge (remnant gap 0), and hovering a highlighted gap commits by
+		// design — gliding through it would merge instead of testing the
+		// plain tool hover. A single move fires one event at the endpoint.
 		const neighbourTool = border.locator('.toolbar').nth(1).locator('.toolbar-item').first()
 		const neighbourBox = await neighbourTool.boundingBox()
 		expect(neighbourBox).not.toBeNull()
 		await page.mouse.move(
 			neighbourBox!.x + neighbourBox!.width / 2,
-			neighbourBox!.y + neighbourBox!.height / 2,
-			{ steps: 6 }
+			neighbourBox!.y + neighbourBox!.height / 2
 		)
 		await page.waitForTimeout(200)
 		const outsidePaint = await highlighted()
